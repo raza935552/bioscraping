@@ -106,7 +106,14 @@ function Field({ f, value, onChange }: { f: SettingsField; value: string | undef
         type={isSecret ? "password" : f.kind === "number" ? "number" : "text"}
         value={value ?? (isSecret ? "" : f.value ?? "")}
         placeholder={isSecret ? (f.configured ? "•••••••• (leave blank to keep)" : f.placeholder ?? "enter value") : f.placeholder}
-        autoComplete="off"
+        // Stop Chrome/Google password manager from autofilling and corrupting
+        // the field: "new-password" + a non-login name + the manager ignore hints.
+        name={`setting-${f.key.toLowerCase()}`}
+        autoComplete={isSecret ? "new-password" : "off"}
+        data-lpignore="true"
+        data-1p-ignore="true"
+        data-form-type="other"
+        spellCheck={false}
         onChange={(e) => onChange(e.target.value)}
       />
       {f.help && <span className="fh">{f.help}</span>}

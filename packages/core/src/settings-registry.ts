@@ -72,7 +72,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     title: "Alerts & digest (Telegram)",
     blurb: "Where fail-loud alerts and the daily number go.",
     fields: [
-      { key: "TELEGRAM_BOT_TOKEN", label: "Bot token", kind: "secret" },
+      // Plain text (visible) by request — a Telegram alert-bot token is low-risk.
+      { key: "TELEGRAM_BOT_TOKEN", label: "Bot token", kind: "text" },
       { key: "TELEGRAM_CHAT_ID", label: "Chat ID", kind: "text" },
     ],
   },
