@@ -1,0 +1,7 @@
+# Copy to /etc/caddy/Caddyfile on the server, then: sudo systemctl reload caddy
+# Caddy issues + renews the TLS cert automatically.
+
+engine.biolinxlabs.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3001
+}

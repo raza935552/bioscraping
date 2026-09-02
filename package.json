@@ -1,0 +1,30 @@
+{
+  "name": "biolinx-affiliate-engine",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Automated affiliate recruiting engine for BiolinX Labs — see MASTER-PLAN.md in affiliate-system-spec",
+  "engines": { "node": ">=22" },
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' --filter './apps/**' run build",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "dev:api": "pnpm --filter @biolinx/api dev",
+    "dev:worker": "pnpm --filter @biolinx/worker dev",
+    "dev:admin": "pnpm --filter @biolinx/admin dev",
+    "probe:idev": "pnpm --filter @biolinx/idev probe",
+    "migrate:export": "tsx migration/export-airtable.ts",
+    "migrate:import": "tsx migration/import-airtable.ts"
+  },
+  "dependencies": {
+    "@biolinx/core": "workspace:*",
+    "@biolinx/db": "workspace:*",
+    "drizzle-orm": "^0.38.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

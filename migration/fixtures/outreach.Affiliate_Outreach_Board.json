@@ -1,0 +1,5 @@
+[
+ {"id":"recTEST001","createdTime":"2026-08-01T00:00:00Z","fields":{"First Name":"Creator","Last Name":"One","Email":"creator.one@example.com","Niche":"Longevity","Primary Platform":"TikTok","Total Reach":50000,"Affiliation Status":"Unsigned","Status":"Reached out","Sub-Profile":"SP2","Personalization Notes":"Posted about recovery 2026-08-20 (https://tiktok.com/x)","Follow-ups Sent":1,"Last Reached Out":"2026-08-30","Contact Channel":"TikTok DM","Owner":"Raza Khan"}},
+ {"id":"recTEST002","createdTime":"2026-08-01T00:00:00Z","fields":{"First Name":"Creator","Last Name":"Two","Niche":"Gym","Primary Platform":"Instagram","Affiliation Status":"Unsigned","Status":"Said no"}},
+ {"id":"recTEST003","createdTime":"2026-08-01T00:00:00Z","fields":{"First Name":"Creator","Last Name":"Three","Niche":"Biohacking","Total Reach":200000,"Affiliation Status":"Signed","Entry Tier":"Gold","Sub-Profile":"SP5","Status":"Reached out"}}
+]
