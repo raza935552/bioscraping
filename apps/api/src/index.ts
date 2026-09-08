@@ -40,6 +40,7 @@ import {
   ingestReply,
   instantlyPusher,
   provisionSignup,
+  runEnrichPersonalize,
   runIdevSync,
   runMetricsDigest,
   runOutreachDispatch,
@@ -466,6 +467,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       lastReachedOut: l.lastReachedOut,
       followUpsSent: l.followUpsSent,
       hasNotes: hasUsableNotes(l.personalizationNotes),
+      enrichmentStatus: l.enrichmentStatus,
       profileUrl: profileUrlFor(l),
     })),
   };
@@ -513,7 +515,13 @@ app.get("/api/leads/:id", { preHandler: requireAuth }, async (req, reply) => {
   if (!lead) return reply.code(404).send({ error: "not found" });
   const messages = await db.select().from(schema.messages).where(eq(schema.messages.leadId, id));
   const replies = await db.select().from(schema.replies).where(eq(schema.replies.leadId, id));
-  return { lead, messages, replies };
+  const enrichments = await db
+    .select()
+    .from(schema.leadEnrichments)
+    .where(eq(schema.leadEnrichments.leadId, id))
+    .orderBy(desc(schema.leadEnrichments.id))
+    .limit(5);
+  return { lead, messages, replies, enrichments };
 });
 
 // ── Jobs (manual triggers, lock-guarded) ────────────────────────────────
@@ -523,6 +531,7 @@ const jobTriggers: Record<string, () => Promise<unknown>> = {
   "rank-recompute": () => runRankRecompute(db),
   "referral-expiry": () => runReferralExpiry(db),
   "metrics-digest": () => runMetricsDigest(db),
+  "enrich-personalize": () => runEnrichPersonalize(db),
 };
 
 app.post("/api/jobs/:job", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {

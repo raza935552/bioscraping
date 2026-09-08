@@ -5,7 +5,7 @@ import { loadEnv } from "@biolinx/core";
 loadEnv();
 
 const { connect, hydrateEnvFromSettings } = await import("@biolinx/db");
-const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest } = await import("@biolinx/jobs");
+const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize } = await import("@biolinx/jobs");
 const { startScheduler } = await import("./scheduler.js");
 
 const conn = connect();
@@ -21,8 +21,9 @@ startScheduler(conn, [
   { name: "idev-sync", everyMs: 30 * 60 * 1000, runOnBoot: true, fn: () => runIdevSync(conn.db) },
   { name: "rank-recompute", everyMs: 6 * HOUR, runOnBoot: true, fn: async () => void (await runRankRecompute(conn.db)) },
   { name: "referral-expiry", everyMs: 24 * HOUR, runOnBoot: true, fn: async () => void (await runReferralExpiry(conn.db)) },
+  { name: "enrich-personalize", everyMs: 24 * HOUR, runOnBoot: true, fn: async () => void (await runEnrichPersonalize(conn.db)) },
   { name: "metrics-digest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runMetricsDigest(conn.db)) },
-  // Phase 3+: lead-ingest, enrich-personalize, outreach-dispatch, reply-ingest.
+  // Phase 3+: lead-ingest, outreach-dispatch, reply-ingest on a schedule.
 ]);
 
-console.log("[worker] up — idev-sync 30m · rank 6h · referral-expiry 24h · digest 24h");
+console.log("[worker] up — idev-sync 30m · rank 6h · referral-expiry 24h · enrich 24h · digest 24h");

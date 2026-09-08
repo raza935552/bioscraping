@@ -94,6 +94,7 @@ export interface LeadRow {
   lastReachedOut: string | null;
   followUpsSent: number;
   hasNotes: boolean;
+  enrichmentStatus: string | null;
   profileUrl: string | null;
 }
 
@@ -101,6 +102,7 @@ export interface LeadDetail {
   lead: Record<string, unknown> & { id: number; personalizationNotes: string | null; notes: string | null };
   messages: Array<{ id: number; channel: string; state: string; body: string | null; sentAt: string | null }>;
   replies: Array<{ id: number; channel: string; body: string | null; classifiedAs: string | null; receivedAt: string }>;
+  enrichments: Array<{ id: number; platform: string; sourceUrl: string; status: string; error: string | null; createdAt: string }>;
 }
 
 export const api = {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type LeadDetail, type LeadsPage, type Me } from "../api.js";
 import { PageInfo, Pagination } from "../components.js";
-import { BAND_HELP, BAND_LABEL, MESSAGE_STATE_LABEL, describeRun, subProfileLabel } from "../labels.js";
+import { BAND_HELP, BAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, describeRun, subProfileLabel } from "../labels.js";
 
 const VIEWS: Array<[string, string]> = [
   ["queue", "Queue"],
@@ -116,8 +116,27 @@ export function Leads({ me }: { me: Me }) {
             {busy ? "Ranking…" : "Recompute ranks"}
           </button>
         )}
+        {canRun && (
+          <button
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              setRankMsg("");
+              void api
+                .runJob("enrich-personalize")
+                .then((r) => {
+                  setRankMsg(describeRun("enrich-personalize", r.result));
+                  return load();
+                })
+                .catch((e) => setError((e as Error).message))
+                .finally(() => setBusy(false));
+            }}
+          >
+            {busy ? "Working…" : "Research next batch"}
+          </button>
+        )}
       </div>
-      {rankMsg && <div className="notice">Ranking done: {rankMsg}</div>}
+      {rankMsg && <div className="notice">Done: {rankMsg}</div>}
 
       {a && (
         <div className="analytics">
@@ -209,11 +228,15 @@ export function Leads({ me }: { me: Me }) {
                 </td>
                 <td className="muted">{l.lastReachedOut?.slice(0, 10) ?? "never"}</td>
                 <td>
-                  {l.hasNotes ? (
-                    <span className="chip ok" title="Has real talking points; can be drafted">ready</span>
-                  ) : (
-                    <span className="chip unresolved" title="No talking points yet; cannot be drafted until researched">none</span>
-                  )}
+                  {(() => {
+                    const key = l.hasNotes ? "enriched" : (l.enrichmentStatus ?? "pending");
+                    const e = ENRICH_LABEL[key] ?? ENRICH_LABEL.pending!;
+                    return (
+                      <span className={`chip ${e.tone === "ok" ? "ok" : e.tone === "bad" ? "failed" : "unresolved"}`} title={e.help}>
+                        {e.text}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td onClick={(e) => e.stopPropagation()}>
                   {l.profileUrl && /^https?:\/\//i.test(l.profileUrl) ? (
@@ -246,6 +269,25 @@ export function Leads({ me }: { me: Me }) {
               <div className="k">Notes</div>
               <div style={{ whiteSpace: "pre-wrap" }}>{detail.lead.notes ?? "—"}</div>
             </div>
+            {detail.enrichments.length > 0 && (
+              <div className="card" style={{ gridColumn: "1 / -1" }}>
+                <div className="k">Research history</div>
+                {detail.enrichments.map((e) => (
+                  <div key={e.id} className="muted" style={{ fontSize: 12.5 }}>
+                    {new Date(e.createdAt).toLocaleDateString()} · {e.platform} · {ENRICH_LABEL[e.status]?.text ?? e.status}
+                    {e.sourceUrl && /^https?:\/\//.test(e.sourceUrl) && (
+                      <>
+                        {" · "}
+                        <a href={e.sourceUrl} target="_blank" rel="noreferrer">
+                          source
+                        </a>
+                      </>
+                    )}
+                    {e.error && <> · {e.error}</>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <h2>Message history ({detail.messages.length})</h2>
           <div className="tablewrap">

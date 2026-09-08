@@ -59,6 +59,15 @@ export const SAGA_LABEL: Record<string, { text: string; tone: "ok" | "warn" | "b
   provisioned: { text: "Set up", tone: "ok" },
 };
 
+export const ENRICH_LABEL: Record<string, { text: string; tone: "ok" | "warn" | "bad"; help: string }> = {
+  enriched: { text: "ready", tone: "ok", help: "Has real, source-linked talking points. Can be drafted." },
+  pending: { text: "queued", tone: "warn", help: "Waiting for the next research run." },
+  no_match: { text: "no match", tone: "warn", help: "Profile found, but nothing relevant to say. A human can add notes by hand." },
+  unresolvable: { text: "unreachable", tone: "bad", help: "Every handle we have is dead, private, or empty." },
+  no_source: { text: "no source", tone: "bad", help: "No URL or handle on file. Add one and it will be researched." },
+  failed: { text: "failed", tone: "bad", help: "The scraper or the model errored. Retried up to 3 times." },
+};
+
 export const ROLE_HELP: Record<string, string> = {
   admin: "Full control, including keys and team",
   ops: "Runs jobs, decides affiliates, prepares signups",
@@ -103,7 +112,9 @@ export function describeRun(job: string, detail: unknown): string {
       return `${n("stamped") ?? 0} dated · ${n("newlyExpired") ?? 0} newly expired · ${n("expiredTotal") ?? 0} expired total`;
     case "outreach-dispatch:dm":
     case "outreach-dispatch:email":
-      return `${n("considered") ?? 0} considered · ${n("drafted") ?? 0} drafted · ${n("queued") ?? 0} to review · ${n("sent") ?? 0} sent · ${n("blocked") ?? 0} blocked`;
+      return `${n("considered") ?? 0} considered · ${n("drafted") ?? 0} drafted · ${n("queued") ?? 0} to review · ${n("sent") ?? 0} sent · ${n("blocked") ?? 0} blocked${(n("skippedUnenriched") ?? 0) > 0 ? ` · ${n("skippedUnenriched")} waiting for research` : ""}`;
+    case "enrich-personalize":
+      return `${n("attempted") ?? 0} researched · ${n("enriched") ?? 0} ready · ${n("no_match") ?? 0} no match · ${n("unresolvable") ?? 0} unreachable · ${n("no_source") ?? 0} no source · ${n("failed") ?? 0} failed`;
     default:
       return Object.entries(d)
         .map(([k, v]) => `${k} ${String(v)}`)
