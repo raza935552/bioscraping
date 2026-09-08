@@ -1,16 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Affiliate, type Me } from "../api.js";
-import { PageInfo } from "../components.js";
+import { CLASS_HELP, CLASS_LABEL, ClassChip, PageInfo } from "../components.js";
 
 const SUGGESTION_LABEL: Record<string, string> = {
-  team: "team member?",
-  house: "house account?",
-  test: "test account?",
+  team: "looks like a team member",
+  house: "looks like a house account",
+  test: "looks like a test account",
 };
+
+const FILTERS: Array<[string, string]> = [
+  ["all", "All"],
+  ["unresolved", CLASS_LABEL.unresolved],
+  ["external", "Real partners"],
+  ["internal", "Team & house"],
+];
 
 export function Affiliates({ me }: { me: Me }) {
   const [rows, setRows] = useState<Affiliate[]>([]);
   const [filter, setFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,10 +36,16 @@ export function Affiliates({ me }: { me: Me }) {
     void load();
   }, [load]);
 
-  const visible = useMemo(
-    () => (filter === "all" ? rows : rows.filter((r) => r.classification === filter)),
-    [rows, filter],
-  );
+  const visible = useMemo(() => {
+    const byClass = filter === "all" ? rows : rows.filter((r) => r.classification === filter);
+    const q = search.trim().toLowerCase();
+    if (!q) return byClass;
+    return byClass.filter((r) =>
+      [r.firstName, r.lastName, r.username, r.email, String(r.idevId)]
+        .filter(Boolean)
+        .some((v) => v!.toLowerCase().includes(q)),
+    );
+  }, [rows, filter, search]);
 
   const canEdit = me.role === "admin" || me.role === "ops";
 
@@ -63,18 +77,30 @@ export function Affiliates({ me }: { me: Me }) {
 
   return (
     <>
-      <PageInfo title="Affiliates — the live iDev roster">
-        Every approved affiliate pulled from iDev, synced every 30 minutes. Classify each as external (a real
-        recruit, counts toward the 100 goal) or internal (team/house account, excluded from the count). The engine
-        suggests likely team/house/test accounts. The external count you see on the Dashboard comes straight from
-        these classifications.
+      <PageInfo title="Affiliates — everyone approved in iDev">
+        Every approved affiliate account, pulled from iDev every 30 minutes. Your job here is one question per
+        account: does this person count toward the 100 goal? The engine flags accounts that look like one of us.
+        The Dashboard's partner count comes straight from these answers.
+        <ul className="legend">
+          {(Object.keys(CLASS_LABEL) as Array<keyof typeof CLASS_LABEL>).map((k) => (
+            <li key={k}>
+              <ClassChip value={k} /> {CLASS_HELP[k]}
+            </li>
+          ))}
+        </ul>
       </PageInfo>
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>Affiliates</h1>
+        <input
+          placeholder="Search name, username, email, iDev id…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ maxWidth: 260 }}
+        />
         <div className="grow" />
-        {(["all", "unresolved", "external", "internal"] as const).map((f) => (
+        {FILTERS.map(([f, label]) => (
           <button key={f} className={filter === f ? "primary" : ""} onClick={() => setFilter(f)}>
-            {f}
+            {label}
           </button>
         ))}
       </div>
@@ -85,15 +111,15 @@ export function Affiliates({ me }: { me: Me }) {
         <div className="toolbar">
           <span className="muted">{selected.size} selected</span>
           <button disabled={busy || selected.size === 0} onClick={() => void classify([...selected], "external")}>
-            Mark external
+            Counts toward goal
           </button>
           <button disabled={busy || selected.size === 0} onClick={() => void classify([...selected], "internal")}>
-            Mark internal
+            Team or house account
           </button>
           <div className="grow" />
           {suggestedIds.length > 0 && (
             <button disabled={busy} onClick={() => setSelected(new Set(suggestedIds))}>
-              Select {suggestedIds.length} suggested internal
+              Select {suggestedIds.length} that look like us
             </button>
           )}
         </div>
@@ -109,7 +135,7 @@ export function Affiliates({ me }: { me: Me }) {
               <th>Username</th>
               <th>Email</th>
               <th>Signed up</th>
-              <th>Class</th>
+              <th>Counts?</th>
             </tr>
           </thead>
           <tbody>
@@ -134,7 +160,7 @@ export function Affiliates({ me }: { me: Me }) {
                 <td className="muted">{a.email ?? "—"}</td>
                 <td className="muted">{a.signedUpAt ? new Date(a.signedUpAt).toISOString().slice(0, 10) : "—"}</td>
                 <td>
-                  <span className={`chip ${a.classification}`}>{a.classification}</span>
+                  <ClassChip value={a.classification} />
                 </td>
               </tr>
             ))}

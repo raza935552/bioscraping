@@ -37,7 +37,7 @@ export function Replies() {
       <h1>Replies</h1>
       {error && <div className="error">{error}</div>}
       {rows.length === 0 && (
-        <p className="muted">No replies yet. Instantly posts inbound replies to /webhooks/instantly; social replies come in via the operator flow.</p>
+        <p className="muted">No replies yet. Email replies arrive here automatically from Instantly. Replies to DMs are logged by whoever checks the inbox.</p>
       )}
       <div className="tablewrap">
         <table>

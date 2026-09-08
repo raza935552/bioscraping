@@ -264,3 +264,10 @@ button.go:hover { filter: brightness(1.05); }
 .badge.unset { background: var(--warn-soft); color: var(--warn); }
 .settings-foot { display: flex; align-items: center; gap: 12px; justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 14px; }
 .ok-text { color: var(--good); font-weight: 600; font-size: 13px; }
+
+/* Legend inside a PageInfo banner (e.g. affiliate classification meanings). */
+.legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.legend li { display: flex; align-items: center; gap: 8px; }
+
+/* One-line result notice after an action (e.g. ranking summary). */
+.notice { background: var(--good-soft); color: var(--good); border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 12px; }

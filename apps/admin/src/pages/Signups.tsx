@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageInfo } from "../components.js";
 import { api, type Me, type SignupRow } from "../api.js";
+import { SAGA_LABEL } from "../labels.js";
 
 export function Signups({ me }: { me: Me }) {
   const [rows, setRows] = useState<SignupRow[]>([]);
@@ -35,7 +36,7 @@ export function Signups({ me }: { me: Me }) {
 
   return (
     <>
-      <PageInfo title="Signups — the provisioning saga">Prospects who said yes. Each one runs through validation, dedupe, and attribution checks, then holds for Diana to confirm (the 21+ and quality gate) before the iDev affiliate account and coupon are created. Saga state shows exactly where each one is.</PageInfo>
+      <PageInfo title="Signups — people who said yes">Each signup is checked (required fields, not already an affiliate, recruiter name matches a real account), then waits for Diana to confirm the 21+ and quality gate before the iDev account and coupon are created. The "Where it is" column shows the exact step.</PageInfo>
       <h1>Signups</h1>
       {error && <div className="error">{error}</div>}
       {rows.length === 0 && <p className="muted">No signups yet.</p>}
@@ -46,7 +47,7 @@ export function Signups({ me }: { me: Me }) {
               <th>Name</th>
               <th>Email</th>
               <th>Recruited by</th>
-              <th>Saga state</th>
+              <th>Where it is</th>
               <th>Status</th>
               {canAct && <th>Actions</th>}
             </tr>
@@ -60,25 +61,22 @@ export function Signups({ me }: { me: Me }) {
                 <td className="muted">{s.email}</td>
                 <td className="muted">{s.recruitedByName ?? "—"}</td>
                 <td>
-                  <span
-                    className={`chip ${
-                      s.sagaState.includes("error") || s.sagaState === "duplicate" || s.sagaState === "invalid"
-                        ? "failed"
-                        : s.sagaState.includes("pending")
-                          ? "unresolved"
-                          : "ok"
-                    }`}
-                  >
-                    {s.sagaState}
-                  </span>
+                  {(() => {
+                    const l = SAGA_LABEL[s.sagaState] ?? { text: s.sagaState, tone: "warn" as const };
+                    return (
+                      <span className={`chip ${l.tone === "bad" ? "failed" : l.tone === "ok" ? "ok" : "unresolved"}`} title={s.sagaState}>
+                        {l.text}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td>
-                  <span className={`chip ${s.status === "confirmed" ? "ok" : "unresolved"}`}>{s.status}</span>
+                  <span className={`chip ${s.status === "confirmed" ? "ok" : "unresolved"}`}>{s.status === "confirmed" ? "Confirmed" : s.status === "pending_diana" ? "Pending Diana" : s.status}</span>
                 </td>
                 {canAct && (
                   <td>
                     <button disabled={busy} onClick={() => void act(() => api.provisionSignup(s.id))}>
-                      Provision
+                      Check &amp; prepare
                     </button>{" "}
                     <button
                       className="primary"

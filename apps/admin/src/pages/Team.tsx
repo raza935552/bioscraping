@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageInfo } from "../components.js";
 import { api, type TeamMember } from "../api.js";
+import { ROLE_HELP } from "../labels.js";
 
 export function Team() {
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -40,7 +41,16 @@ export function Team() {
 
   return (
     <>
-      <PageInfo title="Team — accounts & roles">Invite teammates by email and assign a role: admin (full control), ops (run jobs, classify, provision), rep (Motion B outreach), operator (approve/send messages). Invites are single-use links; the person sets their own password.</PageInfo>
+      <PageInfo title="Team — accounts & roles">
+        Invite teammates by email and pick a role. Invites are single-use links; the person sets their own password.
+        <ul className="legend">
+          {Object.entries(ROLE_HELP).map(([role, help]) => (
+            <li key={role}>
+              <span className="chip internal">{role}</span> {help}
+            </li>
+          ))}
+        </ul>
+      </PageInfo>
       <h1>Team</h1>
       <form className="toolbar" onSubmit={invite}>
         <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required style={{ maxWidth: 180 }} />

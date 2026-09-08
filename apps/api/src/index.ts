@@ -25,6 +25,7 @@ import {
   withMysqlLock,
 } from "@biolinx/db";
 import {
+  hasUsableNotes,
   isConverted,
   isSp5,
   suggestClassification,
@@ -232,7 +233,7 @@ app.get("/api/dashboard", { preHandler: requireAuth }, async () => {
         !isConverted(l.affiliationStatus) &&
         !["Passed", "Signed", "No", "Signed up"].includes(l.status ?? ""),
     ).length,
-    withPersonalization: leads.filter((l) => l.personalizationNotes).length,
+    withPersonalization: leads.filter((l) => hasUsableNotes(l.personalizationNotes)).length,
     sp5Protected: leads.filter((l) => isSp5(l.subProfile)).length,
     verifiedReach: leads.filter((l) => l.totalReach != null).length,
     contacted: contactedLeadIds.size,
@@ -417,7 +418,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     signed: filtered.filter((l) => l.status === "Signed").length,
     notContacted: filtered.filter((l) => (l.status ?? "Not contacted") === "Not contacted").length,
     verifiedReach: filtered.filter((l) => l.totalReach != null).length,
-    personalized: filtered.filter((l) => l.personalizationNotes).length,
+    personalized: filtered.filter((l) => hasUsableNotes(l.personalizationNotes)).length,
     dead: filtered.filter((l) => l.isDead).length,
   };
 
@@ -464,9 +465,36 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       contactChannel: l.contactChannel,
       lastReachedOut: l.lastReachedOut,
       followUpsSent: l.followUpsSent,
+      hasNotes: hasUsableNotes(l.personalizationNotes),
+      profileUrl: profileUrlFor(l),
     })),
   };
 });
+
+/** Only http(s) URLs may become clickable links. Lead fields come from
+ *  imports and scrapes, so a `javascript:` or `data:` value must never reach
+ *  an href in the admin. */
+function safeHttpUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Best link to where a person can be found: explicit site, the promo URL
+ *  we found them at, or the first URL inside the social-profiles text. */
+function profileUrlFor(lead: { websiteUrl: string | null; whereFound: string | null; socialProfiles: string | null }): string | null {
+  const fromSocial = lead.socialProfiles
+    ? lead.socialProfiles
+        .split(/\s|\n|;/)
+        .map(safeHttpUrl)
+        .find((u): u is string => u != null) ?? null
+    : null;
+  return safeHttpUrl(lead.websiteUrl) ?? safeHttpUrl(lead.whereFound) ?? fromSocial;
+}
 
 /** Distinct filter values for the Leads UI dropdowns. */
 app.get("/api/leads/filters", { preHandler: requireAuth }, async () => {
@@ -531,10 +559,7 @@ app.get("/api/messages", { preHandler: requireAuth }, async (req) => {
     .map((m) => {
       const lead = leadsById.get(m.leadId);
       // Where the operator sends a DM: first social profile / promo URL.
-      const profileUrl =
-        lead?.websiteUrl ??
-        lead?.whereFound ??
-        (lead?.socialProfiles ? lead.socialProfiles.split(/\s|\n/).find((s) => /^https?:/.test(s)) ?? null : null);
+      const profileUrl = lead ? profileUrlFor(lead) : null;
       return {
         id: m.id,
         leadId: m.leadId,

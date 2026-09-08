@@ -93,6 +93,8 @@ export interface LeadRow {
   contactChannel: string | null;
   lastReachedOut: string | null;
   followUpsSent: number;
+  hasNotes: boolean;
+  profileUrl: string | null;
 }
 
 export interface LeadDetail {
@@ -122,7 +124,7 @@ export const api = {
       body: JSON.stringify({ name, email, role }),
     }),
   runSync: () => request<{ ok: true }>("/api/jobs/idev-sync", { method: "POST", body: "{}" }),
-  runJob: (job: string) => request<{ ok: true }>(`/api/jobs/${job}`, { method: "POST", body: "{}" }),
+  runJob: (job: string) => request<{ ok: true; result: unknown }>(`/api/jobs/${job}`, { method: "POST", body: "{}" }),
   leads: (view: string) => request<LeadRow[]>(`/api/leads?view=${encodeURIComponent(view)}`),
   lead: (id: number) => request<LeadDetail>(`/api/leads/${id}`),
   leadsPage: (params: URLSearchParams) => request<LeadsPage>(`/api/leads?${params.toString()}`),

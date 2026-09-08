@@ -159,7 +159,7 @@ export function Approvals({ me }: { me: Me }) {
                 </div>
                 <div className="step">
                   <span className="step-n">2</span>
-                  {m.profileUrl ? (
+                  {m.profileUrl && /^https?:\/\//i.test(m.profileUrl) ? (
                     <a href={m.profileUrl} target="_blank" rel="noreferrer"><button>↗ Open {m.platform ?? "profile"} &amp; paste</button></a>
                   ) : (
                     <span className="muted small">no profile link — find them on {m.platform ?? "the platform"}</span>

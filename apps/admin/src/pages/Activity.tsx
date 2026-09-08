@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageInfo } from "../components.js";
 import { api, type ActivityLog } from "../api.js";
+import { describeRun, jobLabel } from "../labels.js";
 
 export function Activity() {
   const [data, setData] = useState<ActivityLog | null>(null);
@@ -46,14 +47,14 @@ export function Activity() {
             {data.runs.map((r) => (
               <tr key={r.id}>
                 <td>{r.id}</td>
-                <td>{r.job}</td>
+                <td title={r.job}>{jobLabel(r.job)}</td>
                 <td>
                   <span className={`chip ${r.status === "ok" ? "ok" : r.status === "failed" ? "failed" : "unresolved"}`}>
                     {r.status}
                   </span>
                 </td>
                 <td className="muted" style={{ maxWidth: 380 }}>
-                  {r.detail ? JSON.stringify(r.detail) : ""}
+                  {describeRun(r.job, r.detail)}
                 </td>
                 <td className="muted">{new Date(r.startedAt).toLocaleString()}</td>
                 <td className="muted">

@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type LeadDetail, type LeadsPage, type Me } from "../api.js";
 import { PageInfo, Pagination } from "../components.js";
+import { BAND_HELP, BAND_LABEL, MESSAGE_STATE_LABEL, describeRun, subProfileLabel } from "../labels.js";
+
+const VIEWS: Array<[string, string]> = [
+  ["queue", "Queue"],
+  ["all", "All"],
+  ["triage", "Needs triage"],
+];
 
 const SORTS: Array<[string, string]> = [
   ["rank", "Rank"],
@@ -27,6 +34,7 @@ export function Leads({ me }: { me: Me }) {
   const [detail, setDetail] = useState<LeadDetail | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [rankMsg, setRankMsg] = useState("");
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ view, page: String(page), pageSize: "50", sort });
@@ -84,9 +92,9 @@ export function Leads({ me }: { me: Me }) {
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>Leads</h1>
         <div className="grow" />
-        {(["queue", "all", "triage"] as const).map((v) => (
+        {VIEWS.map(([v, label]) => (
           <button key={v} className={view === v ? "primary" : ""} onClick={() => setView(v)}>
-            {v}
+            {label}
           </button>
         ))}
         {canRun && (
@@ -94,13 +102,22 @@ export function Leads({ me }: { me: Me }) {
             disabled={busy}
             onClick={() => {
               setBusy(true);
-              void api.runJob("rank-recompute").then(load).catch((e) => setError((e as Error).message)).finally(() => setBusy(false));
+              setRankMsg("");
+              void api
+                .runJob("rank-recompute")
+                .then((r) => {
+                  setRankMsg(describeRun("rank-recompute", r.result));
+                  return load();
+                })
+                .catch((e) => setError((e as Error).message))
+                .finally(() => setBusy(false));
             }}
           >
             {busy ? "Ranking…" : "Recompute ranks"}
           </button>
         )}
       </div>
+      {rankMsg && <div className="notice">Ranking done: {rankMsg}</div>}
 
       {a && (
         <div className="analytics">
@@ -109,9 +126,9 @@ export function Leads({ me }: { me: Me }) {
           <div className="stat"><div className="n">{a.contacted.toLocaleString()}</div><div className="l">Contacted</div></div>
           <div className="stat"><div className="n">{a.inTalks.toLocaleString()}</div><div className="l">In talks</div></div>
           <div className="stat"><div className="n">{a.signed.toLocaleString()}</div><div className="l">Signed</div></div>
-          <div className="stat"><div className="n">{a.personalized.toLocaleString()}</div><div className="l">Personalized</div></div>
+          <div className="stat"><div className="n">{a.personalized.toLocaleString()}</div><div className="l">Has talking points</div></div>
           <div className="stat"><div className="n">{a.verifiedReach.toLocaleString()}</div><div className="l">Verified reach</div></div>
-          <div className="stat"><div className="n">{a.dead.toLocaleString()}</div><div className="l">Dead</div></div>
+          <div className="stat"><div className="n">{a.dead.toLocaleString()}</div><div className="l">Unreachable</div></div>
         </div>
       )}
 
@@ -152,6 +169,8 @@ export function Leads({ me }: { me: Me }) {
                   {sort === col ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
                 </th>
               ))}
+              <th>Notes</th>
+              <th>Profile</th>
             </tr>
           </thead>
           <tbody>
@@ -162,16 +181,49 @@ export function Leads({ me }: { me: Me }) {
                 style={{ cursor: "pointer" }}
                 onClick={() => setOpen(open === l.id ? null : l.id)}
               >
-                <td>{l.rank ?? "—"}<span className="muted" style={{ fontSize: 11 }}> {l.band ? `b${l.band}` : ""}</span></td>
                 <td>
-                  {l.name} {l.needsTriage && <span className="chip suggest">triage</span>}
-                  {l.isDead && <span className="chip failed">dead</span>}
+                  {l.rank ?? "—"}
+                  {l.band && (
+                    <span className="muted" style={{ fontSize: 11 }} title={BAND_HELP[l.band]}>
+                      {" "}
+                      {BAND_LABEL[l.band] ?? l.band}
+                    </span>
+                  )}
+                </td>
+                <td>
+                  {l.name} {l.needsTriage && <span className="chip suggest">needs triage</span>}
+                  {l.isDead && <span className="chip failed">unreachable</span>}
                 </td>
                 <td className="muted">{l.platform ?? "—"}</td>
                 <td>{l.reach != null ? l.reach.toLocaleString() : <span className="muted">unverified</span>}</td>
                 <td className="muted">{l.status ?? "—"}</td>
-                <td>{l.subProfile ? (l.subProfile.startsWith("SP5") ? <span className="chip failed">SP5</span> : l.subProfile.slice(0, 12)) : "—"}</td>
+                <td>
+                  {(() => {
+                    const sp = subProfileLabel(l.subProfile);
+                    return sp.danger ? (
+                      <span className="chip failed" title={sp.help}>{sp.text}</span>
+                    ) : (
+                      <span className="muted" title={sp.help}>{sp.text}</span>
+                    );
+                  })()}
+                </td>
                 <td className="muted">{l.lastReachedOut?.slice(0, 10) ?? "never"}</td>
+                <td>
+                  {l.hasNotes ? (
+                    <span className="chip ok" title="Has real talking points; can be drafted">ready</span>
+                  ) : (
+                    <span className="chip unresolved" title="No talking points yet; cannot be drafted until researched">none</span>
+                  )}
+                </td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {l.profileUrl && /^https?:\/\//i.test(l.profileUrl) ? (
+                    <a href={l.profileUrl} target="_blank" rel="noreferrer" title={l.profileUrl}>
+                      ↗ open
+                    </a>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -188,7 +240,7 @@ export function Leads({ me }: { me: Me }) {
           <div className="cards">
             <div className="card" style={{ gridColumn: "1 / -1" }}>
               <div className="k">Personalization notes</div>
-              <div style={{ whiteSpace: "pre-wrap" }}>{detail.lead.personalizationNotes ?? "(none — needs enrichment)"}</div>
+              <div style={{ whiteSpace: "pre-wrap" }}>{detail.lead.personalizationNotes ?? "(none yet — this lead has not been researched)"}</div>
             </div>
             <div className="card" style={{ gridColumn: "1 / -1" }}>
               <div className="k">Notes</div>
@@ -209,7 +261,7 @@ export function Leads({ me }: { me: Me }) {
                   <tr key={m.id}>
                     <td>{m.channel}</td>
                     <td>
-                      <span className={`chip ${m.state === "blocked" ? "failed" : m.state === "sent" || m.state === "logged" ? "ok" : "unresolved"}`}>{m.state}</span>
+                      <span className={`chip ${m.state === "blocked" ? "failed" : m.state === "sent" || m.state === "logged" ? "ok" : "unresolved"}`}>{MESSAGE_STATE_LABEL[m.state] ?? m.state}</span>
                     </td>
                     <td style={{ whiteSpace: "pre-wrap", maxWidth: 480 }}>{m.body ?? ""}</td>
                     <td className="muted">{m.sentAt ? new Date(m.sentAt).toLocaleString() : "—"}</td>
