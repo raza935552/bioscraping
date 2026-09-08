@@ -51,7 +51,18 @@ export function anthropicFromEnv(env = process.env, fetchImpl: typeof fetch = fe
         }),
         signal: AbortSignal.timeout(60_000),
       });
-      if (!res.ok) throw new Error(`Anthropic API: HTTP ${res.status}`);
+      if (!res.ok) {
+        // Surface the API's own reason (type + message, never the key) so a
+        // failed enrichment or draft is diagnosable from its history row.
+        let reason = "";
+        try {
+          const err = (await res.json()) as { error?: { type?: string; message?: string } };
+          reason = [err.error?.type, err.error?.message].filter(Boolean).join(": ");
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new Error(`Anthropic API: HTTP ${res.status}${reason ? ` — ${reason.slice(0, 200)}` : ""}`);
+      }
       const body = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
       return body.content?.find((c) => c.type === "text")?.text ?? "";
     },

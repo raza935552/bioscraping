@@ -7,12 +7,15 @@
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "run:idev-sync": "tsx src/run-idev-sync.ts"
+    "run:idev-sync": "tsx src/run-idev-sync.ts",
+    "run:enrich": "tsx src/run-enrich.ts",
+    "run:dispatch": "tsx src/run-dispatch.ts"
   },
   "dependencies": {
     "@biolinx/compliance": "workspace:*",
     "@biolinx/core": "workspace:*",
     "@biolinx/db": "workspace:*",
+    "@biolinx/drafting": "workspace:*",
     "@biolinx/idev": "workspace:*",
     "@biolinx/jobs": "workspace:*",
     "@biolinx/notify": "workspace:*",

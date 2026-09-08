@@ -4,7 +4,7 @@
 
 import { candidateFromUrl } from "../resolve.js";
 import type { Fetcher, SourceCandidate } from "../types.js";
-import { clip } from "./shared.js";
+import { clip, safeSlice } from "./shared.js";
 
 const UA = "Mozilla/5.0 (compatible; BiolinxEngine/1.0; +https://biolinxlabs.com)";
 const MAX_TEXT = 4000;
@@ -42,7 +42,7 @@ async function getHtml(url: string, fetchImpl: typeof fetch): Promise<string | n
 export const fetchWeb: Fetcher = async (c, deps) => {
   const html = await getHtml(c.url, deps.fetchImpl);
   if (html == null) return { platform: "web", profileUrl: c.url, displayName: null, bio: null, followers: null, items: [] };
-  const text = htmlToText(html).slice(0, MAX_TEXT);
+  const text = safeSlice(htmlToText(html), MAX_TEXT);
   return {
     platform: "web",
     profileUrl: c.url,

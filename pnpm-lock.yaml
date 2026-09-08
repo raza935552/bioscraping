@@ -113,6 +113,9 @@ importers:
       '@biolinx/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@biolinx/drafting':
+        specifier: workspace:*
+        version: link:../../packages/drafting
       '@biolinx/idev':
         specifier: workspace:*
         version: link:../../packages/idev

@@ -262,3 +262,32 @@ Unit, vitest, matching the existing layout:
 
 Acceptance: a live run with the cap set to 5 against the local database,
 notes checked by hand for fabrication before the schedule is enabled.
+
+## 11. Acceptance log
+
+**2026-09-08, local database, three capped runs (5, 3, 1).**
+
+| Run | Attempted | Enriched | No match | Failed | Notes |
+|---|---|---|---|---|---|
+| 1 (cap 5) | 5 | 3 | 1 | 1 | First run also cleared 51 August failure markers and purged 25 blocked drafts |
+| 2 (cap 3) | 3 | 2 | 0 | 1 | Same lead failed again; error now readable |
+| 3 (cap 1) | 1 | 1 | 0 | 0 | Retry after fix |
+
+Hand check: every cited URL in all six notes is a URL from the stored bundle,
+and every quoted fragment appears verbatim in the stored caption or title
+(checked against `lead_enrichments.bundle`). Zero fabricated citations.
+
+The one failure was ours: `clip()` truncated by UTF-16 unit and split an emoji
+surrogate pair in an Instagram caption; the lone half made the Anthropic
+request body invalid JSON ("no low surrogate in string"). Fixed with
+code-point-safe truncation everywhere text is cut, with a regression test.
+The Anthropic client now surfaces the API's error type and message so a
+failed row explains itself.
+
+Dispatch after enrichment (DM, cap 5): 6 considered, 5 drafted to the review
+queue, 0 blocked, 378 counted as `skippedUnenriched` with no rows created.
+`next_follow_up_date` is verified by unit test; a live confirm is pending the
+operator's first send from the queue.
+
+Platform coverage observed: Instagram 4, YouTube 1, TikTok 1, web 1 (a
+directory listing page correctly judged no match).

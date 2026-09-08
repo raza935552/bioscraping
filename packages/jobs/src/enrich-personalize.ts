@@ -10,6 +10,7 @@ import {
   apifyConfigFromEnv,
   fetcherFor as defaultFetcherFor,
   resolveCandidates,
+  safeSlice,
   summarizeBundle,
   type FetchDeps,
   type Fetcher,
@@ -53,7 +54,7 @@ export function enrichDepsFromEnv(env = process.env, actorOverrides: Record<stri
 
 /** Keep the history row small: item urls + first 300 chars of each text. */
 function compactBundle(b: SourceBundle): SourceBundle {
-  return { ...b, items: b.items.map((i) => ({ ...i, text: i.text.slice(0, 300) })) };
+  return { ...b, items: b.items.map((i) => ({ ...i, text: safeSlice(i.text, 300) })) };
 }
 
 export async function enrichOne(lead: ResolveInput & { id: number }, deps: EnrichDeps): Promise<EnrichOutcome> {

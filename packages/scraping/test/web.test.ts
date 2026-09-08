@@ -57,3 +57,15 @@ describe("fetcherFor", () => {
     }
   });
 });
+
+describe("clip / safeSlice", () => {
+  it("never splits a surrogate pair at the cut point", async () => {
+    const { clip, safeSlice } = await import("../src/fetchers/shared.js");
+    const s = "ab" + "😀".repeat(5); // each emoji is 2 UTF-16 units
+    const cut = safeSlice(s, 3); // a plain slice(0,3) would end on a lone high surrogate
+    expect(cut).toBe("ab😀");
+    expect(() => JSON.parse(JSON.stringify({ cut }))).not.toThrow();
+    expect(/[\uD800-\uDBFF]$/.test(cut)).toBe(false);
+    expect(clip("x".repeat(10) + "🎉🎉", 11)).toBe("x".repeat(10) + "🎉");
+  });
+});

@@ -21,3 +21,4 @@ export function fetcherFor(platform: SourcePlatform): Fetcher {
 }
 
 export { fetchInstagram, fetchLinkHub, fetchReddit, fetchTikTok, fetchWeb, fetchX, fetchYouTube };
+export { clip, safeSlice } from "./shared.js";
