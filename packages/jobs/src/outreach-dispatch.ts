@@ -8,6 +8,7 @@
 
 import { and, eq } from "drizzle-orm";
 import {
+  hasUsableNotes,
   isConverted,
   isSp5,
   messageKey,
@@ -17,6 +18,60 @@ import {
 import { createDb, schema, type Db } from "@biolinx/db";
 import { draftMessage, type DraftRequest, type LlmClient } from "@biolinx/drafting";
 import type { LintContext } from "@biolinx/compliance";
+import { maxTouchesFor, nextFollowUpDateAfterSend, type Motion } from "./cadence-dates.js";
+
+const TERMINAL_STATUSES = ["Passed", "Signed", "No", "Signed up"];
+
+export interface CandidateLead {
+  id: number;
+  isDead: boolean;
+  subProfile: string | null;
+  affiliationStatus: string | null;
+  status: string | null;
+  email: string | null;
+  conversionRank: number | null;
+  nextFollowUpDate: Date | string | null;
+  followUpsSent: number;
+  motion: string;
+  personalizationNotes: string | null;
+}
+
+export type CandidateVerdict = "ok" | "unenriched" | "ineligible";
+
+/** Pure eligibility check. "unenriched" is the only soft skip: the lead is
+ *  fine, it just has no talking points yet. */
+export function isDispatchCandidate(
+  l: CandidateLead,
+  o: { channel: "email" | "dm"; today: Date; openReplyLeadIds: Set<number> },
+): CandidateVerdict {
+  if (l.isDead || isSp5(l.subProfile) || isConverted(l.affiliationStatus)) return "ineligible";
+  if (TERMINAL_STATUSES.includes(l.status ?? "")) return "ineligible";
+  if (o.channel === "email" && !l.email) return "ineligible";
+  if (l.conversionRank == null) return "ineligible";
+  if (o.openReplyLeadIds.has(l.id)) return "ineligible";
+  if (l.nextFollowUpDate != null && new Date(l.nextFollowUpDate) > o.today) return "ineligible";
+  if ((l.followUpsSent ?? 0) >= maxTouchesFor(l.motion === "B" ? "B" : "A")) return "ineligible";
+  if (!hasUsableNotes(l.personalizationNotes)) return "unenriched";
+  return "ok";
+}
+
+/** Lead-row update after a confirmed send: bookkeeping + next due date. */
+export function touchUpdate(
+  l: { motion: string },
+  touchNumber: number,
+  contactChannel: ContactChannel,
+  now = new Date(),
+  tz?: string,
+): { lastReachedOut: Date; followUpsSent: number; status: string; contactChannel: ContactChannel; nextFollowUpDate: Date | null } {
+  const motion: Motion = l.motion === "B" ? "B" : "A";
+  return {
+    lastReachedOut: now,
+    followUpsSent: touchNumber,
+    status: "Contacted",
+    contactChannel,
+    nextFollowUpDate: nextFollowUpDateAfterSend(motion, touchNumber, now, tz),
+  };
+}
 
 export interface DispatchOptions {
   llm: LlmClient;
@@ -38,6 +93,7 @@ export interface DispatchSummary {
   queued: number;
   sent: number;
   skippedSuppressed: number;
+  skippedUnenriched: number;
 }
 
 const DEFAULT_GUIDANCE =
@@ -45,7 +101,7 @@ const DEFAULT_GUIDANCE =
 
 export async function runOutreachDispatch(opts: DispatchOptions, db: Db = createDb()): Promise<DispatchSummary> {
   const cap = opts.dailyCap ?? 10;
-  const summary: DispatchSummary = { considered: 0, drafted: 0, blocked: 0, queued: 0, sent: 0, skippedSuppressed: 0 };
+  const summary: DispatchSummary = { considered: 0, drafted: 0, blocked: 0, queued: 0, sent: 0, skippedSuppressed: 0, skippedUnenriched: 0 };
 
   const startedAt = new Date();
   const [run] = await db
@@ -65,19 +121,13 @@ export async function runOutreachDispatch(opts: DispatchOptions, db: Db = create
     );
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const verdictOpts = { channel: opts.channel, today, openReplyLeadIds };
     const candidates = all
-      .filter(
-        (l) =>
-          !l.isDead &&
-          !isSp5(l.subProfile) &&
-          !isConverted(l.affiliationStatus) &&
-          !["Passed", "Signed", "No", "Signed up"].includes(l.status ?? "") &&
-          (opts.channel === "email" ? !!l.email : true) &&
-          l.conversionRank != null &&
-          !openReplyLeadIds.has(l.id) && // blocked while a reply is unhandled
-          // cadence-interval gate: a follow-up is only due on/after its date
-          (l.nextFollowUpDate == null || new Date(l.nextFollowUpDate) <= today),
-      )
+      .filter((l) => {
+        const v = isDispatchCandidate(l, verdictOpts);
+        if (v === "unenriched") summary.skippedUnenriched++;
+        return v === "ok";
+      })
       .sort((a, b) => (a.conversionRank ?? 1e9) - (b.conversionRank ?? 1e9));
 
     for (const lead of candidates) {
@@ -192,10 +242,7 @@ export async function runOutreachDispatch(opts: DispatchOptions, db: Db = create
           continue;
         }
         await db.update(schema.messages).set({ state: "sent", sentAt: new Date() }).where(eq(schema.messages.idempotencyKey, key));
-        await db
-          .update(schema.leads)
-          .set({ lastReachedOut: new Date(), followUpsSent: touchNumber, status: "Contacted", contactChannel: "Email" })
-          .where(eq(schema.leads.id, lead.id));
+        await db.update(schema.leads).set(touchUpdate(lead, touchNumber, "Email")).where(eq(schema.leads.id, lead.id));
         summary.sent++;
       } else {
         summary.queued++;
@@ -244,8 +291,9 @@ export async function confirmSent(
     .update(schema.messages)
     .set({ state: "sent", sentAt: new Date(), sentByUserId })
     .where(eq(schema.messages.id, messageId));
+  const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, msg.leadId) });
   await db
     .update(schema.leads)
-    .set({ lastReachedOut: new Date(), followUpsSent: msg.touchNumber, status: "Contacted", contactChannel })
+    .set(touchUpdate({ motion: lead?.motion ?? "A" }, msg.touchNumber, contactChannel))
     .where(eq(schema.leads.id, msg.leadId));
 }
