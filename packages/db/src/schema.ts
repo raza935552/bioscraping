@@ -86,7 +86,11 @@ export const leads = mysqlTable("leads", {
   motion: varchar("motion", { length: 4 }).default("A").notNull(), // A cold | B warm
   geoCountry: varchar("geo_country", { length: 2 }), // automated email is US-only (L5)
   isDead: boolean("is_dead").default(false).notNull(),
-  needsEnrichment: boolean("needs_enrichment").default(false).notNull(),
+  // Enrichment (enrich-personalize job). NULL = never attempted.
+  enrichmentStatus: varchar("enrichment_status", { length: 16 }), // pending | enriched | no_match | no_source | unresolvable | failed
+  enrichedAt: datetime("enriched_at"),
+  enrichmentSourceUrl: varchar("enrichment_source_url", { length: 500 }),
+  enrichmentAttempts: int("enrichment_attempts").default(0).notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -114,6 +118,21 @@ export const leadHandles = mysqlTable("lead_handles", {
   verifiedAt: datetime("verified_at"), // last time the profile resolved
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("handles_key").on(t.handleKey)]);
+
+/** One row per enrichment attempt — the audit trail behind every note. The
+ *  bundle is compact (profile fields + item urls + first 300 chars of text);
+ *  rows older than 90 days are pruned by the job (PII retention). */
+export const leadEnrichments = mysqlTable("lead_enrichments", {
+  id: id(),
+  leadId: int("lead_id").notNull(),
+  platform: varchar("platform", { length: 16 }).notNull(),
+  sourceUrl: varchar("source_url", { length: 500 }).notNull(),
+  bundle: json("bundle"),
+  notes: text("notes"),
+  status: varchar("status", { length: 16 }).notNull(), // enriched | no_match | unresolvable | failed
+  error: text("error"),
+  createdAt: createdAt(),
+}, (t) => [index("enrich_lead").on(t.leadId), index("enrich_created").on(t.createdAt)]);
 
 export const messages = mysqlTable("messages", {
   id: id(),
