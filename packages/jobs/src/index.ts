@@ -8,3 +8,4 @@ export * from "./signup-provision.js";
 export * from "./esp-adapter.js";
 export * from "./setup-recruiting-campaign.js";
 export * from "./cadence-dates.js";
+export * from "./enrich-personalize.js";

@@ -245,6 +245,9 @@ importers:
       '@biolinx/notify':
         specifier: workspace:*
         version: link:../notify
+      '@biolinx/scraping':
+        specifier: workspace:*
+        version: link:../scraping
       drizzle-orm:
         specifier: ^0.38.2
         version: 0.38.4(@types/react@18.3.31)(mysql2@3.24.2(@types/node@22.20.1))(react@18.3.1)
