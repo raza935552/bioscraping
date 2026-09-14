@@ -12,3 +12,4 @@ export * from "./enrich-personalize.js";
 export * from "./lead-ingest.js";
 export * from "./customerio-sync.js";
 export * from "./sourced-export.js";
+export * from "./sourced-details.js";

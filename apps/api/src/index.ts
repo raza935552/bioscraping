@@ -48,7 +48,9 @@ import {
   runEnrichPersonalize,
   runIdevSync,
   runLeadIngest,
+  sourcedDetails,
   sourcedLeadsCsv,
+  type DetailBundle,
   runMetricsDigest,
   runOutreachDispatch,
   runRankRecompute,
@@ -399,14 +401,40 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     status?: string;
     platform?: string;
     sp?: string;
+    // Sourced view only
+    review?: string;
+    niche?: string;
+    competitor?: string;
+    store?: string;
+    active?: string;
+    minReach?: string;
+    minScore?: string;
+    minEngagement?: string;
+    country?: string;
+    audience?: string;
   };
   const rows = await db.select().from(schema.leads);
+  const sourcedView = q.view === "sourced";
+  // Sourced view: derived details (engagement, activity, bio, surfaced post) from the profile-read bundles.
+  const details = new Map<number, ReturnType<typeof sourcedDetails>>();
+  if (sourcedView) {
+    const now = new Date();
+    const bundles = new Map<number, DetailBundle>();
+    for (const e of await db
+      .select({ leadId: schema.leadEnrichments.leadId, bundle: schema.leadEnrichments.bundle })
+      .from(schema.leadEnrichments)
+      .where(eq(schema.leadEnrichments.status, "sourced"))
+      .orderBy(desc(schema.leadEnrichments.id))) {
+      if (!bundles.has(e.leadId)) bundles.set(e.leadId, (e.bundle as DetailBundle) ?? null);
+    }
+    for (const l of rows) if (l.source === "sourcing") details.set(l.id, sourcedDetails(l, bundles.get(l.id) ?? null, now));
+  }
   const reviewable = (l: { sourcingReview: string | null }) => l.sourcingReview == null || l.sourcingReview === "accepted";
   let filtered =
     q.view === "triage"
       ? rows.filter((l) => l.needsTriage && reviewable(l))
-      : q.view === "sourced"
-        ? rows.filter((l) => l.sourcingReview === "pending")
+      : sourcedView
+        ? rows.filter((l) => l.source === "sourcing" && (q.review === "all" ? true : l.sourcingReview === (q.review || "pending")))
       : q.view === "queue"
         ? rows.filter(
             (l) =>
@@ -424,11 +452,33 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
   if (q.sp) filtered = filtered.filter((l) => (q.sp === "SP5" ? isSp5(l.subProfile) : l.subProfile === q.sp));
   if (q.search) {
     const s = q.search.toLowerCase();
-    filtered = filtered.filter((l) =>
-      [l.firstName, l.lastName, l.email, l.primaryPlatform, l.niche, l.whatTheyPromoted]
+    filtered = filtered.filter((l) => {
+      const d = details.get(l.id);
+      return [l.firstName, l.lastName, l.email, l.primaryPlatform, l.niche, l.whatTheyPromoted, l.otherCreatorCompany, l.affiliateCode, d?.handle, d?.bio, d?.term, d?.niche]
         .filter(Boolean)
-        .some((v) => v!.toLowerCase().includes(s)),
-    );
+        .some((v) => v!.toLowerCase().includes(s));
+    });
+  }
+  if (sourcedView) {
+    const num = (v?: string) => (v != null && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
+    const minReach = num(q.minReach);
+    const minScore = num(q.minScore);
+    const minEng = num(q.minEngagement); // percent
+    filtered = filtered.filter((l) => {
+      const d = details.get(l.id);
+      if (q.niche && d?.niche !== q.niche) return false;
+      if (q.competitor === "yes" && !l.otherCreatorCompany) return false;
+      if (q.competitor === "no" && l.otherCreatorCompany) return false;
+      if (q.store === "hide" && d?.isStore) return false;
+      if (q.store === "only" && !d?.isStore) return false;
+      if (q.active === "yes" && !(d?.daysSinceLastPost != null && d.daysSinceLastPost <= 30)) return false;
+      if (minReach != null && !(l.totalReach != null && l.totalReach >= minReach)) return false;
+      if (minScore != null && (l.sourcingScore ?? 0) < minScore) return false;
+      if (minEng != null && !(d?.engagementRate != null && d.engagementRate * 100 >= minEng)) return false;
+      if (q.country && (l.geoCountry ?? "") !== q.country) return false;
+      if (q.audience && d?.audience !== q.audience) return false;
+      return true;
+    });
   }
 
   // Analytics over the FILTERED set (before pagination).
@@ -456,8 +506,14 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     lastTouch: (a, b) => new Date(a.lastReachedOut ?? 0).getTime() - new Date(b.lastReachedOut ?? 0).getTime(),
     name: (a, b) => (a.firstName ?? "").localeCompare(b.firstName ?? ""),
     score: (a, b) => (a.sourcingScore ?? 0) - (b.sourcingScore ?? 0),
+    niche: (a, b) => (details.get(a.id)?.niche ?? a.niche ?? "").localeCompare(details.get(b.id)?.niche ?? b.niche ?? ""),
+    avgViews: (a, b) => (details.get(a.id)?.avgViews ?? -1) - (details.get(b.id)?.avgViews ?? -1),
+    engagement: (a, b) => (details.get(a.id)?.engagementRate ?? -1) - (details.get(b.id)?.engagementRate ?? -1),
+    posts30: (a, b) => (details.get(a.id)?.postsLast30 ?? -1) - (details.get(b.id)?.postsLast30 ?? -1),
+    lastPost: (a, b) => new Date(a.lastPostAt ?? 0).getTime() - new Date(b.lastPostAt ?? 0).getTime(),
+    competitor: (a, b) => (a.otherCreatorCompany ?? "").localeCompare(b.otherCreatorCompany ?? ""),
   };
-  const defaultDir: Record<string, 1 | -1> = { rank: 1, name: 1, status: 1, platform: 1, sp: 1, reach: -1, lastTouch: -1, score: -1 };
+  const defaultDir: Record<string, 1 | -1> = { rank: 1, name: 1, status: 1, platform: 1, sp: 1, reach: -1, lastTouch: -1, score: -1, niche: 1, avgViews: -1, engagement: -1, posts30: -1, lastPost: -1, competitor: 1 };
   const sorter = asc[sort] ?? asc.rank!;
   const dir = q.dir === "asc" ? 1 : q.dir === "desc" ? -1 : (defaultDir[sort] ?? 1);
   filtered.sort((a, b) => dir * sorter(a, b));
@@ -468,8 +524,28 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
   const start = (page - 1) * pageSize;
   const pageRows = filtered.slice(start, start + pageSize);
 
+  // Dropdown options for the Sourced filters, from every sourced lead (not just this page).
+  const facets = sourcedView
+    ? (() => {
+        const all = rows.filter((l) => l.source === "sourcing");
+        const uniq = (vals: Array<string | null | undefined>) => [...new Set(vals.filter((v): v is string => !!v))].sort();
+        return {
+          niches: uniq(all.map((l) => details.get(l.id)?.niche)),
+          countries: uniq(all.map((l) => l.geoCountry)),
+          audiences: uniq(all.map((l) => details.get(l.id)?.audience)),
+          platforms: uniq(all.map((l) => l.primaryPlatform)),
+          review: {
+            pending: all.filter((l) => l.sourcingReview === "pending").length,
+            accepted: all.filter((l) => l.sourcingReview === "accepted").length,
+            rejected: all.filter((l) => l.sourcingReview === "rejected").length,
+          },
+        };
+      })()
+    : null;
+
   return {
     analytics,
+    facets,
     page,
     pageSize,
     totalPages: Math.ceil(filtered.length / pageSize),
@@ -503,6 +579,9 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       sample: (l.sourcingSample as SamplePost[] | null) ?? [],
       enrichmentStatus: l.enrichmentStatus,
       profileUrl: profileUrlFor(l),
+      country: l.geoCountry,
+      rejectedReason: l.sourcingRejectedReason,
+      details: details.get(l.id) ?? null,
     })),
   };
 });
@@ -541,12 +620,22 @@ app.get("/api/leads/sourced.csv", { preHandler: requireRole("admin", "ops") }, a
     .filter((l) => review === "all" || l.sourcingReview === review)
     .sort((a, b) => (b.sourcingScore ?? 0) - (a.sourcingScore ?? 0));
   await audit(req, "leads.sourced.export", "leads", null, { review, count: rows.length });
+  const bundles = new Map<number, DetailBundle>();
+  for (const e of await db
+    .select({ leadId: schema.leadEnrichments.leadId, bundle: schema.leadEnrichments.bundle })
+    .from(schema.leadEnrichments)
+    .where(eq(schema.leadEnrichments.status, "sourced"))
+    .orderBy(desc(schema.leadEnrichments.id))) {
+    if (!bundles.has(e.leadId)) bundles.set(e.leadId, (e.bundle as DetailBundle) ?? null);
+  }
+  const now = new Date();
+  const byId = new Map(rows.map((l) => [l.id, l]));
   const stamp = new Date().toISOString().slice(0, 10);
   return reply
     .header("content-type", "text/csv; charset=utf-8")
     .header("content-disposition", `attachment; filename="biolinx-sourced-leads-${review}-${stamp}.csv"`)
     .header("cache-control", "no-store")
-    .send(sourcedLeadsCsv(rows));
+    .send(sourcedLeadsCsv(rows, now, (l) => sourcedDetails(byId.get(l.id)!, bundles.get(l.id) ?? null, now)));
 });
 
 /** Distinct filter values for the Leads UI dropdowns. */

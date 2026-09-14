@@ -2,7 +2,7 @@
 // We keep one hit per creator (the newest video) so the cap counts people.
 
 import { runActorSync } from "../apify.js";
-import { clip, toIso, toNumber } from "../fetchers/shared.js";
+import { clip, engagement, toIso, toNumber } from "../fetchers/shared.js";
 import { DISCOVERY_ACTORS, countryCode, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
 
 interface Row {
@@ -12,6 +12,9 @@ interface Row {
   error?: string;
   authorMeta?: { name?: string; nickName?: string; signature?: string; fans?: number; profileUrl?: string };
   locationMeta?: { countryCode?: string | number };
+  playCount?: number;
+  diggCount?: number;
+  commentCount?: number;
 }
 
 /** TikTok hashtags are one token: "#Peptide Sciences" → "peptidesciences".
@@ -50,6 +53,7 @@ export const discoverTikTok: Discoverer = async (term, deps) => {
       country: countryCode(r.locationMeta?.countryCode),
       isRepost: null,
       term,
+      ...engagement({ views: r.playCount, likes: r.diggCount, comments: r.commentCount }),
     };
     const prev = byHandle.get(name);
     if (!prev) byHandle.set(name, hit);

@@ -2,7 +2,7 @@
 // row. No follower count at this stage; verification reads the profile.
 
 import { runActorSync } from "../apify.js";
-import { clip, toIso } from "../fetchers/shared.js";
+import { clip, engagement, toIso } from "../fetchers/shared.js";
 import { DISCOVERY_ACTORS, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
 
 interface Row {
@@ -12,6 +12,10 @@ interface Row {
   url?: string;
   timestamp?: string;
   error?: string;
+  likesCount?: number;
+  commentsCount?: number;
+  videoViewCount?: number;
+  videoPlayCount?: number;
 }
 
 export const discoverInstagram: Discoverer = async (term, deps) => {
@@ -42,6 +46,8 @@ export const discoverInstagram: Discoverer = async (term, deps) => {
       country: null,
       isRepost: null,
       term,
+      // Instagram hides like counts on some posts and returns -1; engagement() keeps only real numbers.
+      ...engagement({ views: r.videoViewCount ?? r.videoPlayCount, likes: r.likesCount != null && r.likesCount >= 0 ? r.likesCount : undefined, comments: r.commentsCount }),
     };
     const prev = byHandle.get(handle);
     if (!prev || (postedAt ?? "") > (prev.postedAt ?? "")) {

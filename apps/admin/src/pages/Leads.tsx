@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type SamplePost } from "../api.js";
+import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type SamplePost, type SourcedFacets } from "../api.js";
 import { PageInfo, Pagination } from "../components.js";
 import { BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
 
@@ -21,6 +21,10 @@ const SORTS: Array<[string, string]> = [
 ];
 
 const NICHES = Object.keys(NICHE_BRAND);
+const SOURCED_SORTS = new Set(["score", "name", "niche", "platform", "reach", "avgViews", "engagement", "posts30", "lastPost", "competitor"]);
+const SOURCED_ONLY_SORTS = new Set(["score", "niche", "avgViews", "engagement", "posts30", "lastPost", "competitor"]);
+const compact = (n: number | null | undefined): string =>
+  n == null ? "—" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}K` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 const isHttp = (u: string | null | undefined): u is string => !!u && /^https?:\/\//i.test(u);
 
 export function Leads({ me }: { me: Me }) {
@@ -41,6 +45,21 @@ export function Leads({ me }: { me: Me }) {
   const [rankMsg, setRankMsg] = useState("");
   const [reviewing, setReviewing] = useState<LeadRow | null>(null);
   const [confirmReject, setConfirmReject] = useState<number | null>(null);
+  // Sourced view filters
+  const [review, setReview] = useState("pending");
+  const [niche, setNiche] = useState("");
+  const [competitor, setCompetitor] = useState("");
+  const [store, setStore] = useState("");
+  const [active, setActive] = useState("");
+  const [minReach, setMinReach] = useState("");
+  const [minScore, setMinScore] = useState("");
+  const [minEngagement, setMinEngagement] = useState("");
+  const [country, setCountry] = useState("");
+  const [audience, setAudience] = useState("");
+  const sourcedFilters = { review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience };
+  const clearSourcedFilters = () => {
+    setNiche(""); setCompetitor(""); setStore(""); setActive(""); setMinReach(""); setMinScore(""); setMinEngagement(""); setCountry(""); setAudience("");
+  };
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ view, page: String(page), pageSize: "50", sort });
@@ -49,8 +68,10 @@ export function Leads({ me }: { me: Me }) {
     if (status) p.set("status", status);
     if (platform) p.set("platform", platform);
     if (sp) p.set("sp", sp);
+    if (view === "sourced") for (const [k, v] of Object.entries(sourcedFilters)) if (v) p.set(k, v);
     return p;
-  }, [view, page, sort, dir, search, status, platform, sp]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, page, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience]);
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +94,13 @@ export function Leads({ me }: { me: Me }) {
   }, [open]);
 
   // Reset to page 1 when filters/sort change.
-  useEffect(() => setPage(1), [view, sort, dir, search, status, platform, sp]);
+  useEffect(() => setPage(1), [view, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience]);
+  // The Sourced view ranks by score; the other views by conversion rank.
+  useEffect(() => {
+    if (view === "sourced" && !SOURCED_SORTS.has(sort)) { setSort("score"); setDir(""); }
+    if (view !== "sourced" && SOURCED_ONLY_SORTS.has(sort)) { setSort("rank"); setDir(""); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   const clickSort = (col: string) => {
     if (sort === col) setDir((d) => (d === "desc" ? "asc" : d === "asc" ? "" : "desc"));
@@ -206,22 +233,26 @@ export function Leads({ me }: { me: Me }) {
           onChange={(e) => setSearch(e.target.value)}
           style={{ maxWidth: 280 }}
         />
+        {view !== "sourced" && (
         <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ maxWidth: 150 }}>
           <option value="">All statuses</option>
           {filters?.statuses.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        )}
         <select value={platform} onChange={(e) => setPlatform(e.target.value)} style={{ maxWidth: 150 }}>
           <option value="">All platforms</option>
           {filters?.platforms.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
+        {view !== "sourced" && (
         <select value={sp} onChange={(e) => setSp(e.target.value)} style={{ maxWidth: 150 }}>
           <option value="">All sub-profiles</option>
           {filters?.subProfiles.map((s) => <option key={s} value={s}>{s.slice(0, 24)}</option>)}
         </select>
+        )}
         {view === "sourced" && canRun && (
           <>
             <div className="grow" />
-            <a className="btn-link" href="/api/leads/sourced.csv?review=pending" download title="Spreadsheet of the leads waiting for review, with the marketing spec's fields">
+            <a className="btn-link" href={`/api/leads/sourced.csv?review=${encodeURIComponent(review)}`} download title="Spreadsheet of the leads in this review status, with the marketing spec's fields">
               Download for marketing (CSV)
             </a>
             <a className="btn-link" href="/api/leads/sourced.csv?review=all" download title="Every sourced lead, including accepted and rejected, with reject reasons">
@@ -231,12 +262,25 @@ export function Leads({ me }: { me: Me }) {
         )}
       </div>
 
+      {view === "sourced" && (
+        <SourcedFilterBar
+          facets={data?.facets ?? null}
+          values={sourcedFilters}
+          set={{ setReview, setNiche, setCompetitor, setStore, setActive, setMinReach, setMinScore, setMinEngagement, setCountry, setAudience }}
+          onClear={clearSourcedFilters}
+          shown={data?.analytics.total ?? 0}
+        />
+      )}
+
       {error && <div className="error">{error}</div>}
 
       {view === "sourced" ? (
         <SourcedTable
           rows={data?.rows ?? []}
-          canRun={canRun}
+          sort={sort}
+          dir={dir}
+          onSort={clickSort}
+          canRun={canRun && review === "pending"}
           open={open}
           onOpen={(id) => setOpen(open === id ? null : id)}
           onAccept={setReviewing}
@@ -415,8 +459,67 @@ export function Leads({ me }: { me: Me }) {
 }
 
 
+interface SourcedFilterValues {
+  review: string; niche: string; competitor: string; store: string; active: string;
+  minReach: string; minScore: string; minEngagement: string; country: string; audience: string;
+}
+interface SourcedFilterSetters {
+  setReview: (v: string) => void; setNiche: (v: string) => void; setCompetitor: (v: string) => void; setStore: (v: string) => void;
+  setActive: (v: string) => void; setMinReach: (v: string) => void; setMinScore: (v: string) => void; setMinEngagement: (v: string) => void;
+  setCountry: (v: string) => void; setAudience: (v: string) => void;
+}
+
+function SourcedFilterBar({ facets, values: v, set, onClear, shown }: { facets: SourcedFacets | null; values: SourcedFilterValues; set: SourcedFilterSetters; onClear: () => void; shown: number }) {
+  const any = [v.niche, v.competitor, v.store, v.active, v.minReach, v.minScore, v.minEngagement, v.country, v.audience].some(Boolean);
+  const r = facets?.review;
+  return (
+    <div className="toolbar filterbar">
+      <select value={v.review} onChange={(e) => set.setReview(e.target.value)} title="Review status">
+        <option value="pending">Waiting for review{r ? ` (${r.pending})` : ""}</option>
+        <option value="accepted">Accepted{r ? ` (${r.accepted})` : ""}</option>
+        <option value="rejected">Rejected{r ? ` (${r.rejected})` : ""}</option>
+        <option value="all">All sourced</option>
+      </select>
+      <select value={v.niche} onChange={(e) => set.setNiche(e.target.value)}>
+        <option value="">All niches</option>
+        {(facets?.niches ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
+      </select>
+      <select value={v.audience} onChange={(e) => set.setAudience(e.target.value)}>
+        <option value="">All audiences</option>
+        {(facets?.audiences ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
+      </select>
+      <select value={v.competitor} onChange={(e) => set.setCompetitor(e.target.value)}>
+        <option value="">Competitor: any</option>
+        <option value="yes">Promotes a competitor</option>
+        <option value="no">No competitor seen</option>
+      </select>
+      <select value={v.store} onChange={(e) => set.setStore(e.target.value)}>
+        <option value="">Stores: show</option>
+        <option value="hide">Hide stores / vendors</option>
+        <option value="only">Only stores / vendors</option>
+      </select>
+      <select value={v.active} onChange={(e) => set.setActive(e.target.value)}>
+        <option value="">Any activity</option>
+        <option value="yes">Posted in last 30 days</option>
+      </select>
+      <select value={v.country} onChange={(e) => set.setCountry(e.target.value)}>
+        <option value="">Any country</option>
+        {(facets?.countries ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <input type="number" min={0} placeholder="Min reach" value={v.minReach} onChange={(e) => set.setMinReach(e.target.value)} style={{ width: 110 }} />
+      <input type="number" min={0} max={100} placeholder="Min score" value={v.minScore} onChange={(e) => set.setMinScore(e.target.value)} style={{ width: 100 }} />
+      <input type="number" min={0} step={0.5} placeholder="Min eng. %" value={v.minEngagement} onChange={(e) => set.setMinEngagement(e.target.value)} style={{ width: 105 }} title="Minimum engagement rate, in percent" />
+      {any && <button onClick={onClear}>Clear filters</button>}
+      <span className="muted" style={{ fontSize: 12 }}>{shown} shown</span>
+    </div>
+  );
+}
+
 interface SourcedTableProps {
   rows: LeadRow[];
+  sort: string;
+  dir: string;
+  onSort: (col: string) => void;
   canRun: boolean;
   open: number | null;
   onOpen: (id: number) => void;
@@ -425,79 +528,128 @@ interface SourcedTableProps {
   confirmReject: number | null;
 }
 
-function SourcedTable({ rows, canRun, open, onOpen, onAccept, onReject, confirmReject }: SourcedTableProps) {
+const SOURCED_COLUMNS: Array<[string | null, string, string?]> = [
+  ["score", "Score"],
+  ["name", "Creator"],
+  ["niche", "Niche"],
+  ["platform", "Platform"],
+  ["reach", "Reach", "Followers from a real profile read"],
+  ["avgViews", "Avg views", "Average views across their most recent posts"],
+  ["engagement", "Engagement", "(likes + comments) ÷ views, averaged over recent posts. Per follower when posts have no view count"],
+  ["posts30", "Posts 30d", "Posts in the last 30 days, out of the recent posts read"],
+  ["lastPost", "Last post"],
+  [null, "Surfaced post", "The post that found them: views · likes · comments"],
+  ["competitor", "Competitor"],
+  [null, "Code"],
+  [null, "Flags"],
+  [null, "Links"],
+  [null, "Decision"],
+];
+
+function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept, onReject, confirmReject }: SourcedTableProps) {
   return (
     <div className="tablewrap">
-      <table>
+      <table className="sourced">
         <thead>
           <tr>
-            <th>Score</th>
-            <th>Who</th>
-            <th>Platform</th>
-            <th>Verified reach</th>
-            <th>Last post</th>
-            <th>Links</th>
-            <th>Decision</th>
+            {SOURCED_COLUMNS.map(([col, label, help]) =>
+              col ? (
+                <th key={label} className={`sortable ${sort === col ? "active" : ""}`} onClick={() => onSort(col)} title={help}>
+                  {label}
+                  {sort === col ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
+                </th>
+              ) : (
+                <th key={label} title={help}>{label}</th>
+              ),
+            )}
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={7} className="muted">
-                Nothing waiting for review. Run an audience from the Audiences page to find new people.
+              <td colSpan={SOURCED_COLUMNS.length} className="muted">
+                Nothing matches. Clear the filters, or run an audience from the Audiences page to find new people.
               </td>
             </tr>
           )}
-          {rows.map((l) => (
-            <tr key={l.id} className={open === l.id ? "selected" : ""} style={{ cursor: "pointer" }} onClick={() => onOpen(l.id)}>
-              <td>
-                <strong>{l.sourcingScore ?? 0}</strong>
-                <div className="muted" style={{ fontSize: 11 }}>{l.scoreReasons.length} reasons</div>
-              </td>
-              <td>
-                {l.name}
-                {l.competitor && (
-                  <>
-                    {" "}
-                    <span className="chip suggest" title={l.affiliateCode ? `code ${l.affiliateCode}` : "competitor link seen"}>
-                      promotes {l.competitor}
-                    </span>
-                  </>
-                )}
-                <div className="muted" style={{ fontSize: 11 }}>
-                  {l.sourcingReason} · {BRAND_LABEL[l.brandFit ?? ""] ?? l.brandFit ?? ""}
-                </div>
-              </td>
-              <td className="muted">{l.platform ?? "—"}</td>
-              <td>{l.reach != null ? l.reach.toLocaleString() : <span className="muted">unverified</span>}</td>
-              <td className="muted">{l.lastPostAt?.slice(0, 10) ?? "—"}</td>
-              <td onClick={(e) => e.stopPropagation()}>
-                {isHttp(l.sample[0]?.url) && (
-                  <a href={l.sample[0]!.url} target="_blank" rel="noreferrer">
-                    post ↗
-                  </a>
-                )}{" "}
-                {isHttp(l.profileUrl) && (
-                  <a href={l.profileUrl} target="_blank" rel="noreferrer">
-                    profile ↗
-                  </a>
-                )}
-              </td>
-              <td onClick={(e) => e.stopPropagation()}>
-                {canRun && (
-                  <>
-                    <button className="primary" onClick={() => onAccept(l)}>
-                      Accept…
-                    </button>{" "}
-                    <button onClick={() => onReject(l)}>{confirmReject === l.id ? "Click again to reject" : "Reject"}</button>{" "}
-                    <button onClick={() => onReject(l, "goodwill advocate")} title="SP5: never contacted, by rule">
-                      Goodwill advocate
-                    </button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
+          {rows.map((l) => {
+            const d = l.details;
+            const s = d?.surfaced;
+            return (
+              <tr key={l.id} className={open === l.id ? "selected" : ""} style={{ cursor: "pointer" }} onClick={() => onOpen(l.id)}>
+                <td>
+                  <strong>{l.sourcingScore ?? 0}</strong>
+                  <div className="muted" style={{ fontSize: 11 }}>{l.scoreReasons.length} reasons</div>
+                </td>
+                <td className="creator">
+                  <div><strong>{l.name}</strong>{d?.handle && <span className="muted"> @{d.handle}</span>}</div>
+                  {d?.bio && <div className="bio" title={d.bio}>{d.bio}</div>}
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    {d?.term ? <>via <strong>{d.term}</strong>{d.audience ? ` · ${d.audience}` : ""}</> : l.sourcingReason}
+                  </div>
+                  {l.rejectedReason && <div className="chip failed" style={{ marginTop: 4 }}>rejected: {l.rejectedReason}</div>}
+                </td>
+                <td>
+                  {d?.niche ?? l.niche ?? "—"}
+                  <div className="muted" style={{ fontSize: 11 }}>{BRAND_LABEL[l.brandFit ?? ""] ?? l.brandFit ?? ""}</div>
+                </td>
+                <td className="muted">{l.platform ?? "—"}</td>
+                <td>{l.reach != null ? l.reach.toLocaleString() : <span className="muted">unverified</span>}</td>
+                <td>{d?.avgViews != null ? compact(d.avgViews) : <span className="muted">—</span>}</td>
+                <td title={d?.engagementBasis === "followers" ? "per follower (posts have no view count)" : "per view"}>
+                  {d?.engagementRate != null ? `${(d.engagementRate * 100).toFixed(1)}%` : <span className="muted">—</span>}
+                  {d?.engagementBasis === "followers" && <span className="muted" style={{ fontSize: 11 }}> /fol.</span>}
+                </td>
+                <td>{d?.postsLast30 != null ? <>{d.postsLast30}<span className="muted" style={{ fontSize: 11 }}> /{d.postsRead}</span></> : <span className="muted">—</span>}</td>
+                <td className="muted">
+                  {l.lastPostAt?.slice(0, 10) ?? "—"}
+                  {d?.daysSinceLastPost != null && <div style={{ fontSize: 11 }}>{d.daysSinceLastPost}d ago</div>}
+                </td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {s ? (
+                    <>
+                      {isHttp(s.url) ? <a href={s.url} target="_blank" rel="noreferrer">post ↗</a> : null}
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        {compact(s.views)} views · {compact(s.likes)} likes · {compact(s.comments)} comm.
+                      </div>
+                    </>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
+                <td>{l.competitor ? <span className="chip suggest">{l.competitor}</span> : <span className="muted">—</span>}</td>
+                <td>{l.affiliateCode ? <code>{l.affiliateCode}</code> : <span className="muted">—</span>}</td>
+                <td>
+                  <div className="flags">
+                  {d?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">store</span>}
+                  {l.promoTrackRecord && <span className="chip ok" title="Has run a code, discount link or #ad before">promo</span>}
+                  {l.doesLive && <span className="chip ok">LIVE</span>}
+                  {l.country && <span className="chip internal" title="Country from the platform">{l.country}</span>}
+                  </div>
+                </td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {isHttp(l.profileUrl) && (
+                    <a href={l.profileUrl} target="_blank" rel="noreferrer">profile ↗</a>
+                  )}
+                </td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {canRun ? (
+                    <>
+                      <button className="primary" onClick={() => onAccept(l)}>
+                        Accept…
+                      </button>{" "}
+                      <button onClick={() => onReject(l)}>{confirmReject === l.id ? "Click again to reject" : "Reject"}</button>{" "}
+                      <button onClick={() => onReject(l, "goodwill advocate")} title="SP5: never contacted, by rule">
+                        Goodwill advocate
+                      </button>
+                    </>
+                  ) : (
+                    <span className="muted">{l.sourcingReview ?? ""}</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

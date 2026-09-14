@@ -23,6 +23,10 @@ export interface DiscoveryHit {
   isRepost: boolean | null;
   /** Which term found them. */
   term: string;
+  /** Engagement on the surfaced post, when the search row carries it. */
+  views?: number;
+  likes?: number;
+  comments?: number;
 }
 
 export interface DiscoveryDeps {

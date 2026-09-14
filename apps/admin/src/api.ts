@@ -108,6 +108,34 @@ export interface LeadRow {
   contentOriginal: boolean | null;
   scoreReasons: string[];
   sample: SamplePost[];
+  country?: string | null;
+  rejectedReason?: string | null;
+  /** Sourced view only: values derived from the profile read. */
+  details?: SourcedDetails | null;
+}
+
+export interface SourcedDetails {
+  handle: string | null;
+  niche: string | null;
+  bio: string | null;
+  avgViews: number | null;
+  engagementRate: number | null;
+  engagementBasis: "views" | "followers" | null;
+  postsLast30: number | null;
+  postsRead: number;
+  surfaced: { url: string; views: number | null; likes: number | null; comments: number | null } | null;
+  isStore: boolean;
+  audience: string | null;
+  term: string | null;
+  daysSinceLastPost: number | null;
+}
+
+export interface SourcedFacets {
+  niches: string[];
+  countries: string[];
+  audiences: string[];
+  platforms: string[];
+  review: { pending: number; accepted: number; rejected: number };
 }
 
 export interface SamplePost {
@@ -260,6 +288,7 @@ export interface LeadsPage {
     dead: number;
     sourcedPending: number;
   };
+  facets?: SourcedFacets | null;
   page: number;
   pageSize: number;
   totalPages: number;

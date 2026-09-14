@@ -360,8 +360,15 @@ export async function planProfile(
       continue;
     }
     track(h, true);
+    // The surfaced post first, with its engagement from the search row, or from the profile read when it's there too.
+    const surfacedRead: SourceItem | undefined = (v?.items as SourceItem[] | undefined)?.find((i) => i.url === h.postUrl);
+    const surfacedStats = {
+      ...(h.views != null ? { views: h.views } : surfacedRead?.views != null ? { views: surfacedRead.views } : {}),
+      ...(h.likes != null ? { likes: h.likes } : surfacedRead?.likes != null ? { likes: surfacedRead.likes } : {}),
+      ...(h.comments != null ? { comments: h.comments } : surfacedRead?.comments != null ? { comments: surfacedRead.comments } : {}),
+    };
     const sample = [
-      ...(h.postUrl ? [{ url: h.postUrl, text: h.postText ?? "", postedAt: h.postedAt }] : []),
+      ...(h.postUrl ? [{ url: h.postUrl, text: h.postText ?? "", postedAt: h.postedAt, ...surfacedStats }] : []),
       ...(v?.items ?? []).filter((i) => i.url !== h.postUrl).slice(0, 12),
     ];
     const lastPost = v?.lastPostAt ?? h.postedAt ?? null;
@@ -404,7 +411,7 @@ export async function planProfile(
         ? {
             platform: h.platform,
             sourceUrl: v.profileUrl,
-            bundle: { platform: h.platform, profileUrl: v.profileUrl, bio: v.bio, followers: v.followers, items: v.items },
+            bundle: { platform: h.platform, profileUrl: v.profileUrl, bio: v.bio ?? h.bio, followers: v.followers, items: v.items },
             status: "sourced",
           }
         : null,

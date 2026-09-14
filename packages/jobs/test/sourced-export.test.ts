@@ -47,7 +47,28 @@ describe("sourced leads export", () => {
 
   it("file starts with a BOM and the header row", () => {
     const csv = sourcedLeadsCsv([base], now);
-    expect(csv.startsWith("﻿Lead ID,Name,Platform")).toBe(true);
+    expect(csv.startsWith("\uFEFFLead ID,Name,Handle,Platform")).toBe(true);
     expect(csv.trim().split("\r\n")).toHaveLength(2);
+  });
+});
+
+describe("export includes the derived details", () => {
+  it("fills engagement, activity, bio, surfaced stats and store flag when details are given", async () => {
+    const { sourcedDetails } = await import("../src/sourced-details.js");
+    const d = sourcedDetails({ ...base, sourcingSample: [{ url: base.whereFound!, views: 12000, likes: 900, comments: 60 }] }, { bio: "peptide mom", followers: 56900, items: [{ url: "https://x/1", postedAt: "2026-09-10T00:00:00Z", views: 1000, likes: 50, comments: 0 }] }, now);
+    const r = exportRow(base, now, 30, d);
+    expect(r).toHaveLength(EXPORT_COLUMNS.length);
+    expect(col(r, "Handle")).toBe("chaoticallycannella");
+    expect(col(r, "Bio")).toBe("peptide mom");
+    expect(col(r, "Avg views (recent posts)")).toBe("1000");
+    expect(col(r, "Engagement rate")).toBe("5.0% per view");
+    expect(col(r, "Posts in last 30 days")).toBe("1 of last 1 read");
+    expect(col(r, "Surfaced post views")).toBe("12000");
+    expect(col(r, "Store or vendor")).toBe("no");
+  });
+  it("without details, derived columns say NOT FOUND instead of guessing", () => {
+    const r = exportRow(base, now);
+    expect(col(r, "Avg views (recent posts)")).toBe("NOT FOUND");
+    expect(col(r, "Engagement rate")).toBe("NOT FOUND");
   });
 });

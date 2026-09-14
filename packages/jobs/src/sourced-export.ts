@@ -3,6 +3,7 @@
 // values say so ("NOT FOUND", "not checked") instead of guessing.
 
 import { brandFitForNiche, normalizeNiche } from "@biolinx/core";
+import type { SourcedDetails } from "./sourced-details.js";
 
 export interface ExportLead {
   id: number;
@@ -35,8 +36,10 @@ export interface ExportLead {
 export const EXPORT_COLUMNS = [
   "Lead ID",
   "Name",
+  "Handle",
   "Platform",
   "Profile link",
+  "Bio",
   "Niche",
   "Brand tag",
   "Affiliate type",
@@ -44,12 +47,19 @@ export const EXPORT_COLUMNS = [
   "Competitor code",
   "Commission comparison",
   "Audience size",
+  "Avg views (recent posts)",
+  "Engagement rate",
   "Posting activity",
+  "Posts in last 30 days",
   "Last post",
   "Live status",
   "Promotion track record",
   "Content originality",
   "Where found (post link)",
+  "Surfaced post views",
+  "Surfaced post likes",
+  "Surfaced post comments",
+  "Store or vendor",
   "Country",
   "Score",
   "Why this score",
@@ -66,7 +76,7 @@ const day = (d: Date | string | null): string => {
 };
 
 /** One lead as a row of display values, in EXPORT_COLUMNS order. */
-export function exportRow(l: ExportLead, now: Date, activityDays = 30): string[] {
+export function exportRow(l: ExportLead, now: Date, activityDays = 30, d: SourcedDetails | null = null): string[] {
   const niche = normalizeNiche(l.niche);
   const brand = (l.brandFit ?? (niche ? brandFitForNiche(niche) : null)) === "both" ? "Both" : "Biolinx only";
   const competitor = l.affiliationStatus === "Signed elsewhere" || !!l.otherCreatorCompany;
@@ -78,11 +88,16 @@ export function exportRow(l: ExportLead, now: Date, activityDays = 30): string[]
     if (Number.isFinite(days)) activity = days <= activityDays ? `active (${Math.round(days)}d ago)` : `dormant (${Math.round(days)}d ago)`;
   }
   const tri = (v: boolean | null, yes: string, no: string, unknown: string) => (v === true ? yes : v === false ? no : unknown);
+  const n = (v: number | null | undefined) => (v == null ? "NOT FOUND" : String(v));
+  const engagement = d?.engagementRate == null ? "NOT FOUND" : `${(d.engagementRate * 100).toFixed(1)}% per ${d.engagementBasis === "views" ? "view" : "follower"}`;
+  const posts30 = d?.postsLast30 == null ? "NOT FOUND" : `${d.postsLast30} of last ${d.postsRead} read`;
   return [
     String(l.id),
     [l.firstName, l.lastName].filter(Boolean).join(" "),
+    d?.handle ?? "",
     l.primaryPlatform ?? "",
     l.reachSourceUrl ?? "",
+    d?.bio ?? "",
     niche ?? l.niche ?? "",
     brand,
     competitor ? "competitor affiliate" : "individual creator",
@@ -90,12 +105,19 @@ export function exportRow(l: ExportLead, now: Date, activityDays = 30): string[]
     l.affiliateCode ?? "",
     commission,
     l.totalReach != null ? String(l.totalReach) : "NOT FOUND",
+    n(d?.avgViews),
+    engagement,
     activity,
+    posts30,
     day(l.lastPostAt),
     tri(l.doesLive, "live seen", "checked, not live", "not checked"),
     tri(l.promoTrackRecord, "proven", "no history found", "no history found"),
     tri(l.contentOriginal, "original", "reposts only", "not checked"),
     l.whereFound ?? "",
+    d?.surfaced ? n(d.surfaced.views) : "",
+    d?.surfaced ? n(d.surfaced.likes) : "",
+    d?.surfaced ? n(d.surfaced.comments) : "",
+    d?.isStore ? "yes" : "no",
     l.geoCountry ?? "",
     l.sourcingScore != null ? String(l.sourcingScore) : "",
     (l.notes ?? "").split("\n").filter(Boolean).join("; "),
@@ -114,7 +136,7 @@ export function csvCell(value: string): string {
 }
 
 /** Full CSV text with a UTF-8 byte-order mark so Excel reads emoji and accents correctly. */
-export function sourcedLeadsCsv(leads: ExportLead[], now: Date = new Date()): string {
-  const lines = [EXPORT_COLUMNS.map(csvCell).join(","), ...leads.map((l) => exportRow(l, now).map(csvCell).join(","))];
+export function sourcedLeadsCsv(leads: ExportLead[], now: Date = new Date(), detailsFor: (l: ExportLead) => SourcedDetails | null = () => null): string {
+  const lines = [EXPORT_COLUMNS.map(csvCell).join(","), ...leads.map((l) => exportRow(l, now, 30, detailsFor(l)).map(csvCell).join(","))];
   return "﻿" + lines.join("\r\n") + "\r\n";
 }

@@ -2,7 +2,7 @@
 // author is the candidate. Reddit has no follower count → followers null.
 
 import { runActorSync } from "../apify.js";
-import { clip, toIso } from "../fetchers/shared.js";
+import { clip, engagement, toIso } from "../fetchers/shared.js";
 import { DISCOVERY_ACTORS, type Discoverer, type DiscoveryHit } from "./types.js";
 
 interface Row {
@@ -11,6 +11,8 @@ interface Row {
   selftext?: string;
   permalink?: string;
   created_utc?: number;
+  score?: number;
+  num_comments?: number;
 }
 
 const SKIP_AUTHORS = new Set(["[deleted]", "automoderator"]);
@@ -45,6 +47,7 @@ export const discoverReddit: Discoverer = async (term, deps) => {
       country: null,
       isRepost: null,
       term,
+      ...engagement({ likes: r.score, comments: r.num_comments }),
     });
   }
   return [...byHandle.values()];
