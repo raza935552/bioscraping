@@ -69,7 +69,8 @@ built lead sourcing.
   research, ranking queues, and dispatch.
 - `does_live`, `promo_track_record`, `content_original` are true or null from
   code. Only a human sets false.
-- The worker never runs `lead-ingest` on boot. A restart must not spend money.
+- The worker never runs `lead-ingest` or `enrich-personalize` on boot. A
+  restart must not spend money.
 
 ## What is built (as of 2026-09-14, all on `main`, 152 tests, 0 type errors)
 
@@ -77,8 +78,9 @@ built lead sourcing.
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
   niche tiers, roster.
 - **Jobs (worker, MySQL `GET_LOCK` scheduler):** `idev-sync` 30m,
-  `rank-recompute` 6h, `referral-expiry` 24h, `enrich-personalize` 24h (boot
-  run, cap 40, ~$1 per batch), `lead-ingest` 24h (no boot run),
+  `rank-recompute` 6h, `referral-expiry` 24h, `enrich-personalize` 24h (cap
+  40, ~$1 per batch), `lead-ingest` 24h (both marked `spends`: never on boot,
+  first run anchored to the last `sync_runs` row, at least 1h after a restart),
   `customerio-sync` 1h, `metrics-digest` 24h. `outreach-dispatch` and
   `reply-ingest` exist but run only from admin buttons or one-shot runners.
 - **Scraping (`packages/scraping`):** resolve → per-platform Apify fetchers
@@ -135,7 +137,7 @@ pnpm -r test && pnpm -r typecheck
 pnpm --filter @biolinx/db apply-sql sql       # idempotent; run after every pull
 pnpm dev:api      # :3001
 pnpm dev:admin    # :5173
-pnpm dev:worker   # all scheduled jobs; enrich runs on boot (real spend)
+pnpm dev:worker   # all scheduled jobs; spending jobs wait ≥1h after boot
 # one-shots (all spend real credit except dispatch to the approval queue):
 pnpm --filter @biolinx/worker run:enrich 5
 pnpm --filter @biolinx/worker run:ingest <audienceId>

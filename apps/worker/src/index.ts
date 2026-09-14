@@ -22,9 +22,10 @@ startScheduler(conn, [
   { name: "idev-sync", everyMs: 30 * 60 * 1000, runOnBoot: true, fn: () => runIdevSync(conn.db) },
   { name: "rank-recompute", everyMs: 6 * HOUR, runOnBoot: true, fn: async () => void (await runRankRecompute(conn.db)) },
   { name: "referral-expiry", everyMs: 24 * HOUR, runOnBoot: true, fn: async () => void (await runReferralExpiry(conn.db)) },
-  { name: "enrich-personalize", everyMs: 24 * HOUR, runOnBoot: true, fn: async () => void (await runEnrichPersonalize(conn.db)) },
-  // No boot run: a restart must never spend Apify credit. Daily, after enrichment.
-  { name: "lead-ingest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runLeadIngest(conn.db)) },
+  // Jobs that spend Apify/Anthropic credit never run on boot: a restart must not spend money.
+  // Their first run follows their last run in sync_runs, at least an hour after boot.
+  { name: "enrich-personalize", everyMs: 24 * HOUR, spends: true, fn: async () => void (await runEnrichPersonalize(conn.db)) },
+  { name: "lead-ingest", everyMs: 24 * HOUR, spends: true, fn: async () => void (await runLeadIngest(conn.db)) },
   { name: "customerio-sync", everyMs: HOUR, runOnBoot: true, fn: async () => void (await runCustomerioSync(conn.db)) },
   { name: "metrics-digest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runMetricsDigest(conn.db)) },
   // Phase 3+: outreach-dispatch, reply-ingest on a schedule.
