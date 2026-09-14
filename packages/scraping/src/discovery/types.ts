@@ -82,6 +82,30 @@ export function estimateCost(platform: DiscoveryPlatform, items: number): number
   return Math.round(ACTOR_UNIT_PRICE[platform] * items * 10000) / 10000;
 }
 
+// GeoNames ids TikTok puts in locationMeta.countryCode instead of ISO codes (seen live 2026-09-14: 6252001).
+const GEONAMES: Record<string, string> = {
+  "6252001": "US", "6251999": "CA", "2635167": "GB", "2077456": "AU", "2186224": "NZ", "2963597": "IE",
+  "2921044": "DE", "3017382": "FR", "3175395": "IT", "2510769": "ES", "2750405": "NL", "1269750": "IN",
+  "1168579": "PK", "1694008": "PH", "3996063": "MX", "3469034": "BR", "953987": "ZA", "290557": "AE",
+};
+const COUNTRY_NAMES: Record<string, string> = {
+  "united states": "US", "united states of america": "US", usa: "US", "u.s.": "US", "u.s.a.": "US", america: "US",
+  canada: "CA", "united kingdom": "GB", uk: "GB", england: "GB", scotland: "GB", wales: "GB", "great britain": "GB",
+  australia: "AU", "new zealand": "NZ", ireland: "IE", germany: "DE", france: "FR", india: "IN", pakistan: "PK",
+  philippines: "PH", mexico: "MX", brazil: "BR", "south africa": "ZA", "united arab emirates": "AE",
+};
+
+/** A platform's country value as ISO-2, or null when it can't be read with certainty.
+ *  null means unknown, and the country filter keeps unknowns rather than guessing. */
+export function countryCode(raw: string | number | null | undefined): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (/^[A-Za-z]{2}$/.test(s)) return s.toUpperCase();
+  if (/^\d+$/.test(s)) return GEONAMES[s] ?? null;
+  return COUNTRY_NAMES[s.toLowerCase()] ?? null;
+}
+
 export function isHttpUrl(u: string | null | undefined): u is string {
   return typeof u === "string" && /^https?:\/\//i.test(u);
 }

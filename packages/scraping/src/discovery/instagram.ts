@@ -21,7 +21,7 @@ export const discoverInstagram: Discoverer = async (term, deps) => {
   if (!isTag) input.keywordSearch = true;
   const rows = await runActorSync<Row>(
     { token: deps.apify.token, fetchImpl: deps.fetchImpl },
-    deps.apify.actors.instagram ?? DISCOVERY_ACTORS.instagram,
+    deps.apify.actors["discover:instagram"] ?? DISCOVERY_ACTORS.instagram,
     input,
   );
   const byHandle = new Map<string, DiscoveryHit>();

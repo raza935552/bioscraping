@@ -22,7 +22,7 @@ export function subredditOf(term: string): string {
 export const discoverReddit: Discoverer = async (term, deps) => {
   const rows = await runActorSync<Row>(
     { token: deps.apify.token, fetchImpl: deps.fetchImpl },
-    deps.apify.actors.reddit ?? DISCOVERY_ACTORS.reddit,
+    deps.apify.actors["discover:reddit"] ?? DISCOVERY_ACTORS.reddit,
     { subreddits: [subredditOf(term)], maxPostsPerSubreddit: deps.perTerm, sort: "top", timeFilter: "month", includeComments: false },
   );
   const byHandle = new Map<string, DiscoveryHit>();

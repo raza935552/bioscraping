@@ -140,3 +140,43 @@ describe("discovererFor", () => {
     for (const p of ["tiktok", "instagram", "youtube", "reddit", "skool"] as const) expect(typeof discovererFor(p)).toBe("function");
   });
 });
+
+describe("discovery never uses the profile readers' actors", () => {
+  // Regression, 2026-09-14 first live run: the real actor map holds the profile
+  // readers under bare platform keys; searches picked them up and every call 400'd.
+  it.each(["tiktok", "instagram", "youtube", "reddit", "skool"] as const)("%s search calls its search actor", async (platform) => {
+    const { DEFAULT_ACTORS } = await import("../src/apify.js");
+    const { DISCOVERY_ACTORS } = await import("../src/discovery/types.js");
+    let url = "";
+    const fetchImpl = vi.fn(async (u: string | URL) => {
+      url = String(u);
+      return json([]);
+    });
+    await discovererFor(platform)("#peptides", { fetchImpl: fetchImpl as typeof fetch, apify: { token: "t", actors: { ...DEFAULT_ACTORS } }, perTerm: 5 }, {});
+    expect(url).toContain(`/acts/${DISCOVERY_ACTORS[platform].replace("/", "~")}/`);
+  });
+
+  it("a discover:<platform> override is honored", async () => {
+    let url = "";
+    const fetchImpl = vi.fn(async (u: string | URL) => {
+      url = String(u);
+      return json([]);
+    });
+    await discovererFor("tiktok")("#peptides", { fetchImpl: fetchImpl as typeof fetch, apify: { token: "t", actors: { "discover:tiktok": "someone/other-hashtag" } }, perTerm: 5 }, {});
+    expect(url).toContain("/acts/someone~other-hashtag/");
+  });
+});
+
+describe("countryCode", () => {
+  it("reads ISO-2, TikTok GeoNames ids, and country names; unknown stays null", async () => {
+    const { countryCode } = await import("../src/discovery/types.js");
+    expect(countryCode("us")).toBe("US");
+    expect(countryCode("6252001")).toBe("US"); // seen live from TikTok 2026-09-14
+    expect(countryCode(6251999)).toBe("CA");
+    expect(countryCode("United Kingdom")).toBe("GB");
+    expect(countryCode("99999999")).toBeNull();
+    expect(countryCode("Narnia")).toBeNull();
+    expect(countryCode("")).toBeNull();
+    expect(countryCode(null)).toBeNull();
+  });
+});

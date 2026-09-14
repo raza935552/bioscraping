@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
-import { countFresh, effectiveSpendCap, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
+import { activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
   id: 1,
@@ -256,5 +256,69 @@ describe("daily limit across audiences", () => {
     expect(isDuplicateKey({ code: "ER_DUP_ENTRY" })).toBe(true);
     expect(isDuplicateKey({ message: "x", cause: { errno: 1062 } })).toBe(true);
     expect(isDuplicateKey(new Error("timeout"))).toBe(false);
+  });
+});
+
+describe("ingest wiring", () => {
+  it("sourcing_actors overrides land on discover:<platform> keys, profile readers keep theirs", () => {
+    const deps = ingestDepsFromEnv({ APIFY_TOKEN: "t" } as NodeJS.ProcessEnv, { tiktok: "x/hashtag" });
+    expect(deps.apify.actors["discover:tiktok"]).toBe("x/hashtag");
+    expect(deps.apify.actors.tiktok).toBe("clockworks/tiktok-profile-scraper");
+  });
+
+  it("the schedule skips an audience that already ran today (LA time); a never-run audience is due", () => {
+    const now = new Date("2026-09-14T20:00:00Z"); // 13:00 in LA
+    expect(ranToday({ lastRunAt: "2026-09-14T13:43:00Z" }, now)).toBe(true); // 06:43 LA, same day
+    expect(ranToday({ lastRunAt: "2026-09-14T06:00:00Z" }, now)).toBe(false); // 23:00 LA the day before
+    expect(ranToday({ lastRunAt: null }, now)).toBe(false);
+  });
+});
+
+describe("quality in planProfile (first live run lessons)", () => {
+  const wl: ProfileRow = { ...profile, platforms: ["tiktok", "instagram"], matchTerms: ["weight loss", "peptide"], dailyCap: 10, spendCapUsd: "5.00", countries: [] };
+  const english = "sharing my weight loss journey and the peptide routine that finally worked for me this year";
+
+  it("non-English and off-niche search rows are dropped before any paid read", async () => {
+    let reads = 0;
+    const v: VerifyFn = async (h) => { reads++; return { followers: 20000, bio: null, lastPostAt: "2026-09-12T00:00:00Z", isRepostRatio: null, profileUrl: h.profileUrl, items: [{ url: h.profileUrl + "/v", text: english }] }; };
+    const hits = new Map([["t", [
+      hit("es", { postText: "¿Sabías que los péptidos inyectados funcionan como mensajes directos para tus células? Tu cuerpo los produce" }),
+      hit("art", { postText: "LMAO RANDOM VENT I GUESS HAHA this happened years ago", bio: null }),
+      hit("good", { postText: english }),
+    ]]]);
+    const { candidates, summary } = await planProfile(wl, [], hits, emptyKnown(), v, now);
+    expect(candidates.map((c) => c.hit.handle)).toEqual(["good"]);
+    expect(reads).toBe(1);
+    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1 });
+  });
+
+  it("a dead account after the read is not saved, does not use a slot, and is remembered", async () => {
+    const v: VerifyFn = async (h) => ({ followers: 50000, bio: null, lastPostAt: h.handle === "dead" ? "2026-01-20T00:00:00Z" : "2026-09-12T00:00:00Z", isRepostRatio: null, profileUrl: h.profileUrl, items: [{ url: h.profileUrl + "/v", text: english }] });
+    const hits = new Map([["t", [hit("dead", { followers: 90000, postText: english }), hit("alive", { followers: 10000, postText: english })]]]);
+    const { candidates, summary } = await planProfile({ ...wl, dailyCap: 1 }, [], hits, emptyKnown(), v, now);
+    expect(candidates.map((c) => c.hit.handle)).toEqual(["alive"]);
+    expect(summary.gated).toEqual([{ key: "tiktok:dead", reason: "dead" }]);
+  });
+
+  it("profile reads alternate platforms so Instagram (no follower count in search) gets reads", () => {
+    const ig = (h: string) => hit(h, { platform: "instagram", followers: null, profileUrl: `https://www.instagram.com/${h}/` });
+    const order = interleaveByPlatform([hit("t1", { followers: 5 }), hit("t2", { followers: 9 }), hit("t3", { followers: 7 }), ig("i1"), ig("i2")], ["tiktok", "instagram"]);
+    expect(order.map((h) => h.handle)).toEqual(["t2", "i1", "t3", "i2", "t1"]);
+  });
+
+  it("a search whose people keep failing quality rests for 7 days", () => {
+    const t0 = new Date("2026-09-14T14:00:00Z");
+    const stats = recordTermRun({}, "tiktok", "Amino Innovations", 28, 7, t0);
+    expect(stats["tiktok:aminoinnovations"]!.restUntil).toBeNull();
+    const rested = applyTermOutcome(stats, { "tiktok Amino Innovations": { checked: 6, kept: 0 } }, t0);
+    expect(rested["tiktok:aminoinnovations"]!.restUntil).toBe(new Date(t0.getTime() + 7 * 86_400_000).toISOString());
+    expect(applyTermOutcome(stats, { "tiktok Amino Innovations": { checked: 6, kept: 1 } }, t0)["tiktok:aminoinnovations"]!.restUntil).toBeNull();
+    expect(applyTermOutcome(stats, { "tiktok Amino Innovations": { checked: 3, kept: 0 } }, t0)["tiktok:aminoinnovations"]!.restUntil).toBeNull();
+  });
+
+  it("gated memory expires after 90 days", () => {
+    const t0 = new Date("2026-09-14T14:00:00Z");
+    const mem = { "tiktok:a": { reason: "dead" as const, at: "2026-09-01T00:00:00Z" }, "tiktok:b": { reason: "dead" as const, at: "2026-05-01T00:00:00Z" } };
+    expect(activeGated(mem, t0)).toEqual(["tiktok:a"]);
   });
 });

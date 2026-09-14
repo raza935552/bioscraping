@@ -3,7 +3,7 @@
 
 import { runActorSync } from "../apify.js";
 import { clip, toIso, toNumber } from "../fetchers/shared.js";
-import { DISCOVERY_ACTORS, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
+import { DISCOVERY_ACTORS, countryCode, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
 
 interface Row {
   text?: string;
@@ -11,7 +11,7 @@ interface Row {
   createTimeISO?: string;
   error?: string;
   authorMeta?: { name?: string; nickName?: string; signature?: string; fans?: number; profileUrl?: string };
-  locationMeta?: { countryCode?: string };
+  locationMeta?: { countryCode?: string | number };
 }
 
 /** TikTok hashtags are one token: "#Peptide Sciences" → "peptidesciences".
@@ -28,7 +28,7 @@ export function tagOf(term: string): string {
 export const discoverTikTok: Discoverer = async (term, deps) => {
   const rows = await runActorSync<Row>(
     { token: deps.apify.token, fetchImpl: deps.fetchImpl },
-    deps.apify.actors.tiktok ?? DISCOVERY_ACTORS.tiktok,
+    deps.apify.actors["discover:tiktok"] ?? DISCOVERY_ACTORS.tiktok,
     { hashtags: [tagOf(term)], resultsPerPage: deps.perTerm },
   );
   const byHandle = new Map<string, DiscoveryHit>();
@@ -47,7 +47,7 @@ export const discoverTikTok: Discoverer = async (term, deps) => {
       postUrl: isHttpUrl(r.webVideoUrl) ? r.webVideoUrl : null,
       postText: r.text ? clip(r.text, 300) : null,
       postedAt,
-      country: r.locationMeta?.countryCode ?? null,
+      country: countryCode(r.locationMeta?.countryCode),
       isRepost: null,
       term,
     };

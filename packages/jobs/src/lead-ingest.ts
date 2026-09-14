@@ -21,6 +21,9 @@ import {
   scoreHit,
   urlKey,
   urlsInText,
+  qualityGate,
+  deadWithoutRead,
+  type QualityReason,
   type CompetitorRule,
   type Discoverer,
   type DiscoveryHit,
@@ -43,8 +46,14 @@ export interface IngestDeps {
   now: () => Date;
 }
 
+/** `actorOverrides` is the config `sourcing_actors` map ({ tiktok: "..." }) for search
+ *  actors. They're stored under "discover:<platform>" so they can never be confused
+ *  with the profile readers, which share the bare platform keys. */
 export function ingestDepsFromEnv(env = process.env, actorOverrides: Record<string, string> = {}): IngestDeps {
-  const apify = apifyConfigFromEnv(env, actorOverrides);
+  const discoveryOverrides = Object.fromEntries(
+    Object.entries(actorOverrides).map(([k, v]) => [k.startsWith("discover:") ? k : `discover:${k}`, v]),
+  );
+  const apify = apifyConfigFromEnv(env, discoveryOverrides);
   return { fetchImpl: fetch, apify, discovererFor: defaultDiscovererFor, fetcherFor: defaultFetcherFor, now: () => new Date() };
 }
 
@@ -68,6 +77,15 @@ export interface ProfileRow {
   excludeHandles: string[] | null;
   dailyCap: number;
   spendCapUsd: string | number;
+  lastRunAt?: Date | string | null;
+}
+
+/** The daily schedule runs an audience at most once per business day. A manual
+ *  "Run now" (explicit profileId) always runs; the schedule then skips it until tomorrow. */
+export function ranToday(profile: Pick<ProfileRow, "lastRunAt">, now: Date): boolean {
+  if (!profile.lastRunAt) return false;
+  const last = new Date(profile.lastRunAt);
+  return !Number.isNaN(last.getTime()) && last.getTime() >= startOfBusinessDay(now).getTime();
 }
 
 export interface ProfileRunSummary {
@@ -89,6 +107,12 @@ export interface ProfileRunSummary {
   termsResting?: string[];
   /** Per search: results paid for, and how many were people we didn't already have. */
   termYield?: Array<{ search: string; hits: number; fresh: number }>;
+  /** Candidates dropped by the quality gates, by reason. */
+  quality?: Record<QualityReason, number>;
+  /** Handles dropped after a paid profile read (remembered so they aren't read again). */
+  gated?: Array<{ key: string; reason: QualityReason }>;
+  /** Per search: candidates that reached a quality decision, and how many became leads. */
+  termOutcome?: Record<string, { checked: number; kept: number }>;
 }
 
 /** What one search term has been worth, kept per audience in config `sourcing_term_stats:<id>`. */
@@ -250,21 +274,46 @@ export async function planProfile(
   const { kept, rejected } = applyFilters([...merged.values()], audienceRules(profile));
   summary.rejected = rejected;
 
+  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0 };
+  const gated: Array<{ key: string; reason: QualityReason }> = [];
+  const outcome: Record<string, { checked: number; kept: number }> = {};
+  const track = (h: DiscoveryHit, keptIt: boolean) => {
+    const k = `${h.platform} ${h.term}`;
+    outcome[k] ??= { checked: 0, kept: 0 };
+    outcome[k].checked++;
+    if (keptIt) outcome[k].kept++;
+  };
+  const gateInput = (h: DiscoveryHit, v: VerifiedRead | null, competitorFound: boolean) => ({
+    hit: h,
+    verified: v,
+    matchTerms: profile.matchTerms ?? [],
+    language: profile.language,
+    competitorFound,
+    now,
+  });
+
   const fresh = kept.filter((h) => {
     const pre = scoreHit({ hit: h, verified: null, rules: rulesFor(profile, h), competitors, now });
     if (isKnown(h, pre.affiliateCode, known)) {
       summary.alreadyKnown++;
       return false;
     }
+    // Free check on the search row before paying for a profile read.
+    const reason = qualityGate(gateInput(h, null, pre.competitor != null));
+    if (reason) {
+      quality[reason]++;
+      track(h, false);
+      return false;
+    }
     return true;
   });
-  fresh.sort((a, b) => (b.followers ?? -1) - (a.followers ?? -1));
+  const ordered = interleaveByPlatform(fresh, profile.platforms);
 
   const niche = (normalizeNiche(profile.niche) ?? profile.niche) as Niche;
   const brandFit = profile.brandFit || brandFitForNiche(niche);
   const candidates: Candidate[] = [];
 
-  for (const h of fresh) {
+  for (const h of ordered) {
     if (candidates.length >= profile.dailyCap) {
       summary.stoppedBy = "cap";
       break;
@@ -286,6 +335,14 @@ export async function planProfile(
     }
 
     const s = scoreHit({ hit: h, verified: v, rules: rulesFor(profile, h), competitors, now });
+    const reason = v ? qualityGate(gateInput(h, v, s.competitor != null)) : deadWithoutRead(h, now) ? "dead" : null;
+    if (reason) {
+      quality[reason]++;
+      gated.push({ key: handleKey(h.platform, h.handle), reason });
+      track(h, false);
+      continue;
+    }
+    track(h, true);
     const sample = [
       ...(h.postUrl ? [{ url: h.postUrl, text: h.postText ?? "", postedAt: h.postedAt }] : []),
       ...(v?.items ?? []).filter((i) => i.url !== h.postUrl).slice(0, 12),
@@ -344,7 +401,46 @@ export async function planProfile(
     if (nk) known.names.add(nk);
   }
   summary.inserted = candidates.length;
+  summary.quality = quality;
+  summary.gated = gated;
+  summary.termOutcome = outcome;
   return { candidates, summary };
+}
+
+/** Profile-read order: each platform sorted by follower count, then taken in turns,
+ *  so a platform whose search rows carry no follower count (Instagram) still gets reads. */
+export function interleaveByPlatform(hits: DiscoveryHit[], platforms: DiscoveryPlatform[]): DiscoveryHit[] {
+  const order = [...platforms, ...new Set(hits.map((h) => h.platform).filter((p) => !platforms.includes(p)))];
+  const queues = order.map((p) => hits.filter((h) => h.platform === p).sort((a, b) => (b.followers ?? -1) - (a.followers ?? -1)));
+  const out: DiscoveryHit[] = [];
+  for (let i = 0; queues.some((q) => i < q.length); i++) for (const q of queues) if (i < q.length) out.push(q[i]!);
+  return out;
+}
+
+/** Terms whose people keep failing the quality gates rest like terms that find nobody new. */
+export function applyTermOutcome(stats: TermStats, outcome: Record<string, { checked: number; kept: number }>, now: Date): TermStats {
+  const next = { ...stats };
+  for (const [search, o] of Object.entries(outcome)) {
+    const sp = search.indexOf(" ");
+    const key = termStatKey(search.slice(0, sp) as DiscoveryPlatform, search.slice(sp + 1));
+    const s = next[key];
+    if (!s || o.checked < 5 || o.kept > 0) continue;
+    const until = new Date(now.getTime() + 7 * 86_400_000);
+    if (!s.restUntil || new Date(s.restUntil) < until) next[key] = { ...s, restUntil: until.toISOString() };
+  }
+  return next;
+}
+
+/** People rejected after a paid profile read are not read again for this long. */
+export const GATED_MEMORY_DAYS = 90;
+const GATED_CONFIG_KEY = "sourcing_gated_handles";
+type GatedMemory = Record<string, { reason: QualityReason; at: string }>;
+
+export function activeGated(memory: GatedMemory, now: Date): string[] {
+  const cutoff = now.getTime() - GATED_MEMORY_DAYS * 86_400_000;
+  return Object.entries(memory)
+    .filter(([, v]) => new Date(v.at).getTime() >= cutoff)
+    .map(([k]) => k);
 }
 
 /** Profile read through the existing fetchers. Skool has no profile
@@ -594,9 +690,16 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
       deps = ingestDepsFromEnv(process.env, (row?.value as Record<string, string> | undefined) ?? {});
     }
     const all = (await db.select().from(schema.sourcingProfiles)) as unknown as ProfileRow[];
-    const profiles = all.filter((p) => (opts.profileId ? p.id === opts.profileId : p.active));
+    const now0 = deps.now();
+    const profiles = all.filter((p) => (opts.profileId ? p.id === opts.profileId : p.active && !ranToday(p, now0)));
     const competitors = competitorRules(await db.select().from(schema.competitors));
     const known = await loadKnownPeople(db);
+    // People dropped after a paid read in the last 90 days count as known: don't pay to read them again.
+    const gatedRow = await db.query.config.findFirst({ where: eq(schema.config.key, GATED_CONFIG_KEY) });
+    const storedGated = (gatedRow?.value as GatedMemory | undefined) ?? {};
+    const stillActive = new Set(activeGated(storedGated, now0));
+    const gatedMemory: GatedMemory = Object.fromEntries(Object.entries(storedGated).filter(([k]) => stillActive.has(k)));
+    for (const k of Object.keys(gatedMemory)) known.handles.add(k);
     const verify = makeVerify(deps);
     const now = deps.now();
     const limit = await dailyLimitUsd(db);
@@ -626,11 +729,22 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
           termErrors.push(`${platform} ${term}: ${(err as Error).message}`);
         }
       }
+      const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now);
+      stats = applyTermOutcome(stats, ps.termOutcome ?? {}, now);
       await db
         .insert(schema.config)
         .values({ key: termStatsConfigKey(profile.id), value: stats })
         .onDuplicateKeyUpdate({ set: { value: stats } });
-      const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now);
+      if (ps.gated && ps.gated.length > 0) {
+        for (const g of ps.gated) {
+          gatedMemory[g.key] = { reason: g.reason, at: now.toISOString() };
+          known.handles.add(g.key);
+        }
+        await db
+          .insert(schema.config)
+          .values({ key: GATED_CONFIG_KEY, value: gatedMemory })
+          .onDuplicateKeyUpdate({ set: { value: gatedMemory } });
+      }
       ps.termErrors = termErrors;
       ps.termYield = termYield;
       ps.termsResting = searches.resting.map((s) => `${s.platform} ${s.term}`);

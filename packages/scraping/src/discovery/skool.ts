@@ -3,7 +3,7 @@
 
 import { runActorSync } from "../apify.js";
 import { clip } from "../fetchers/shared.js";
-import { DISCOVERY_ACTORS, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
+import { DISCOVERY_ACTORS, countryCode, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
 
 interface Row {
   name?: string;
@@ -20,7 +20,7 @@ interface Row {
 export const discoverSkool: Discoverer = async (term, deps) => {
   const rows = await runActorSync<Row>(
     { token: deps.apify.token, fetchImpl: deps.fetchImpl },
-    deps.apify.actors.skool ?? DISCOVERY_ACTORS.skool,
+    deps.apify.actors["discover:skool"] ?? DISCOVERY_ACTORS.skool,
     { searchTerms: [term.trim()], maxCommunities: deps.perTerm, includeOwnerDetails: true },
   );
   const byHandle = new Map<string, DiscoveryHit>();
@@ -40,7 +40,7 @@ export const discoverSkool: Discoverer = async (term, deps) => {
       postUrl: isHttpUrl(r.communityUrl) ? r.communityUrl : null,
       postText: title ? clip(title, 300) : null,
       postedAt: null,
-      country: country && country.length === 2 ? country.toUpperCase() : null,
+      country: countryCode(country),
       isRepost: null,
       term,
     };

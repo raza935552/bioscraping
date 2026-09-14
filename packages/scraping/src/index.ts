@@ -8,3 +8,4 @@ export * from "./discovery/index.js";
 export * from "./filter.js";
 export * from "./score.js";
 export * from "./dedupe.js";
+export * from "./quality.js";

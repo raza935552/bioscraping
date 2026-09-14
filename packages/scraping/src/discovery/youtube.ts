@@ -4,7 +4,7 @@
 
 import { runActorSync } from "../apify.js";
 import { clip, toIso, toNumber } from "../fetchers/shared.js";
-import { DISCOVERY_ACTORS, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
+import { DISCOVERY_ACTORS, countryCode, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
 
 interface Row {
   channel?: { handle?: string; id?: string; title?: string; url?: string; description?: string | null };
@@ -26,7 +26,7 @@ export const discoverYouTube: Discoverer = async (term, deps, opts) => {
   if (opts.language) input.languageHint = opts.language;
   const rows = await runActorSync<Row>(
     { token: deps.apify.token, fetchImpl: deps.fetchImpl },
-    deps.apify.actors.youtube ?? DISCOVERY_ACTORS.youtube,
+    deps.apify.actors["discover:youtube"] ?? DISCOVERY_ACTORS.youtube,
     input,
   );
   const hits: DiscoveryHit[] = [];
@@ -45,7 +45,7 @@ export const discoverYouTube: Discoverer = async (term, deps, opts) => {
       postUrl: isHttpUrl(videoUrl) ? videoUrl : null,
       postText: r.sourceVideo?.title ? clip(r.sourceVideo.title, 300) : null,
       postedAt: toIso(r.sourceVideo?.publishedAt),
-      country: r.profile?.country ?? null,
+      country: countryCode(r.profile?.country),
       isRepost: null,
       term,
     });

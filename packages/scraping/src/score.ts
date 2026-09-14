@@ -4,6 +4,7 @@
 
 import type { DiscoveryHit } from "./discovery/types.js";
 import { hasTerm } from "./filter.js";
+import { compact, compactTokens, looksLikeStore } from "./quality.js";
 
 export interface CompetitorRule {
   id: number;
@@ -62,6 +63,17 @@ function safeRegex(source: string): RegExp | null {
   }
 }
 
+/** Index of a whole-word mention of `needle` (a name or domain) in lowercase text, or -1.
+ *  A plural or possessive is allowed ("Ion Peptides", "Amino Club's"); a word that merely
+ *  contains it is not ("informatION PEPTIDEs"). */
+export function mentionIndex(lower: string, needle: string): number {
+  const n = needle.trim().toLowerCase();
+  if (!n) return -1;
+  const esc = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?:'?s)?(?![\\p{L}\\p{N}])`, "u").exec(lower);
+  return m ? m.index : -1;
+}
+
 /** A competitor code (by prefix or pattern) wins; a bare domain match is a
  *  weaker signal that still names the competitor. */
 export function findAffiliateCode(text: string, competitors: CompetitorRule[]): { code: string | null; competitor: CompetitorRule } | null {
@@ -74,8 +86,27 @@ export function findAffiliateCode(text: string, competitors: CompetitorRule[]): 
       if ((prefix && t.startsWith(prefix) && t.length > prefix.length) || (re && re.test(t))) return { code: t, competitor: c };
     }
   }
+  // Name or domain mention. Competitor codes are usually personal ("code JACOB at Amino
+  // Club"), so a code within 80 characters of the mention is taken as theirs.
+  const codeNear = (at: number): string | null => {
+    for (const m of text.matchAll(CODE_TOKEN)) {
+      const t = m[1]!.toUpperCase();
+      if (!NOT_CODES.has(t) && Math.abs((m.index ?? 0) - at) <= 80) return t;
+    }
+    return null;
+  };
   for (const c of competitors) {
-    if (c.domains.some((d) => d.trim() && lower.includes(d.trim().toLowerCase()))) return { code: null, competitor: c };
+    for (const raw of c.domains) {
+      const at = mentionIndex(lower, raw);
+      if (at >= 0) return { code: codeNear(at), competitor: c };
+    }
+  }
+  // Hashtag spelling: "#offlinepeptides" or "#offlinepeptidesreview" for "Offline Peptides".
+  // A word or hashtag must start with the squashed name; never matched across words.
+  const words = compactTokens(text);
+  for (const c of competitors) {
+    const names = [c.name, ...c.domains].map((d) => compact(d.trim().replace(/\.[a-z]{2,}$/i, ""))).filter((t) => t.length >= 8);
+    if (names.some((n) => words.some((w) => w.startsWith(n)))) return { code: null, competitor: c };
   }
   return null;
 }
@@ -142,6 +173,11 @@ export function scoreHit(input: ScoreInput): ScoreResult {
   if (glp1Only) {
     score -= 30;
     reasons.push(`GLP-1-only content: "${glp1}" (−30)`);
+  }
+
+  if (looksLikeStore(hit.handle, verified?.bio ?? hit.bio)) {
+    score -= 25;
+    reasons.push("looks like a store or vendor, not a creator (−25)");
   }
 
   return {

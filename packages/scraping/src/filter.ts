@@ -2,6 +2,7 @@
 // counted so the run summary explains where candidates went.
 
 import type { DiscoveryHit, DiscoveryPlatform } from "./discovery/types.js";
+import { findTerm } from "./quality.js";
 
 export interface AudienceRules {
   followerMin: Partial<Record<DiscoveryPlatform, number>>;
@@ -18,11 +19,10 @@ export type RejectReason = "excluded_handle" | "excluded_term" | "followers_low"
  *  compliance linter refuses in outbound copy. Editable per profile. */
 export const DEFAULT_EXCLUDE_TERMS = ["semaglutide", "tirzepatide", "retatrutide", "ozempic", "wegovy", "mounjaro", "zepbound"];
 
-/** First term (case-insensitive substring) found in the text, or null. */
+/** First term found in the text, or null. Case-insensitive, and hashtag-aware:
+ *  "weight loss" matches #weightloss (see findTerm). */
 export function hasTerm(text: string | null | undefined, terms: string[]): string | null {
-  if (!text) return null;
-  const lower = text.toLowerCase();
-  return terms.find((t) => t.trim() && lower.includes(t.trim().toLowerCase())) ?? null;
+  return findTerm(text, terms);
 }
 
 export function applyFilters(hits: DiscoveryHit[], rules: AudienceRules): { kept: DiscoveryHit[]; rejected: Record<RejectReason, number> } {
