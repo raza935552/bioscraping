@@ -33,6 +33,10 @@ export interface SourceBundle {
   items: SourceItem[];
   /** Link hubs only: social links found on the page. */
   discovered?: SourceCandidate[];
+  /** Country the platform states for the account (YouTube channel location), raw. */
+  country?: string | null;
+  /** Country each post was created in, when the platform stamps it (TikTok locationCreated), raw. */
+  postCountries?: Array<string | null>;
 }
 
 export interface FetchDeps {

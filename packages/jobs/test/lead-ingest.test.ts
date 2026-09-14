@@ -290,7 +290,7 @@ describe("quality in planProfile (first live run lessons)", () => {
     const { candidates, summary } = await planProfile(wl, [], hits, emptyKnown(), v, now);
     expect(candidates.map((c) => c.hit.handle)).toEqual(["good"]);
     expect(reads).toBe(1);
-    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0 });
+    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0 });
   });
 
   it("a dead account after the read is not saved, does not use a slot, and is remembered", async () => {
@@ -380,5 +380,27 @@ describe("fixes from the 50-lead test run (2026-09-14)", () => {
     const { run } = planSearches(p, [{ name: "Amino Club" }, { name: "Swiss Chems" }], 30);
     expect(run.some((s) => s.term === "Amino Club")).toBe(true);
     expect(planSearches(p, [], 30).run.filter((s) => s.term.startsWith("#")).length).toBe(9); // no competitors: hashtags keep the whole budget
+  });
+});
+
+describe("US only (2026-09-14)", () => {
+  const us: ProfileRow = { ...profile, platforms: ["tiktok", "youtube"], countries: ["US"], matchTerms: ["peptide"], followerMin: {}, followerMax: {}, dailyCap: 10 };
+  const text = "my peptide routine and results this month, what actually worked";
+  it("drops a bio that says London before paying for the read, and a UK YouTube channel after it", async () => {
+    let reads = 0;
+    const v: VerifyFn = async (h) => {
+      reads++;
+      return { followers: 146000, bio: null, country: h.handle === "dr_abs" ? "GB" : null, lastPostAt: "2026-09-12T00:00:00Z", isRepostRatio: null, profileUrl: h.profileUrl, items: [{ url: h.profileUrl + "/v", text }] };
+    };
+    const hits = new Map([["t", [
+      hit("londonpt", { bio: "London based PT | online coaching", country: null, postText: text }),
+      hit("dr_abs", { platform: "youtube", bio: null, country: null, postText: text, profileUrl: "https://www.youtube.com/@dr_abs" }),
+      hit("texasmom", { bio: "📍 Dallas | mom of 3", country: null, postText: text }),
+      hit("unknown", { bio: "peptide journey", country: null, postText: text }),
+    ]]]);
+    const { candidates, summary } = await planProfile(us, [], hits, emptyKnown(), v, now);
+    expect(candidates.map((c) => [c.hit.handle, c.lead.geoCountry])).toEqual([["texasmom", "US"], ["unknown", null]]);
+    expect(summary.quality?.country).toBe(2);
+    expect(reads).toBe(3); // londonpt never read
   });
 });

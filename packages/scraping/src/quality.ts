@@ -8,7 +8,8 @@ import type { DiscoveryHit } from "./discovery/types.js";
 
 /** "followers": outside the audience's follower range once the profile read shows the real count
  *  (Instagram search rows carry no follower count, so the range can only be checked after the read). */
-export type QualityReason = "non_english" | "dead" | "off_niche" | "followers";
+/** "country": evidence places the creator outside the audience's countries (see country.ts). */
+export type QualityReason = "non_english" | "dead" | "off_niche" | "followers" | "country";
 
 /** Lowercase letters and digits only: "#WeightLoss" and "weight loss" both → "weightloss". */
 export function compact(s: string): string {

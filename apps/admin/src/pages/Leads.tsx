@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type SamplePost, type SourcedFacets } from "../api.js";
-import { PageInfo, Pagination } from "../components.js";
+import { Modal, PageInfo, Pagination } from "../components.js";
 import { BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
 
 const VIEWS: Array<[string, string]> = [
@@ -219,14 +219,16 @@ export function Leads({ me }: { me: Me }) {
       </div>
       {rankMsg && <div className="notice">Done: {rankMsg}</div>}
       {reviewing && (
-        <ReviewForm
-          lead={reviewing}
-          onClose={() => setReviewing(null)}
-          onDone={async () => {
-            setReviewing(null);
-            await load();
-          }}
-        />
+        <Modal title={`Accept ${reviewing.name}`} onClose={() => setReviewing(null)} wide={false}>
+          <ReviewForm
+            lead={reviewing}
+            onClose={() => setReviewing(null)}
+            onDone={async () => {
+              setReviewing(null);
+              await load();
+            }}
+          />
+        </Modal>
       )}
 
       {a && (
@@ -299,7 +301,10 @@ export function Leads({ me }: { me: Me }) {
           canRun={canRun && review === "pending"}
           open={open}
           onOpen={(id) => setOpen(open === id ? null : id)}
-          onAccept={setReviewing}
+          onAccept={(l) => {
+            setOpen(null);
+            setReviewing(l);
+          }}
           onReject={(l, reason) => void reject(l, reason)}
           confirmReject={confirmReject}
         />
@@ -435,11 +440,65 @@ export function Leads({ me }: { me: Me }) {
         </label>
       </div>
 
-      {detail && (
-        <>
-          <h2>
-            Lead #{detail.lead.id} — {String(detail.lead.firstName ?? "")} {String(detail.lead.lastName ?? "")}
-          </h2>
+      {detail && (() => {
+        const row = data?.rows.find((r) => r.id === detail.lead.id) ?? null;
+        const d = row?.details ?? null;
+        const pendingSourced = row?.sourcingReview === "pending" && canRun;
+        const cell = (k: string, v: React.ReactNode, sub?: React.ReactNode) => (
+          <div className="cell"><div className="k">{k}</div><div className="v">{v}</div>{sub && <div className="s">{sub}</div>}</div>
+        );
+        return (
+        <Modal
+          onClose={() => setOpen(null)}
+          title={<>{row?.name ?? `${String(detail.lead.firstName ?? "")} ${String(detail.lead.lastName ?? "")}`}{d?.handle && <span className="muted" style={{ fontWeight: 400 }}> @{d.handle}</span>}</>}
+          subtitle={
+            <>
+              Lead #{detail.lead.id} · {row?.platform ?? "—"} · {d?.niche ?? row?.niche ?? "no niche"}
+              {row?.brandFit ? ` · ${BRAND_LABEL[row.brandFit] ?? row.brandFit}` : ""}
+              {d?.term ? ` · found via ${d.term}` : ""}
+            </>
+          }
+        >
+          {row && (
+            <>
+              <div className="modal-actions">
+                {isHttp(row.profileUrl) && <a className="btn-link" href={row.profileUrl} target="_blank" rel="noreferrer">Open profile ↗</a>}
+                {d?.surfaced && isHttp(d.surfaced.url) && <a className="btn-link" href={d.surfaced.url} target="_blank" rel="noreferrer">Post that found them ↗</a>}
+                {row.sourcingScore != null && <span className="chip internal">score {row.sourcingScore}</span>}
+                {row.competitor && <span className="chip suggest">promotes {row.competitor}{row.affiliateCode ? ` · code ${row.affiliateCode}` : ""}</span>}
+                {d?.isStore && <span className="chip failed">store / business</span>}
+                {row.country ? <span className={`chip ${row.country === "US" ? "ok" : "failed"}`}>{row.country === "US" ? "US ✓" : row.country}</span> : <span className="chip unresolved" title="No platform or bio evidence of where they are">location unknown</span>}
+                {row.rejectedReason && <span className="chip failed">rejected: {row.rejectedReason}</span>}
+                <div className="grow" />
+                {pendingSourced && (
+                  <>
+                    <button className="primary" onClick={() => { setOpen(null); setReviewing(row); }}>Accept…</button>
+                    <button
+                      onClick={() => {
+                        const confirming = confirmReject === row.id;
+                        void reject(row).then(() => {
+                          if (confirming) setOpen(null);
+                        });
+                      }}
+                    >
+                      {confirmReject === row.id ? "Click again to reject" : "Reject"}
+                    </button>
+                  </>
+                )}
+              </div>
+              {d?.bio && <p style={{ whiteSpace: "pre-wrap", margin: "8px 0 14px" }}>{d.bio}</p>}
+              <div className="stat-grid">
+                {cell("Reach", row.reach != null ? row.reach.toLocaleString() : "unverified")}
+                {cell("Avg views", d?.avgViews != null ? compact(d.avgViews) : "—", "recent posts")}
+                {cell("Engagement", d?.engagementRate != null ? `${(d.engagementRate * 100).toFixed(1)}%` : "—", d?.engagementBasis === "followers" ? "per follower" : d?.engagementBasis === "views" ? "per view" : "not reported")}
+                {cell("Posts in 30 days", d?.postsLast30 != null ? `${d.postsLast30} / ${d.postsRead}` : "—")}
+                {cell("Last post", row.lastPostAt?.slice(0, 10) ?? "—", d?.daysSinceLastPost != null ? `${d.daysSinceLastPost} days ago` : undefined)}
+                {cell("Surfaced post", d?.surfaced?.views != null ? `${compact(d.surfaced.views)} views` : "—", d?.surfaced ? `${compact(d.surfaced.likes)} likes · ${compact(d.surfaced.comments)} comments` : undefined)}
+                {cell("Competitor", row.competitor ?? "—", row.affiliateCode ? `code ${row.affiliateCode}` : row.currentOffer ?? undefined)}
+                {cell("Status", row.status ?? "—", row.subProfile ? subProfileLabel(row.subProfile).text : undefined)}
+              </div>
+            </>
+          )}
           <div className="cards">
             <div className="card" style={{ gridColumn: "1 / -1" }}>
               <div className="k">Personalization notes</div>
@@ -494,7 +553,7 @@ export function Leads({ me }: { me: Me }) {
               </div>
             )}
           </div>
-          <h2>Message history ({detail.messages.length})</h2>
+          <h3>Message history ({detail.messages.length})</h3>
           <div className="tablewrap">
             <table>
               <thead>
@@ -517,8 +576,9 @@ export function Leads({ me }: { me: Me }) {
               </tbody>
             </table>
           </div>
-        </>
-      )}
+        </Modal>
+        );
+      })()}
     </>
   );
 }
@@ -697,7 +757,11 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
                   {d?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">store</span>}
                   {l.promoTrackRecord && <span className="chip ok" title="Has run a code, discount link or #ad before">promo</span>}
                   {l.doesLive && <span className="chip ok">LIVE</span>}
-                  {l.country && <span className="chip internal" title="Country from the platform">{l.country}</span>}
+                  {l.country ? (
+                    <span className={`chip ${l.country === "US" ? "ok" : "failed"}`} title="Where they are, from the platform or their bio">{l.country === "US" ? "US ✓" : l.country}</span>
+                  ) : (
+                    <span className="chip unresolved" title="No platform or bio evidence of where they are">location ?</span>
+                  )}
                   </div>
                 </td>
                 <td onClick={(e) => e.stopPropagation()}>

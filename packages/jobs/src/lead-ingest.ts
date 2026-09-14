@@ -23,6 +23,8 @@ import {
   urlsInText,
   qualityGate,
   deadWithoutRead,
+  countryFromText,
+  resolveCountry,
   type QualityReason,
   type CompetitorRule,
   type Discoverer,
@@ -186,7 +188,7 @@ export interface IngestSummary {
   pendingReviewBefore?: number;
 }
 
-export type VerifiedRead = VerifiedProfile & { items: SourceItem[]; profileUrl: string };
+export type VerifiedRead = VerifiedProfile & { items: SourceItem[]; profileUrl: string; country?: string | null };
 export type VerifyFn = (hit: DiscoveryHit) => Promise<VerifiedRead | null>;
 
 export interface Candidate {
@@ -291,7 +293,9 @@ export async function planProfile(
   const { kept, rejected } = applyFilters([...merged.values()], audienceRules(profile));
   summary.rejected = rejected;
 
-  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0 };
+  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0 };
+  const allowedCountries = (profile.countries ?? []).map((c) => c.toUpperCase());
+  const outsideCountries = (c: string | null) => c != null && allowedCountries.length > 0 && !allowedCountries.includes(c);
   const gated: Array<{ key: string; reason: QualityReason }> = [];
   const outcome: Record<string, { checked: number; kept: number }> = {};
   const track = (h: DiscoveryHit, keptIt: boolean) => {
@@ -315,8 +319,8 @@ export async function planProfile(
       summary.alreadyKnown++;
       return false;
     }
-    // Free check on the search row before paying for a profile read.
-    const reason = qualityGate(gateInput(h, null, pre.competitor != null));
+    // Free checks on the search row before paying for a profile read.
+    const reason = outsideCountries(h.country ?? countryFromText(h.bio)) ? "country" : qualityGate(gateInput(h, null, pre.competitor != null));
     if (reason) {
       quality[reason]++;
       track(h, false);
@@ -355,9 +359,12 @@ export async function planProfile(
     const fMin = profile.followerMin?.[h.platform];
     const fMax = profile.followerMax?.[h.platform];
     const outOfRange = v?.followers != null && ((fMin != null && v.followers < fMin) || (fMax != null && v.followers > fMax));
+    const country = h.country ?? v?.country ?? countryFromText(h.bio);
     const reason: QualityReason | null = outOfRange
       ? "followers"
-      : v
+      : outsideCountries(country)
+        ? "country"
+        : v
         ? qualityGate(gateInput(h, v, s.competitor != null))
         : deadWithoutRead(h, now)
           ? "dead"
@@ -392,7 +399,7 @@ export async function planProfile(
       reachSourceUrl: v ? v.profileUrl : null,
       niche,
       brandFit,
-      geoCountry: h.country,
+      geoCountry: country,
       status: "Not contacted",
       motion: "A",
       source: "sourcing",
@@ -420,7 +427,7 @@ export async function planProfile(
         ? {
             platform: h.platform,
             sourceUrl: v.profileUrl,
-            bundle: { platform: h.platform, profileUrl: v.profileUrl, bio: v.bio ?? h.bio, followers: v.followers, items: v.items },
+            bundle: { platform: h.platform, profileUrl: v.profileUrl, bio: v.bio ?? h.bio, followers: v.followers, country, items: v.items },
             status: "sourced",
           }
         : null,
@@ -497,6 +504,7 @@ export function makeVerify(deps: IngestDeps): VerifyFn {
     return {
       followers: bundle.followers,
       bio: bundle.bio,
+      country: resolveCountry({ platform: bundle.country, posts: bundle.postCountries, bio: bundle.bio }).country,
       lastPostAt: dated.length > 0 ? dated[dated.length - 1]! : null,
       isRepostRatio: flagged.length > 0 ? flagged.filter((i) => i.isRepost).length / flagged.length : null,
       items: bundle.items,

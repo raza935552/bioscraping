@@ -16,6 +16,7 @@ interface TikTokRow {
   playCount?: number;
   commentCount?: number;
   isRepost?: boolean;
+  locationCreated?: string;
   authorMeta?: { name?: string; nickName?: string; signature?: string; fans?: number; profileUrl?: string };
 }
 
@@ -40,5 +41,6 @@ export const fetchTikTok: Fetcher = async (c, deps) => {
     bio: meta?.signature ? clip(meta.signature, 300) : null,
     followers: toNumber(meta?.fans),
     items: takeItems(items, deps.maxItems),
+    postCountries: videos.map((r) => r.locationCreated ?? null),
   };
 };

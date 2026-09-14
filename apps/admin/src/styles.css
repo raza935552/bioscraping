@@ -299,3 +299,17 @@ table.sourced th { white-space: nowrap; }
 table.sourced td.creator { min-width: 240px; max-width: 340px; }
 table.sourced .bio { font-size: 12px; color: var(--ink); opacity: 0.8; margin: 2px 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px; }
+
+/* Dialog */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(15, 18, 25, 0.45); display: flex; align-items: flex-start; justify-content: center; padding: 4vh 16px; z-index: 50; overflow-y: auto; }
+.modal { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-lift); width: 100%; max-width: 640px; display: flex; flex-direction: column; max-height: 92vh; }
+.modal.wide { max-width: 1040px; }
+.modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 18px 22px 14px; border-bottom: 1px solid var(--line); }
+.modal-body { padding: 18px 22px 22px; overflow-y: auto; }
+.modal-body h3 { margin: 18px 0 8px; font-size: 14px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.stat-grid .cell { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; }
+.stat-grid .cell .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.stat-grid .cell .v { font-size: 16px; font-weight: 600; margin-top: 2px; }
+.stat-grid .cell .s { font-size: 11px; color: var(--muted); }
+.modal-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 6px; }

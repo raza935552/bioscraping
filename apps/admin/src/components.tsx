@@ -3,6 +3,8 @@
 // classification (DB values stay internal/external/unresolved; people see
 // these words instead).
 
+import { useEffect, type ReactNode } from "react";
+
 export type Classification = "internal" | "external" | "unresolved";
 
 export const CLASS_LABEL: Record<Classification, string> = {
@@ -67,6 +69,34 @@ export function Pagination({
       <button disabled={page >= totalPages} onClick={() => onPage(totalPages)}>
         Last »
       </button>
+    </div>
+  );
+}
+
+/** A dialog over the page. Closes on Esc, the close button, or a click on the backdrop. */
+export function Modal({ title, subtitle, onClose, children, wide = true }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={`modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true">
+        <div className="modal-head">
+          <div>
+            <h2 style={{ margin: 0 }}>{title}</h2>
+            {subtitle && <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>{subtitle}</div>}
+          </div>
+          <button onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
     </div>
   );
 }

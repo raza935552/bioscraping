@@ -13,6 +13,7 @@ interface YouTubeRow {
   channelDescription?: string | null;
   numberOfSubscribers?: number | null;
   channelUrl?: string;
+  channelLocation?: string | null;
   error?: string;
   viewCount?: number;
   likes?: number;
@@ -40,5 +41,6 @@ export const fetchYouTube: Fetcher = async (c, deps) => {
     bio: first?.channelDescription ? clip(first.channelDescription, 300) : null,
     followers: toNumber(first?.numberOfSubscribers),
     items: takeItems(items, deps.maxItems),
+    country: first?.channelLocation ?? null,
   };
 };
