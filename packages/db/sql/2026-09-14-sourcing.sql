@@ -1,0 +1,57 @@
+ALTER TABLE leads
+  ADD COLUMN brand_fit VARCHAR(8) NULL,
+  ADD COLUMN sourcing_review VARCHAR(12) NULL,
+  ADD COLUMN sourcing_profile_id INT NULL,
+  ADD COLUMN sourcing_reason VARCHAR(255) NULL,
+  ADD COLUMN sourcing_sample JSON NULL,
+  ADD COLUMN sourcing_score INT NULL,
+  ADD COLUMN sourcing_rejected_reason VARCHAR(120) NULL,
+  ADD COLUMN affiliate_code VARCHAR(64) NULL,
+  ADD COLUMN last_post_at DATETIME NULL,
+  ADD COLUMN does_live TINYINT(1) NULL,
+  ADD COLUMN promo_track_record TINYINT(1) NULL,
+  ADD COLUMN content_original TINYINT(1) NULL,
+  ADD COLUMN customerio_synced_at DATETIME NULL,
+  ADD INDEX leads_sourcing_review (sourcing_review),
+  ADD INDEX leads_affiliate_code (affiliate_code);
+
+CREATE TABLE IF NOT EXISTS sourcing_profiles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  niche VARCHAR(40) NOT NULL,
+  brand_fit VARCHAR(8) NOT NULL,
+  platforms JSON NOT NULL,
+  terms JSON NOT NULL,
+  seed_accounts JSON NULL,
+  follower_min JSON NULL,
+  follower_max JSON NULL,
+  activity_days INT NOT NULL DEFAULT 30,
+  countries JSON NULL,
+  language VARCHAR(8) NOT NULL DEFAULT 'en',
+  match_terms JSON NULL,
+  exclude_terms JSON NULL,
+  exclude_handles JSON NULL,
+  daily_cap INT NOT NULL DEFAULT 50,
+  spend_cap_usd DECIMAL(6,2) NOT NULL DEFAULT 2.00,
+  last_run_at DATETIME NULL,
+  last_run_summary JSON NULL,
+  created_by_user_id INT NULL,
+  updated_by_user_id INT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS competitors (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  domains JSON NULL,
+  code_pattern VARCHAR(120) NULL,
+  code_prefix VARCHAR(24) NULL,
+  commission_pct INT NULL,
+  recurring TINYINT(1) NULL,
+  notes TEXT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);

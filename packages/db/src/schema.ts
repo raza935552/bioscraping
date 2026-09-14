@@ -91,6 +91,20 @@ export const leads = mysqlTable("leads", {
   enrichedAt: datetime("enriched_at"),
   enrichmentSourceUrl: varchar("enrichment_source_url", { length: 500 }),
   enrichmentAttempts: int("enrichment_attempts").default(0).notNull(),
+  // Sourcing (spec 2026-09-14 §3.3) — null on leads that were not sourced.
+  brandFit: varchar("brand_fit", { length: 8 }), // biolinx | aro | both
+  sourcingReview: varchar("sourcing_review", { length: 12 }), // pending | accepted | rejected
+  sourcingProfileId: int("sourcing_profile_id"),
+  sourcingReason: varchar("sourcing_reason", { length: 255 }),
+  sourcingSample: json("sourcing_sample"), // [{url,text,postedAt,likes?,views?,comments?}] reviewer + drafter
+  sourcingScore: int("sourcing_score"),
+  sourcingRejectedReason: varchar("sourcing_rejected_reason", { length: 120 }),
+  affiliateCode: varchar("affiliate_code", { length: 64 }), // strongest dedupe key
+  lastPostAt: datetime("last_post_at"),
+  doesLive: boolean("does_live"), // null = not observed; never inferred false
+  promoTrackRecord: boolean("promo_track_record"),
+  contentOriginal: boolean("content_original"),
+  customerioSyncedAt: datetime("customerio_synced_at"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -133,6 +147,50 @@ export const leadEnrichments = mysqlTable("lead_enrichments", {
   error: text("error"),
   createdAt: createdAt(),
 }, (t) => [index("enrich_lead").on(t.leadId), index("enrich_created").on(t.createdAt)]);
+
+/** An audience the marketing team defines; the lead-ingest job turns it
+ *  into Apify searches. Every save is audit-logged. */
+export const sourcingProfiles = mysqlTable("sourcing_profiles", {
+  id: id(),
+  name: varchar("name", { length: 120 }).notNull(),
+  active: boolean("active").default(true).notNull(),
+  niche: varchar("niche", { length: 40 }).notNull(),
+  brandFit: varchar("brand_fit", { length: 8 }).notNull(),
+  platforms: json("platforms").notNull(), // ordered: ["tiktok","youtube",...]
+  terms: json("terms").notNull(), // { tiktok: string[], ... }
+  seedAccounts: json("seed_accounts"), // phase 2, stored now
+  followerMin: json("follower_min"), // { tiktok: 5000, ... } null = none
+  followerMax: json("follower_max"),
+  activityDays: int("activity_days").default(30).notNull(),
+  countries: json("countries"), // ["US","CA","GB","AU"]
+  language: varchar("language", { length: 8 }).default("en").notNull(),
+  matchTerms: json("match_terms"),
+  excludeTerms: json("exclude_terms"),
+  excludeHandles: json("exclude_handles"),
+  dailyCap: int("daily_cap").default(50).notNull(),
+  spendCapUsd: decimal("spend_cap_usd", { precision: 6, scale: 2 }).default("2.00").notNull(),
+  lastRunAt: datetime("last_run_at"),
+  lastRunSummary: json("last_run_summary"),
+  createdByUserId: int("created_by_user_id"),
+  updatedByUserId: int("updated_by_user_id"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** Matt's competitor list: their affiliates are the tier-one target. */
+export const competitors = mysqlTable("competitors", {
+  id: id(),
+  name: varchar("name", { length: 120 }).notNull(),
+  domains: json("domains"), // ["peptidesciences.com"]
+  codePattern: varchar("code_pattern", { length: 120 }), // regex source, or null
+  codePrefix: varchar("code_prefix", { length: 24 }), // "PS" → matches PS20, PSJANE
+  commissionPct: int("commission_pct"),
+  recurring: boolean("recurring"),
+  notes: text("notes"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
 
 export const messages = mysqlTable("messages", {
   id: id(),
