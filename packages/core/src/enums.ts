@@ -4,23 +4,40 @@
 // list marked PARTIAL — extend, never reorder, the arrays below.
 
 /** Niche priority order IS the ranking tiebreaker — index = priority.
- *  Live Airtable option labels (recovered from the metadata export
- *  2026-09-01) differ from the ranking-spec shorthand; normalizeNiche maps
- *  both vocabularies onto the canonical priority list. */
+ *  Jakob's 5K-scrape canvas (2026-09-14) ranks conversion probability by
+ *  tier; the old Airtable labels stay valid through normalizeNiche. */
 export const NICHE_PRIORITY = [
-  "Longevity",
-  "Biohacking",
-  "Gym",
-  "Women's Wellness",
-  "Nootropics",
-  "MMA",
+  "Weight-loss seeker",
+  "Biohacker",
+  "Gym / PED-curious",
+  "Anti-aging",
+  "Sexual wellness",
 ] as const;
 export type Niche = (typeof NICHE_PRIORITY)[number];
 
+export const NICHE_TIER: Record<Niche, 1 | 2 | 3 | 4> = {
+  "Weight-loss seeker": 1,
+  Biohacker: 1,
+  "Gym / PED-curious": 2,
+  "Anti-aging": 3,
+  "Sexual wellness": 4,
+};
+
+export type BrandFit = "biolinx" | "aro" | "both";
+export function brandFitForNiche(niche: Niche): BrandFit {
+  return niche === "Weight-loss seeker" ? "both" : "biolinx";
+}
+
 const NICHE_ALIASES: Record<string, Niche> = {
-  "gym/bodybuilding": "Gym",
-  "mma/combat": "MMA",
-  "nootropics/cognitive": "Nootropics",
+  longevity: "Anti-aging",
+  "women's wellness": "Anti-aging",
+  biohacking: "Biohacker",
+  nootropics: "Biohacker",
+  "nootropics/cognitive": "Biohacker",
+  gym: "Gym / PED-curious",
+  "gym/bodybuilding": "Gym / PED-curious",
+  mma: "Gym / PED-curious",
+  "mma/combat": "Gym / PED-curious",
 };
 
 export function normalizeNiche(value: string | null | undefined): Niche | null {

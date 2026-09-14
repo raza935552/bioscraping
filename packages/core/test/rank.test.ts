@@ -49,7 +49,7 @@ describe("live Airtable vocabulary (recovered 2026-09-01)", () => {
       lead({ id: "gym", affiliationStatus: "Unsigned", totalReach: 1000, niche: "Gym/Bodybuilding" }),
       lead({ id: "noo", affiliationStatus: "Unsigned", totalReach: 1000, niche: "Nootropics/Cognitive" }),
     ]);
-    expect(results.map((r) => r.id)).toEqual(["gym", "noo", "mma"]);
+    expect(results.map((r) => r.id)).toEqual(["noo", "mma", "gym"]);
   });
 });
 
@@ -76,13 +76,13 @@ describe("rankAll — global ordinal", () => {
     expect(results.map((r) => r.id)).toEqual(["solo", "team"]);
   });
 
-  it("tiebreak 2: niche priority Longevity > … > MMA; blank niche last", () => {
+  it("tiebreak 2: niche tier order Weight-loss seeker > … > Sexual wellness; blank niche last", () => {
     const results = rankAll([
-      lead({ id: "mma", affiliationStatus: "Unsigned", totalReach: 1000, niche: "MMA" }),
+      lead({ id: "sex", affiliationStatus: "Unsigned", totalReach: 1000, niche: "Sexual wellness" }),
       lead({ id: "none", affiliationStatus: "Unsigned", totalReach: 1000 }),
-      lead({ id: "long", affiliationStatus: "Unsigned", totalReach: 1000, niche: "Longevity" }),
+      lead({ id: "wl", affiliationStatus: "Unsigned", totalReach: 1000, niche: "Weight-loss seeker" }),
     ]);
-    expect(results.map((r) => r.id)).toEqual(["long", "mma", "none"]);
+    expect(results.map((r) => r.id)).toEqual(["wl", "sex", "none"]);
   });
 
   it("is stable for full ties", () => {
