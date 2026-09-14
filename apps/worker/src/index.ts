@@ -5,7 +5,8 @@ import { loadEnv } from "@biolinx/core";
 loadEnv();
 
 const { connect, hydrateEnvFromSettings } = await import("@biolinx/db");
-const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize } = await import("@biolinx/jobs");
+const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize, runLeadIngest, runCustomerioSync } =
+  await import("@biolinx/jobs");
 const { startScheduler } = await import("./scheduler.js");
 
 const conn = connect();
@@ -22,8 +23,11 @@ startScheduler(conn, [
   { name: "rank-recompute", everyMs: 6 * HOUR, runOnBoot: true, fn: async () => void (await runRankRecompute(conn.db)) },
   { name: "referral-expiry", everyMs: 24 * HOUR, runOnBoot: true, fn: async () => void (await runReferralExpiry(conn.db)) },
   { name: "enrich-personalize", everyMs: 24 * HOUR, runOnBoot: true, fn: async () => void (await runEnrichPersonalize(conn.db)) },
+  // No boot run: a restart must never spend Apify credit. Daily, after enrichment.
+  { name: "lead-ingest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runLeadIngest(conn.db)) },
+  { name: "customerio-sync", everyMs: HOUR, runOnBoot: true, fn: async () => void (await runCustomerioSync(conn.db)) },
   { name: "metrics-digest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runMetricsDigest(conn.db)) },
-  // Phase 3+: lead-ingest, outreach-dispatch, reply-ingest on a schedule.
+  // Phase 3+: outreach-dispatch, reply-ingest on a schedule.
 ]);
 
-console.log("[worker] up — idev-sync 30m · rank 6h · referral-expiry 24h · enrich 24h · digest 24h");
+console.log("[worker] up — idev-sync 30m · rank 6h · referral-expiry 24h · enrich 24h · ingest 24h · customerio 1h · digest 24h");

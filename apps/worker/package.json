@@ -9,7 +9,8 @@
     "start": "tsx src/index.ts",
     "run:idev-sync": "tsx src/run-idev-sync.ts",
     "run:enrich": "tsx src/run-enrich.ts",
-    "run:dispatch": "tsx src/run-dispatch.ts"
+    "run:dispatch": "tsx src/run-dispatch.ts",
+    "run:ingest": "tsx src/run-ingest.ts"
   },
   "dependencies": {
     "@biolinx/compliance": "workspace:*",
