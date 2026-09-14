@@ -156,10 +156,10 @@ pnpm --filter @biolinx/worker run:dispatch dm 5
 ```
 
 Production runs at `/var/www/bioscraping` on the gemboxpk.com server (nginx →
-:3001). Node 22, pnpm and pm2 live in `/opt/node22/bin`; PM2 uses the untracked
-`infra/ecosystem.local.config.cjs` (the committed one points at the tsx shell
-wrapper and crashes), so `infra/deploy.sh` needs that config swapped in. Push
-via the `github-bioscraping` SSH alias. Repo: `github.com/raza935552/bioscraping`.
+:3001). Deploy with `/var/www/bioscraping/infra/deploy.sh`: it finds Node 22 in
+`/opt/node22/bin`, pulls, installs, applies SQL, builds the admin, restarts
+PM2 from `infra/ecosystem.config.cjs`, and waits for /health. Push via the
+`github-bioscraping` SSH alias. Repo: `github.com/raza935552/bioscraping`.
 The older `biolinkxaffilaiteengine` repo is stale.
 
 Settings (Apify token, Anthropic key, iDev keys, Instantly, Customer.io site
