@@ -10,3 +10,4 @@ export * from "./setup-recruiting-campaign.js";
 export * from "./cadence-dates.js";
 export * from "./enrich-personalize.js";
 export * from "./lead-ingest.js";
+export * from "./customerio-sync.js";

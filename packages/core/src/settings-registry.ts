@@ -51,7 +51,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     blurb: "Every lead email is mirrored as a person with lead attributes. Journeys are built in Customer.io.",
     fields: [
       { key: "CUSTOMERIO_SITE_ID", label: "Site ID", kind: "text" },
-      { key: "CUSTOMERIO_TRACK_API_KEY", label: "Track API key", kind: "secret" },
+      { key: "CUSTOMERIO_TRACK_API_KEY", label: "Track API key", kind: "secret", help: "Site ID + Track API key identify people. Both are in Customer.io under Settings > API credentials." },
+      { key: "CUSTOMERIO_APP_API_KEY", label: "App API key (optional)", kind: "secret", help: "Only needed later for reading segments and campaigns back." },
       { key: "CUSTOMERIO_REGION", label: "Region (us or eu)", kind: "text", placeholder: "us" },
     ],
   },

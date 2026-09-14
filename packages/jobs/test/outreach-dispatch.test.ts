@@ -13,6 +13,7 @@ const lead = {
   followUpsSent: 0,
   motion: "A",
   personalizationNotes: "MATCH — real detail (https://x/1).",
+  sourcingReview: null as string | null,
 };
 const today = new Date("2026-09-08T00:00:00Z");
 
@@ -34,6 +35,13 @@ describe("isDispatchCandidate", () => {
     expect(isDispatchCandidate({ ...lead, status: "Passed" }, o)).toBe("ineligible");
     expect(isDispatchCandidate(lead, { ...o, openReplyLeadIds: new Set([1]) })).toBe("ineligible");
     expect(isDispatchCandidate({ ...lead, nextFollowUpDate: new Date("2026-09-09T00:00:00Z") }, o)).toBe("ineligible");
+  });
+  it("pending or rejected sourced leads are ineligible; accepted and non-sourced pass", () => {
+    const o = { channel: "dm" as const, today, openReplyLeadIds: new Set<number>() };
+    expect(isDispatchCandidate({ ...lead, sourcingReview: "pending" }, o)).toBe("ineligible");
+    expect(isDispatchCandidate({ ...lead, sourcingReview: "rejected" }, o)).toBe("ineligible");
+    expect(isDispatchCandidate({ ...lead, sourcingReview: "accepted" }, o)).toBe("ok");
+    expect(isDispatchCandidate({ ...lead, sourcingReview: null }, o)).toBe("ok");
   });
   it("skips leads that exhausted their cadence", () => {
     expect(isDispatchCandidate({ ...lead, followUpsSent: 4, motion: "A" }, { channel: "dm", today, openReplyLeadIds: new Set() })).toBe("ineligible");

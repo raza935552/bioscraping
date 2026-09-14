@@ -34,6 +34,13 @@ export interface CandidateLead {
   followUpsSent: number;
   motion: string;
   personalizationNotes: string | null;
+  /** Sourced leads: pending | accepted | rejected. Null for everyone else. */
+  sourcingReview: string | null;
+}
+
+/** Sourced leads are invisible to outreach and research until a human accepts them. */
+export function isReviewable(l: { sourcingReview: string | null }): boolean {
+  return l.sourcingReview == null || l.sourcingReview === "accepted";
 }
 
 export type CandidateVerdict = "ok" | "unenriched" | "ineligible";
@@ -44,6 +51,7 @@ export function isDispatchCandidate(
   l: CandidateLead,
   o: { channel: "email" | "dm"; today: Date; openReplyLeadIds: Set<number> },
 ): CandidateVerdict {
+  if (!isReviewable(l)) return "ineligible";
   if (l.isDead || isSp5(l.subProfile) || isConverted(l.affiliationStatus)) return "ineligible";
   if (TERMINAL_STATUSES.includes(l.status ?? "")) return "ineligible";
   if (o.channel === "email" && !l.email) return "ineligible";

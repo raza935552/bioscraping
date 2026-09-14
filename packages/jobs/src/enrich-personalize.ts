@@ -6,6 +6,7 @@ import { FAILURE_NOTE_PATTERN, handleKey, hasUsableNotes, isConverted, isSp5 } f
 import { createDb, schema, type Db } from "@biolinx/db";
 import { anthropicFromEnv, type LlmClient } from "@biolinx/drafting";
 import { alert, telegramFromEnv } from "@biolinx/notify";
+import { isReviewable } from "./outreach-dispatch.js";
 import {
   apifyConfigFromEnv,
   fetcherFor as defaultFetcherFor,
@@ -177,6 +178,7 @@ export async function runEnrichPersonalize(
     const batch = fresh
       .filter(
         (l) =>
+          isReviewable(l) &&
           !l.isDead &&
           !isSp5(l.subProfile) &&
           !isConverted(l.affiliationStatus) &&

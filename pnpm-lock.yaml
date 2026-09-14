@@ -248,6 +248,9 @@ importers:
       '@biolinx/core':
         specifier: workspace:*
         version: link:../core
+      '@biolinx/customerio':
+        specifier: workspace:*
+        version: link:../customerio
       '@biolinx/db':
         specifier: workspace:*
         version: link:../db
