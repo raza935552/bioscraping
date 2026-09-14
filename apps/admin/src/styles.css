@@ -145,7 +145,8 @@ input:focus, select:focus, textarea:focus {
 }
 .nav .spacer { flex: 1; }
 .nav .whoami { padding: 8px 10px; color: var(--muted); font-size: 12.5px; }
-.main { flex: 1; padding: 32px 36px; max-width: 1120px; width: 100%; }
+.main { flex: 1; padding: 32px 36px; max-width: 1120px; width: 100%; min-width: 0; }
+.main.wide { max-width: none; padding: 24px 24px; }
 h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 20px; }
 h2 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; margin: 28px 0 10px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }

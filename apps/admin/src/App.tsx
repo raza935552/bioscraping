@@ -14,6 +14,8 @@ import { Settings } from "./pages/Settings.js";
 import { Signups } from "./pages/Signups.js";
 import { Team } from "./pages/Team.js";
 
+const WIDE_ROUTES = new Set(["/leads"]);
+
 function useHashRoute(): string {
   const [route, setRoute] = useState(window.location.hash.slice(1) || "/dashboard");
   useEffect(() => {
@@ -111,7 +113,8 @@ export function App() {
           Sign out
         </button>
       </nav>
-      <main className="main">{page()}</main>
+      {/* Data-heavy pages use the full width; the rest keep a readable column. */}
+      <main className={`main${WIDE_ROUTES.has(route) ? " wide" : ""}`}>{page()}</main>
     </div>
   );
 }
