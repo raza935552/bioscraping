@@ -218,6 +218,17 @@ export function Leads({ me }: { me: Me }) {
           <option value="">All sub-profiles</option>
           {filters?.subProfiles.map((s) => <option key={s} value={s}>{s.slice(0, 24)}</option>)}
         </select>
+        {view === "sourced" && canRun && (
+          <>
+            <div className="grow" />
+            <a className="btn-link" href="/api/leads/sourced.csv?review=pending" download title="Spreadsheet of the leads waiting for review, with the marketing spec's fields">
+              Download for marketing (CSV)
+            </a>
+            <a className="btn-link" href="/api/leads/sourced.csv?review=all" download title="Every sourced lead, including accepted and rejected, with reject reasons">
+              All sourced (CSV)
+            </a>
+          </>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}

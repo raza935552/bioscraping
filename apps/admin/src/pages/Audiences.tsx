@@ -127,6 +127,7 @@ function lastRunText(p: AudienceProfile): string {
   if (s?.estimatedCostUsd != null) parts.push(`≈ $${s.estimatedCostUsd}`);
   if (s?.stoppedBy === "spend") parts.push("stopped at spend cap");
   if (s?.stoppedBy === "daily_limit") parts.push("stopped at the daily limit for all audiences");
+  if (s?.stoppedBy === "review_full") parts.push("stopped: review queue is full");
   if (s?.termsResting?.length) parts.push(`${s.termsResting.length} search${s.termsResting.length === 1 ? "" : "es"} resting (no new people lately)`);
   if (s?.termsSkipped?.length) parts.push(`${s.termsSkipped.length} search${s.termsSkipped.length === 1 ? "" : "es"} skipped to stay under the cap`);
   return parts.join(" · ");

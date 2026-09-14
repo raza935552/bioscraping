@@ -48,6 +48,7 @@ import {
   runEnrichPersonalize,
   runIdevSync,
   runLeadIngest,
+  sourcedLeadsCsv,
   runMetricsDigest,
   runOutreachDispatch,
   runRankRecompute,
@@ -530,6 +531,23 @@ function profileUrlFor(lead: { websiteUrl: string | null; whereFound: string | n
     : null;
   return safeHttpUrl(lead.websiteUrl) ?? safeHttpUrl(lead.whereFound) ?? fromSocial;
 }
+
+/** CSV of sourced leads for marketing to check (columns follow their scoring spec).
+ *  ?review=pending (default) | accepted | rejected | all. Holds PII: admin/ops only, audited. */
+app.get("/api/leads/sourced.csv", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const review = String((req.query as { review?: string } | undefined)?.review ?? "pending");
+  if (!["pending", "accepted", "rejected", "all"].includes(review)) return reply.code(400).send({ error: "review must be pending, accepted, rejected or all" });
+  const rows = (await db.select().from(schema.leads).where(eq(schema.leads.source, "sourcing")))
+    .filter((l) => review === "all" || l.sourcingReview === review)
+    .sort((a, b) => (b.sourcingScore ?? 0) - (a.sourcingScore ?? 0));
+  await audit(req, "leads.sourced.export", "leads", null, { review, count: rows.length });
+  const stamp = new Date().toISOString().slice(0, 10);
+  return reply
+    .header("content-type", "text/csv; charset=utf-8")
+    .header("content-disposition", `attachment; filename="biolinx-sourced-leads-${review}-${stamp}.csv"`)
+    .header("cache-control", "no-store")
+    .send(sourcedLeadsCsv(rows));
+});
 
 /** Distinct filter values for the Leads UI dropdowns. */
 app.get("/api/leads/filters", { preHandler: requireAuth }, async () => {

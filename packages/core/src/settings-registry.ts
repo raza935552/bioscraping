@@ -79,6 +79,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
         help: "Estimated Apify spend shared by every audience in one day (Los Angeles time). Each audience also keeps its own cap. Blank = $10.",
         placeholder: "10",
       },
+      {
+        key: "SOURCING_MAX_PENDING",
+        label: "Most leads waiting for review",
+        kind: "number",
+        help: "Sourcing stops adding leads once this many are waiting for review, and continues as they are accepted or rejected. Blank = no limit.",
+        placeholder: "50",
+      },
     ],
   },
   {

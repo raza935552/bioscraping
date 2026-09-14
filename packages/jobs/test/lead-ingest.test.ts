@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
-import { byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
+import { parseMaxPending, reviewRoom, byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
   id: 1,
@@ -342,5 +342,23 @@ describe("many audiences sharing a run", () => {
       { id: 4, niche: "Gym / PED-curious" },
     ];
     expect([...rows].sort(byNichePriority).map((r) => r.id)).toEqual([1, 3, 9, 4, 2, 5]);
+  });
+});
+
+describe("review queue limit (fixed batch for marketing)", () => {
+  it("setting parse: blank or junk = no limit, integers only", () => {
+    expect(parseMaxPending(undefined)).toBeNull();
+    expect(parseMaxPending("")).toBeNull();
+    expect(parseMaxPending("abc")).toBeNull();
+    expect(parseMaxPending("12.5")).toBeNull();
+    expect(parseMaxPending("50")).toBe(50);
+    expect(parseMaxPending("0")).toBe(0);
+  });
+  it("caps each audience at the room left in the queue", () => {
+    expect(reviewRoom(null, 400, 15)).toEqual({ cap: 15, limited: false });
+    expect(reviewRoom(50, 3, 10)).toEqual({ cap: 10, limited: false });
+    expect(reviewRoom(50, 44, 10)).toEqual({ cap: 6, limited: true });
+    expect(reviewRoom(50, 50, 10)).toEqual({ cap: 0, limited: true });
+    expect(reviewRoom(50, 61, 10)).toEqual({ cap: 0, limited: true });
   });
 });

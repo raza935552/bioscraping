@@ -2,7 +2,7 @@
 // dedupe → verify by profile read → score → pending leads for review.
 // planProfile is the testable core; runLeadIngest wraps it with the DB.
 
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { NICHE_PRIORITY, brandFitForNiche, handleKey, normalizeEmail, normalizeNiche, type Niche } from "@biolinx/core";
 import { createDb, schema, type Db } from "@biolinx/db";
 import { alert, telegramFromEnv } from "@biolinx/notify";
@@ -108,7 +108,8 @@ export interface ProfileRunSummary {
   inserted: number;
   estimatedCostUsd: number;
   /** "daily_limit": the shared all-audience daily limit, not this audience's own cap, stopped it. */
-  stoppedBy: "cap" | "spend" | "daily_limit" | "exhausted";
+  /** "review_full": the review queue already holds SOURCING_MAX_PENDING leads. */
+  stoppedBy: "cap" | "spend" | "daily_limit" | "review_full" | "exhausted";
   termErrors: string[];
   /** Searches not run because they would have pushed the run past its spend cap. */
   termsSkipped: string[];
@@ -180,6 +181,9 @@ export interface IngestSummary {
   dailyLimitUsd?: number;
   /** Estimated spend from earlier lead-ingest runs today, before this run. */
   spentEarlierTodayUsd?: number;
+  /** SOURCING_MAX_PENDING at run time (null = no limit) and leads waiting for review before the run. */
+  maxPendingReview?: number | null;
+  pendingReviewBefore?: number;
 }
 
 export type VerifiedRead = VerifiedProfile & { items: SourceItem[]; profileUrl: string };
@@ -241,17 +245,8 @@ export function countFresh(profile: ProfileRow, hits: DiscoveryHit[], known: Kno
   return applyFilters(hits, audienceRules(profile)).kept.filter((h) => !isKnown(h, null, known)).length;
 }
 
-/** Search hits → scored candidates for one profile. No DB, no network:
- *  discovery results and the verify function are injected. */
-export async function planProfile(
-  profile: ProfileRow,
-  competitors: CompetitorRule[],
-  hitsByTerm: Map<string, DiscoveryHit[]>,
-  known: KnownPeople,
-  verify: VerifyFn,
-  now: Date,
-): Promise<{ candidates: Candidate[]; summary: ProfileRunSummary }> {
-  const summary: ProfileRunSummary = {
+export function emptyRunSummary(profile: Pick<ProfileRow, "id" | "name">): ProfileRunSummary {
+  return {
     profileId: profile.id,
     name: profile.name,
     hits: 0,
@@ -267,6 +262,19 @@ export async function planProfile(
     termsResting: [],
     termYield: [],
   };
+}
+
+/** Search hits → scored candidates for one profile. No DB, no network:
+ *  discovery results and the verify function are injected. */
+export async function planProfile(
+  profile: ProfileRow,
+  competitors: CompetitorRule[],
+  hitsByTerm: Map<string, DiscoveryHit[]>,
+  known: KnownPeople,
+  verify: VerifyFn,
+  now: Date,
+): Promise<{ candidates: Candidate[]; summary: ProfileRunSummary }> {
+  const summary: ProfileRunSummary = emptyRunSummary(profile);
   const spendCap = Number(profile.spendCapUsd);
 
   // Merge by platform:handle; discovery cost is what we already paid for.
@@ -678,6 +686,26 @@ export async function spentTodayUsd(db: Db, now: Date, excludeRunId?: number): P
   return round4(total);
 }
 
+/** Admin setting SOURCING_MAX_PENDING: the most sourced leads allowed to wait for review
+ *  at once. Blank or invalid = no limit. Used to hand marketing a fixed batch to check. */
+export function parseMaxPending(raw: string | null | undefined): number | null {
+  if (raw == null || String(raw).trim() === "") return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+export async function maxPendingReview(db: Db, env = process.env): Promise<number | null> {
+  const row = await db.query.appSettings.findFirst({ where: eq(schema.appSettings.key, "SOURCING_MAX_PENDING") });
+  return parseMaxPending(row?.value ?? env.SOURCING_MAX_PENDING);
+}
+
+/** An audience's lead cap this run: its own daily cap, or the room left in the review queue if smaller. */
+export function reviewRoom(maxPending: number | null, pending: number, dailyCap: number): { cap: number; limited: boolean } {
+  if (maxPending == null) return { cap: dailyCap, limited: false };
+  const room = Math.max(0, maxPending - pending);
+  return room < dailyCap ? { cap: room, limited: true } : { cap: dailyCap, limited: false };
+}
+
 /** An audience's cap for this run: its own cap, or whatever is left of the daily limit if that is less. */
 export function effectiveSpendCap(profileCapUsd: number, dailyLimit: number, spentToday: number): { capUsd: number; limitedByDaily: boolean } {
   const left = round4(Math.max(0, dailyLimit - spentToday));
@@ -718,14 +746,28 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
     const spentEarlier = await spentTodayUsd(db, now, run!.id);
     summary.dailyLimitUsd = limit;
     summary.spentEarlierTodayUsd = spentEarlier;
+    const maxPending = await maxPendingReview(db);
+    const [pendingRow] = await db
+      .select({ pending: sql<number>`COUNT(*)` })
+      .from(schema.leads)
+      .where(eq(schema.leads.sourcingReview, "pending"));
+    let pendingNow = Number(pendingRow?.pending ?? 0);
+    summary.maxPendingReview = maxPending;
+    summary.pendingReviewBefore = pendingNow;
 
     // Competitor names are searched by every audience; each search is paid for once per run.
     const searchedThisRun = new Set<string>();
     // Highest-tier niches spend first, so a tight daily limit cuts the lowest tiers.
     profiles.sort(byNichePriority);
     for (const configured of profiles) {
+      const room = reviewRoom(maxPending, pendingNow, configured.dailyCap);
+      if (room.cap === 0) {
+        // Review queue is full: search nothing, spend nothing, leave lastRunAt so tomorrow tries again.
+        summary.profiles.push({ ...emptyRunSummary(configured), stoppedBy: "review_full" });
+        continue;
+      }
       const { capUsd, limitedByDaily } = effectiveSpendCap(Number(configured.spendCapUsd), limit, round4(spentEarlier + summary.estimatedCostUsd));
-      const profile: ProfileRow = { ...configured, spendCapUsd: capUsd };
+      const profile: ProfileRow = { ...configured, spendCapUsd: capUsd, dailyCap: room.cap };
       const hitsByTerm = new Map<string, DiscoveryHit[]>();
       const termErrors: string[] = [];
       const dayNumber = Math.floor(startOfBusinessDay(now).getTime() / 86_400_000);
@@ -797,6 +839,8 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
           ps.alreadyKnown++;
         }
       }
+      pendingNow += ps.inserted;
+      if (room.limited && ps.stoppedBy === "cap") ps.stoppedBy = "review_full";
       await db.update(schema.sourcingProfiles).set({ lastRunAt: now, lastRunSummary: ps }).where(eq(schema.sourcingProfiles.id, profile.id));
       summary.profiles.push(ps);
       summary.inserted += ps.inserted;
