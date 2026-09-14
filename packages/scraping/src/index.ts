@@ -5,3 +5,6 @@ export * from "./fetchers/index.js";
 export { htmlToText } from "./fetchers/web.js";
 export * from "./summarize.js";
 export * from "./discovery/index.js";
+export * from "./filter.js";
+export * from "./score.js";
+export * from "./dedupe.js";
