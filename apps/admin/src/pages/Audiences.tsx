@@ -126,6 +126,7 @@ function lastRunText(p: AudienceProfile): string {
   const parts = [new Date(p.lastRunAt).toLocaleDateString(), `${s?.inserted ?? 0} added`];
   if (s?.estimatedCostUsd != null) parts.push(`≈ $${s.estimatedCostUsd}`);
   if (s?.stoppedBy === "spend") parts.push("stopped at spend cap");
+  if (s?.stoppedBy === "daily_limit") parts.push("stopped at the daily limit for all audiences");
   if (s?.termsSkipped?.length) parts.push(`${s.termsSkipped.length} search${s.termsSkipped.length === 1 ? "" : "es"} skipped to stay under the cap`);
   return parts.join(" · ");
 }

@@ -70,7 +70,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     id: "sourcing",
     title: "Lead sourcing (Apify)",
     blurb: "Scraping creators and enriching contact details.",
-    fields: [{ key: "APIFY_TOKEN", label: "Apify token", kind: "secret" }],
+    fields: [
+      { key: "APIFY_TOKEN", label: "Apify token", kind: "secret" },
+      {
+        key: "SOURCING_DAILY_SPEND_USD",
+        label: "Daily spend limit, all audiences (USD)",
+        kind: "number",
+        help: "Estimated Apify spend shared by every audience in one day (Los Angeles time). Each audience also keeps its own cap. Blank = $10.",
+        placeholder: "10",
+      },
+    ],
   },
   {
     id: "migration",

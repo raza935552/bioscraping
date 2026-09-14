@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
-import { planProfile, planSearches, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
+import { effectiveSpendCap, isDuplicateKey, parseDailyLimit, planProfile, planSearches, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
   id: 1,
@@ -155,5 +155,39 @@ describe("planSearches", () => {
   it("dedupes a competitor name that is already an audience term", () => {
     const { run } = planSearches({ ...base, platforms: ["tiktok"], terms: { tiktok: ["#peptidesciences"] } }, competitors, 30);
     expect(run.map((s) => s.term)).toEqual(["#peptidesciences", "Limitless Life"]);
+  });
+});
+
+describe("daily limit across audiences", () => {
+  it("an audience gets its own cap while the day has room, the remainder once it doesn't", () => {
+    expect(effectiveSpendCap(2, 10, 3)).toEqual({ capUsd: 2, limitedByDaily: false });
+    expect(effectiveSpendCap(2, 10, 8.5)).toEqual({ capUsd: 1.5, limitedByDaily: true });
+    expect(effectiveSpendCap(2, 10, 12)).toEqual({ capUsd: 0, limitedByDaily: true });
+  });
+
+  it("a zero cap plans no searches at all", () => {
+    const { run } = planSearches({ platforms: ["tiktok"], terms: { tiktok: ["#a"] }, dailyCap: 10, spendCapUsd: 0 }, [], 30);
+    expect(run).toEqual([]);
+  });
+
+  it("setting parse: blank or junk means $10, 0 is a real stop", () => {
+    expect(parseDailyLimit(undefined)).toBe(10);
+    expect(parseDailyLimit("")).toBe(10);
+    expect(parseDailyLimit("abc")).toBe(10);
+    expect(parseDailyLimit("25")).toBe(25);
+    expect(parseDailyLimit("0")).toBe(0);
+  });
+
+  it("the business day starts at Los Angeles midnight", () => {
+    // 2026-09-14 06:00 UTC is still 2026-09-13 in LA (PDT, UTC-7).
+    expect(startOfBusinessDay(new Date("2026-09-14T06:00:00Z"), "America/Los_Angeles").toISOString()).toBe("2026-09-13T07:00:00.000Z");
+    expect(startOfBusinessDay(new Date("2026-12-01T20:00:00Z"), "America/Los_Angeles").toISOString()).toBe("2026-12-01T08:00:00.000Z");
+    expect(startOfBusinessDay(new Date("2026-09-14T06:00:00Z"), "UTC").toISOString()).toBe("2026-09-14T00:00:00.000Z");
+  });
+
+  it("recognizes MySQL duplicate-key errors, wrapped or not", () => {
+    expect(isDuplicateKey({ code: "ER_DUP_ENTRY" })).toBe(true);
+    expect(isDuplicateKey({ message: "x", cause: { errno: 1062 } })).toBe(true);
+    expect(isDuplicateKey(new Error("timeout"))).toBe(false);
   });
 });

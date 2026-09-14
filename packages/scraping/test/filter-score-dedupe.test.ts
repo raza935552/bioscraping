@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyFilters, DEFAULT_EXCLUDE_TERMS } from "../src/filter.js";
 import { findAffiliateCode, PROMO_PATTERN, scoreHit, type CompetitorRule } from "../src/score.js";
-import { emptyKnown, isKnown, nameKey, urlKey } from "../src/dedupe.js";
+import { emptyKnown, handlesInText, isKnown, nameKey, urlKey, urlsInText } from "../src/dedupe.js";
 import type { DiscoveryHit } from "../src/discovery/types.js";
 
 const hit = (over: Partial<DiscoveryHit> = {}): DiscoveryHit => ({
@@ -123,5 +123,35 @@ describe("isKnown", () => {
     expect(isKnown(hit(), null, k4)).toBe(true);
     expect(nameKey("  ", "tiktok")).toBeNull();
     expect(urlKey("HTTPS://WWW.TikTok.com/@Ann/?x=1")).toBe("tiktok.com/@ann");
+  });
+});
+
+describe("handlesInText (imported social_profiles formats)", () => {
+  const cases: Array<[string, string | null, string[]]> = [
+    ["TikTok @jamiehiraldo — https://www.tiktok.com/@jamiehiraldo", "TikTok", ["tiktok:jamiehiraldo"]],
+    ["@holisticglpgirly", "TikTok", ["tiktok:holisticglpgirly"]],
+    ["@don_madsen (IG/YT/WhatsApp)", "Instagram", ["instagram:don_madsen", "youtube:don_madsen"]],
+    ["Reddit u/allstealdeals — https://www.reddit.com/user/allstealdeals", "Reddit", ["reddit:allstealdeals"]],
+    ["YT @moreplatesmoredates; IG @moreplatesmoredates; X @Derek_Fitness", "YouTube", ["youtube:moreplatesmoredates", "instagram:moreplatesmoredates", "x:derek_fitness"]],
+    ["TikTok @nota.dimadozen.girl", "TikTok", ["tiktok:nota.dimadozen.girl"]],
+    ["t.me/peptidepartners; @PeptidePartners on X", "Telegram", ["x:peptidepartners"]],
+    ["YT Michael Duggal (86K)", "YouTube", []],
+    ["email ann@gmail.com, TikTok @ann.", "TikTok", ["tiktok:ann"]],
+    ["https://www.youtube.com/channel/UCabc123", "YouTube", ["youtube:ucabc123"]],
+    ["https://www.instagram.com/p/XYZ/", "Instagram", []],
+  ];
+  it.each(cases)("%s", (text, platform, keys) => {
+    expect(handlesInText(text, platform).sort()).toEqual([...keys].sort());
+  });
+
+  it("urlsInText keys every profile URL", () => {
+    expect(urlsInText("Stan Store @chelefit — https://stan.store/chelefit/")).toEqual(["stan.store/chelefit"]);
+  });
+
+  it("isKnown matches a hit through the handle in its profile URL", () => {
+    const known = emptyKnown();
+    known.handles.add("youtube:aminoedge");
+    const hit = { platform: "youtube", handle: "uc123", profileUrl: "https://www.youtube.com/@AminoEdge", displayName: null } as Parameters<typeof isKnown>[0];
+    expect(isKnown(hit, null, known)).toBe(true);
   });
 });

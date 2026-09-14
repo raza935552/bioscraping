@@ -2,7 +2,7 @@
 // dedupe → verify by profile read → score → pending leads for review.
 // planProfile is the testable core; runLeadIngest wraps it with the DB.
 
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { brandFitForNiche, handleKey, normalizeEmail, normalizeNiche, type Niche } from "@biolinx/core";
 import { createDb, schema, type Db } from "@biolinx/db";
 import { alert, telegramFromEnv } from "@biolinx/notify";
@@ -13,11 +13,13 @@ import {
   applyFilters,
   discovererFor as defaultDiscovererFor,
   emptyKnown,
+  handlesInText,
   fetcherFor as defaultFetcherFor,
   isKnown,
   nameKey,
   scoreHit,
   urlKey,
+  urlsInText,
   type CompetitorRule,
   type Discoverer,
   type DiscoveryHit,
@@ -77,7 +79,8 @@ export interface ProfileRunSummary {
   verifyFailed: number;
   inserted: number;
   estimatedCostUsd: number;
-  stoppedBy: "cap" | "spend" | "exhausted";
+  /** "daily_limit": the shared all-audience daily limit, not this audience's own cap, stopped it. */
+  stoppedBy: "cap" | "spend" | "daily_limit" | "exhausted";
   termErrors: string[];
   /** Searches not run because they would have pushed the run past its spend cap. */
   termsSkipped: string[];
@@ -87,6 +90,10 @@ export interface IngestSummary {
   profiles: ProfileRunSummary[];
   inserted: number;
   estimatedCostUsd: number;
+  /** Shared limit for every audience in one business day (America/Los_Angeles). */
+  dailyLimitUsd?: number;
+  /** Estimated spend from earlier lead-ingest runs today, before this run. */
+  spentEarlierTodayUsd?: number;
 }
 
 export type VerifiedRead = VerifiedProfile & { items: SourceItem[]; profileUrl: string };
@@ -302,8 +309,6 @@ export function makeVerify(deps: IngestDeps): VerifyFn {
   };
 }
 
-const SOCIAL_HANDLE = /(tiktok|ig|instagram|yt|youtube|reddit|x|skool)\s*@?u?\/?([a-z0-9._-]+)/gi;
-
 /** The five dedupe keys, loaded once per run from every table that holds a person. */
 export async function loadKnownPeople(db: Db): Promise<KnownPeople> {
   const known = emptyKnown();
@@ -324,11 +329,8 @@ export async function loadKnownPeople(db: Db): Promise<KnownPeople> {
     if (l.site) known.urls.add(urlKey(l.site));
     const nk = nameKey([l.first, l.last].filter(Boolean).join(" "), l.platform ?? "");
     if (nk) known.names.add(nk);
-    for (const m of (l.social ?? "").matchAll(SOCIAL_HANDLE)) {
-      const p = m[1]!.toLowerCase();
-      const platform = p === "ig" ? "instagram" : p === "yt" ? "youtube" : p;
-      known.handles.add(handleKey(platform, m[2]!));
-    }
+    for (const k of handlesInText(l.social, l.platform)) known.handles.add(k);
+    for (const u of urlsInText(l.social)) known.urls.add(u);
   }
   for (const h of await db.select({ key: schema.leadHandles.handleKey, url: schema.leadHandles.profileUrl }).from(schema.leadHandles)) {
     known.handles.add(h.key);
@@ -423,6 +425,58 @@ export function planSearches(
 
 const PER_TERM = 30;
 
+export const DEFAULT_DAILY_LIMIT_USD = 10;
+
+/** The instant the business day containing `now` began, in UTC. */
+export function startOfBusinessDay(now: Date, tz = process.env.BUSINESS_TZ ?? "America/Los_Angeles"): Date {
+  const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  const zone = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
+  const offset = zone.replace("GMT", "") || "Z";
+  return new Date(`${ymd}T00:00:00${offset}`);
+}
+
+/** Admin setting SOURCING_DAILY_SPEND_USD, read fresh each run so a change on
+ *  the Settings page applies without a restart. Blank or invalid → $10. */
+export async function dailyLimitUsd(db: Db, env = process.env): Promise<number> {
+  const row = await db.query.appSettings.findFirst({ where: eq(schema.appSettings.key, "SOURCING_DAILY_SPEND_USD") });
+  return parseDailyLimit(row?.value ?? env.SOURCING_DAILY_SPEND_USD);
+}
+
+export function parseDailyLimit(raw: string | null | undefined): number {
+  if (raw == null || String(raw).trim() === "") return DEFAULT_DAILY_LIMIT_USD;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DAILY_LIMIT_USD;
+}
+
+/** Estimated spend of every lead-ingest run that started today, finished or not.
+ *  Runs write their running total after each audience, so a crash still counts. */
+export async function spentTodayUsd(db: Db, now: Date, excludeRunId?: number): Promise<number> {
+  const rows = await db
+    .select({ id: schema.syncRuns.id, detail: schema.syncRuns.detail })
+    .from(schema.syncRuns)
+    .where(and(eq(schema.syncRuns.job, "lead-ingest"), gte(schema.syncRuns.startedAt, startOfBusinessDay(now))));
+  let total = 0;
+  for (const r of rows) {
+    if (r.id === excludeRunId) continue;
+    const cost = Number((r.detail as { estimatedCostUsd?: unknown } | null)?.estimatedCostUsd ?? 0);
+    if (Number.isFinite(cost)) total += cost;
+  }
+  return round4(total);
+}
+
+/** An audience's cap for this run: its own cap, or whatever is left of the daily limit if that is less. */
+export function effectiveSpendCap(profileCapUsd: number, dailyLimit: number, spentToday: number): { capUsd: number; limitedByDaily: boolean } {
+  const left = round4(Math.max(0, dailyLimit - spentToday));
+  return left < profileCapUsd ? { capUsd: left, limitedByDaily: true } : { capUsd: profileCapUsd, limitedByDaily: false };
+}
+
+export function isDuplicateKey(err: unknown): boolean {
+  for (let e = err as { code?: string; errno?: number; cause?: unknown } | undefined; e; e = e.cause as typeof e) {
+    if (e.code === "ER_DUP_ENTRY" || e.errno === 1062) return true;
+  }
+  return false;
+}
+
 export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts: { profileId?: number } = {}): Promise<IngestSummary> {
   const telegram = telegramFromEnv();
   const startedAt = new Date();
@@ -439,8 +493,14 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
     const known = await loadKnownPeople(db);
     const verify = makeVerify(deps);
     const now = deps.now();
+    const limit = await dailyLimitUsd(db);
+    const spentEarlier = await spentTodayUsd(db, now, run!.id);
+    summary.dailyLimitUsd = limit;
+    summary.spentEarlierTodayUsd = spentEarlier;
 
-    for (const profile of profiles) {
+    for (const configured of profiles) {
+      const { capUsd, limitedByDaily } = effectiveSpendCap(Number(configured.spendCapUsd), limit, round4(spentEarlier + summary.estimatedCostUsd));
+      const profile: ProfileRow = { ...configured, spendCapUsd: capUsd };
       const hitsByTerm = new Map<string, DiscoveryHit[]>();
       const termErrors: string[] = [];
       const searches = planSearches(profile, competitors, PER_TERM);
@@ -456,31 +516,42 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
       ps.termErrors = termErrors;
       ps.termsSkipped = searches.skipped.map((s) => `${s.platform} ${s.term}`);
       if (ps.termsSkipped.length > 0 && ps.stoppedBy === "exhausted") ps.stoppedBy = "spend";
+      if (limitedByDaily && ps.stoppedBy === "spend") ps.stoppedBy = "daily_limit";
       for (const c of candidates) {
-        const [ins] = await db.insert(schema.leads).values(c.lead).$returningId();
-        const leadId = ins!.id;
-        if (c.enrichment) {
-          await db.insert(schema.leadEnrichments).values({
-            leadId,
-            platform: c.enrichment.platform,
-            sourceUrl: c.enrichment.sourceUrl,
-            bundle: c.enrichment.bundle,
-            notes: null,
-            status: c.enrichment.status,
-            error: null,
+        // One transaction per person. The unique index on lead_handles is the last
+        // line against duplicates: if the handle already belongs to a lead (another
+        // process, a race, a key the in-memory set missed), nothing is written.
+        try {
+          await db.transaction(async (tx) => {
+            const [ins] = await tx.insert(schema.leads).values(c.lead).$returningId();
+            const leadId = ins!.id;
+            for (const h of c.handles) {
+              await tx.insert(schema.leadHandles).values({ leadId, handleKey: h.key, profileUrl: h.url, ...(h.verified ? { verifiedAt: now } : {}) });
+            }
+            if (c.enrichment) {
+              await tx.insert(schema.leadEnrichments).values({
+                leadId,
+                platform: c.enrichment.platform,
+                sourceUrl: c.enrichment.sourceUrl,
+                bundle: c.enrichment.bundle,
+                notes: null,
+                status: c.enrichment.status,
+                error: null,
+              });
+            }
           });
-        }
-        for (const h of c.handles) {
-          await db
-            .insert(schema.leadHandles)
-            .values({ leadId, handleKey: h.key, profileUrl: h.url, ...(h.verified ? { verifiedAt: now } : {}) })
-            .onDuplicateKeyUpdate({ set: { profileUrl: h.url } });
+        } catch (err) {
+          if (!isDuplicateKey(err)) throw err;
+          ps.inserted--;
+          ps.alreadyKnown++;
         }
       }
       await db.update(schema.sourcingProfiles).set({ lastRunAt: now, lastRunSummary: ps }).where(eq(schema.sourcingProfiles.id, profile.id));
       summary.profiles.push(ps);
       summary.inserted += ps.inserted;
       summary.estimatedCostUsd = round4(summary.estimatedCostUsd + ps.estimatedCostUsd);
+      // Running total on the run row, so today's spend survives a crash mid-run.
+      await db.update(schema.syncRuns).set({ detail: summary }).where(eq(schema.syncRuns.id, run!.id));
     }
 
     await db.update(schema.syncRuns).set({ status: "ok", finishedAt: new Date(), detail: summary }).where(eq(schema.syncRuns.id, run!.id));
