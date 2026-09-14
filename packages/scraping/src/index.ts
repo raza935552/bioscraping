@@ -4,3 +4,4 @@ export * from "./apify.js";
 export * from "./fetchers/index.js";
 export { htmlToText } from "./fetchers/web.js";
 export * from "./summarize.js";
+export * from "./discovery/index.js";
