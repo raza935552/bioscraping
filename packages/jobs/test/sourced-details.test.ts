@@ -64,3 +64,12 @@ describe("sourcedDetails", () => {
     expect(handleOf(null)).toBeNull();
   });
 });
+
+describe("YouTube posts with views but no likes or comments", () => {
+  it("engagement is unknown, not 0%", () => {
+    const d = sourcedDetails({ ...lead, sourcingSample: [] }, { followers: 255000, items: [{ url: "https://youtube.com/watch?v=1", views: 170000, postedAt: "2026-09-09T00:00:00Z" }, { url: "https://youtube.com/watch?v=2", views: 90000 }] }, now);
+    expect(d.avgViews).toBe(130000);
+    expect(d.engagementRate).toBeNull();
+    expect(d.engagementBasis).toBeNull();
+  });
+});

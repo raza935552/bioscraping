@@ -101,3 +101,20 @@ describe("no matches across word boundaries (live false positives 2026-09-14)", 
     expect(findTerm("I weigh tlossy things", ["weight loss"])).toBeNull();
   });
 });
+
+describe("50-lead run: languages and businesses", () => {
+  it("flags Indonesian, Turkish and Swedish captions", () => {
+    expect(looksNonEnglish("Dokter kulit yang bisa bantu kamu untuk kulit sehat dan awet muda, ini tips dari saya")).toBe(true);
+    expect(looksNonEnglish("bu antrenman için çok iyi bir program ama daha fazla ağırlık gibi şey lazım")).toBe(true);
+    expect(looksNonEnglish("jag tränar varje dag och det är inte lätt men också mycket roligt för mig")).toBe(true);
+    expect(looksNonEnglish("I help women over 40 lose menopause weight and feel strong again in their bodies")).toBe(false);
+  });
+  it("flags studios, clinics, gyms and companies but not doctors who mention a clinic", () => {
+    expect(looksLikeStore("body20pontevedra", "Boutique EMS Fitness Studio 20-Minute Full Body")).toBe(true);
+    expect(looksLikeStore("topcorefitnessgym", "Your goals. Our guidance.")).toBe(true);
+    expect(looksLikeStore("officialtrttucson", "TRT care for men in Tucson. Energy, strength")).toBe(true);
+    expect(looksLikeStore("getstateos", "The world's first Human Operating System")).toBe(true);
+    expect(looksLikeStore("dralextatem", "Board-certified urologist. I see patients at my clinic in Texas")).toBe(false);
+    expect(looksLikeStore("nic.is.fit", "Team BecomingHER helps women 40–65 lose menopause weight")).toBe(false);
+  });
+});

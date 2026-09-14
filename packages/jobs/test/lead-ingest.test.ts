@@ -171,8 +171,9 @@ describe("planSearches", () => {
     const p = { ...base, platforms: ["tiktok"] as ProfileRow["platforms"], spendCapUsd: "0.30" };
     const { run, skipped, budgetUsd } = planSearches(p, competitors, 30);
     expect(budgetUsd).toBe(0.15);
-    expect(run.map((s) => s.term)).toEqual(["#weightloss", "#glp1journey"]);
-    expect(skipped.map((s) => s.term)).toEqual(["Peptide Sciences", "Limitless Life"]);
+    // Audience terms get 60% of $0.15 ($0.09): one hashtag, then a competitor name, then the rest.
+    expect(run.map((s) => s.term)).toEqual(["#weightloss", "Peptide Sciences"]);
+    expect(skipped.map((s) => s.term)).toEqual(["Limitless Life", "#glp1journey"]);
     expect(run.reduce((a, s) => a + s.estimatedCostUsd, 0) + verifyReserveUsd(p)).toBeLessThanOrEqual(0.3);
   });
 
@@ -289,7 +290,7 @@ describe("quality in planProfile (first live run lessons)", () => {
     const { candidates, summary } = await planProfile(wl, [], hits, emptyKnown(), v, now);
     expect(candidates.map((c) => c.hit.handle)).toEqual(["good"]);
     expect(reads).toBe(1);
-    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1 });
+    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0 });
   });
 
   it("a dead account after the read is not saved, does not use a slot, and is remembered", async () => {
@@ -360,5 +361,24 @@ describe("review queue limit (fixed batch for marketing)", () => {
     expect(reviewRoom(50, 44, 10)).toEqual({ cap: 6, limited: true });
     expect(reviewRoom(50, 50, 10)).toEqual({ cap: 0, limited: true });
     expect(reviewRoom(50, 61, 10)).toEqual({ cap: 0, limited: true });
+  });
+});
+
+describe("fixes from the 50-lead test run (2026-09-14)", () => {
+  it("follower range is enforced after the profile read (Instagram rows have no count)", async () => {
+    const ig: ProfileRow = { ...profile, platforms: ["instagram"], followerMin: { instagram: 5000 }, followerMax: { instagram: 500000 }, matchTerms: ["weight loss"], dailyCap: 10, countries: [] };
+    const v: VerifyFn = async (h) => ({ followers: h.handle === "tiny" ? 32 : 22027, bio: null, lastPostAt: "2026-09-12T00:00:00Z", isRepostRatio: null, profileUrl: h.profileUrl, items: [{ url: h.profileUrl + "/p", text: "my weight loss journey update this week" }] });
+    const row = (handle: string) => hit(handle, { platform: "instagram", followers: null, profileUrl: `https://www.instagram.com/${handle}/`, postText: "weight loss journey" });
+    const { candidates, summary } = await planProfile(ig, [], new Map([["t", [row("tiny"), row("ioana")]]]), emptyKnown(), v, now);
+    expect(candidates.map((c) => c.hit.handle)).toEqual(["ioana"]);
+    expect(summary.quality?.followers).toBe(1);
+    expect(summary.gated).toEqual([{ key: "instagram:tiny", reason: "followers" }]);
+  });
+
+  it("competitor names get a share of the budget even when hashtags could use all of it", () => {
+    const p = { platforms: ["tiktok", "instagram"] as ProfileRow["platforms"], terms: { tiktok: ["#a", "#b", "#c", "#d", "#e"], instagram: ["#a", "#b", "#c", "#d"] }, dailyCap: 10, spendCapUsd: "1.00" };
+    const { run } = planSearches(p, [{ name: "Amino Club" }, { name: "Swiss Chems" }], 30);
+    expect(run.some((s) => s.term === "Amino Club")).toBe(true);
+    expect(planSearches(p, [], 30).run.filter((s) => s.term.startsWith("#")).length).toBe(9); // no competitors: hashtags keep the whole budget
   });
 });

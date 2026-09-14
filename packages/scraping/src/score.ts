@@ -177,7 +177,7 @@ export function scoreHit(input: ScoreInput): ScoreResult {
 
   if (looksLikeStore(hit.handle, verified?.bio ?? hit.bio)) {
     score -= 25;
-    reasons.push("looks like a store or vendor, not a creator (−25)");
+    reasons.push("looks like a store, clinic or business, not a creator (−25)");
   }
 
   return {

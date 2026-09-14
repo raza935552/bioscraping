@@ -28,6 +28,8 @@ export const discoverYouTube: Discoverer = async (term, deps, opts) => {
     { token: deps.apify.token, fetchImpl: deps.fetchImpl },
     deps.apify.actors["discover:youtube"] ?? DISCOVERY_ACTORS.youtube,
     input,
+    // Channel search with subscriber filters regularly passes 90s (a live run timed out on 2026-09-14).
+    { timeoutSec: 240 },
   );
   const hits: DiscoveryHit[] = [];
   for (const r of rows) {

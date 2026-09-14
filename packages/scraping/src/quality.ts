@@ -6,7 +6,9 @@
 
 import type { DiscoveryHit } from "./discovery/types.js";
 
-export type QualityReason = "non_english" | "dead" | "off_niche";
+/** "followers": outside the audience's follower range once the profile read shows the real count
+ *  (Instagram search rows carry no follower count, so the range can only be checked after the read). */
+export type QualityReason = "non_english" | "dead" | "off_niche" | "followers";
 
 /** Lowercase letters and digits only: "#WeightLoss" and "weight loss" both → "weightloss". */
 export function compact(s: string): string {
@@ -27,6 +29,12 @@ const FOREIGN = new Set(
     "und der die das ist nicht mit ich sie ein eine auch wird sind het een niet voor zijn",
     // French / Italian
     "les et est pas pour avec une des vous je nous sont dans il elle che non per sono della gli",
+    // Indonesian / Malay (live 2026-09-14: an Indonesian anti-aging doctor passed)
+    "yang dan untuk dengan ini itu tidak ada kamu aku kita ke dari juga bisa sudah akan atau karena saya dokter kulit",
+    // Turkish
+    "ve bir bu için ile çok ama gibi daha ben sen olan değil nasıl şey",
+    // more Swedish / Danish / Norwegian / Dutch
+    "jag inte också mig min mitt hur vad mycket ikke også meget hvad ik maar ook wat heb",
   ].join(" ").split(" "),
 );
 
@@ -78,10 +86,15 @@ export function findTerm(text: string | null | undefined, terms: string[]): stri
 }
 
 const STORE_BIO = /\b(shop now|order now|our products|free shipping|wholesale|we ship|buy now|add to cart|in stock|restock)\b/i;
-/** A seller account rather than a creator: store-like handle or storefront language in the bio. */
+// Businesses that passed as creators on 2026-09-14: an EMS studio, a clinic, a TRT clinic, a gym, a software company.
+const BUSINESS_HANDLE = /(gym|clinic|studio|medspa|spa$|pharmacy|dental|physio|chiropractic)/;
+// Deliberately narrow: doctors who mention "my clinic" are good creators, so a bare "clinic" doesn't count.
+const BUSINESS_BIO = /\b(med ?spa|fitness studio|ems studio|boutique studio|our (team|clinic|studio|gym|services|patients|members|location)|book (a|your) (consult|consultation|appointment|session)|book now|appointments? available|now open|call (us|now)|franchise|care for (men|women) in|human operating system)\b/i;
+/** A seller or business account rather than a creator: store-like or business-like handle, or storefront or clinic language in the bio. */
 export function looksLikeStore(handle: string, bio: string | null | undefined): boolean {
   const h = handle.toLowerCase();
-  return /\.(com|co|shop|store|net)$/.test(h) || /(shop|store)/.test(h) || STORE_BIO.test(bio ?? "");
+  const b = bio ?? "";
+  return /\.(com|co|shop|store|net)$/.test(h) || /(shop|store)/.test(h) || BUSINESS_HANDLE.test(h) || STORE_BIO.test(b) || BUSINESS_BIO.test(b);
 }
 
 export const DEAD_AFTER_DAYS = 180;

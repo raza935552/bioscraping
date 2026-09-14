@@ -291,7 +291,7 @@ export async function planProfile(
   const { kept, rejected } = applyFilters([...merged.values()], audienceRules(profile));
   summary.rejected = rejected;
 
-  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0 };
+  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0 };
   const gated: Array<{ key: string; reason: QualityReason }> = [];
   const outcome: Record<string, { checked: number; kept: number }> = {};
   const track = (h: DiscoveryHit, keptIt: boolean) => {
@@ -352,7 +352,16 @@ export async function planProfile(
     }
 
     const s = scoreHit({ hit: h, verified: v, rules: rulesFor(profile, h), competitors, now });
-    const reason = v ? qualityGate(gateInput(h, v, s.competitor != null)) : deadWithoutRead(h, now) ? "dead" : null;
+    const fMin = profile.followerMin?.[h.platform];
+    const fMax = profile.followerMax?.[h.platform];
+    const outOfRange = v?.followers != null && ((fMin != null && v.followers < fMin) || (fMax != null && v.followers > fMax));
+    const reason: QualityReason | null = outOfRange
+      ? "followers"
+      : v
+        ? qualityGate(gateInput(h, v, s.competitor != null))
+        : deadWithoutRead(h, now)
+          ? "dead"
+          : null;
     if (reason) {
       quality[reason]++;
       gated.push({ key: handleKey(h.platform, h.handle), reason });
@@ -601,7 +610,10 @@ export function planSearches(
   // Advance by as many competitors as one day's budget covers, so tomorrow starts
   // where today stopped instead of repeating most of today's searches.
   const priceOf = (p: DiscoveryPlatform) => round4(ACTOR_UNIT_PRICE[p] * perTerm);
-  const audienceCost = profile.platforms.reduce((a, p) => a + (profile.terms[p]?.length ?? 0) * priceOf(p), 0);
+  const audienceCost = Math.min(
+    profile.platforms.reduce((a, p) => a + (profile.terms[p]?.length ?? 0) * priceOf(p), 0),
+    n > 0 ? budgetUsd * AUDIENCE_SHARE : Infinity,
+  );
   const perCompetitor = profile.platforms.filter((p) => COMPETITOR_NAME_PLATFORMS.has(p)).reduce((a, p) => a + priceOf(p), 0);
   const perDay = perCompetitor > 0 ? Math.max(1, Math.floor(Math.max(0, budgetUsd - audienceCost) / perCompetitor)) : 1;
   const shift = n > 0 ? (((rotation * perDay) % n) + n) % n : 0;
@@ -634,10 +646,23 @@ export function planSearches(
     }
     return out;
   };
-  const all = [
-    ...roundRobin((p) => profile.terms[p] ?? []),
-    ...roundRobin((p) => (COMPETITOR_NAME_PLATFORMS.has(p) ? rotated : [])),
-  ];
+  const audience = roundRobin((p) => profile.terms[p] ?? []);
+  const named = roundRobin((p) => (COMPETITOR_NAME_PLATFORMS.has(p) ? rotated : []));
+  // Competitor-name searches are how tier-one affiliates are found, so audience terms may use
+  // at most AUDIENCE_SHARE of the search budget when there are competitors to search. On
+  // 2026-09-14 hashtags used every dollar and not one of 47 leads was a competitor affiliate.
+  // Whatever the competitor searches don't use goes back to the remaining audience terms.
+  const audienceBudget = named.length > 0 ? round4(budgetUsd * AUDIENCE_SHARE) : budgetUsd;
+  let audienceSpend = 0;
+  const firstAudience: PlannedSearch[] = [];
+  const laterAudience: PlannedSearch[] = [];
+  for (const a of audience) {
+    if (audienceSpend + a.estimatedCostUsd <= audienceBudget) {
+      firstAudience.push(a);
+      audienceSpend = round4(audienceSpend + a.estimatedCostUsd);
+    } else laterAudience.push(a);
+  }
+  const all = [...firstAudience, ...named, ...laterAudience];
   const run: PlannedSearch[] = [];
   const skipped: PlannedSearch[] = [];
   let spent = 0;
@@ -651,6 +676,9 @@ export function planSearches(
 }
 
 const termStatsConfigKey = (profileId: number) => `sourcing_term_stats:${profileId}`;
+
+/** Share of an audience's search budget its own terms may use before competitor names get a turn. */
+export const AUDIENCE_SHARE = 0.6;
 
 const PER_TERM = 30;
 

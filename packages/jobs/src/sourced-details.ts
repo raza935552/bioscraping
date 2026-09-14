@@ -66,12 +66,16 @@ export function sourcedDetails(lead: DetailLead, bundle: DetailBundle | null, no
   const avgViews = mean(viewed.map((p) => p.views!));
   let engagementRate: number | null = null;
   let engagementBasis: SourcedDetails["engagementBasis"] = null;
-  if (viewed.length > 0) {
-    engagementRate = mean(viewed.map((p) => ((p.likes ?? 0) + (p.comments ?? 0)) / p.views!));
+  // A post counts toward engagement only if it reports likes or comments; YouTube's channel
+  // reader returns views alone, which would otherwise read as 0% engagement.
+  const reacts = (p: DetailPost) => typeof p.likes === "number" || typeof p.comments === "number";
+  const viewedWithReactions = viewed.filter(reacts);
+  if (viewedWithReactions.length > 0) {
+    engagementRate = mean(viewedWithReactions.map((p) => ((p.likes ?? 0) + (p.comments ?? 0)) / p.views!));
     engagementBasis = "views";
-  } else {
+  } else if (viewed.length === 0) {
     const followers = bundle?.followers ?? lead.totalReach;
-    const reacted = posts.filter((p) => typeof p.likes === "number" || typeof p.comments === "number");
+    const reacted = posts.filter(reacts);
     if (followers && followers > 0 && reacted.length > 0) {
       engagementRate = mean(reacted.map((p) => ((p.likes ?? 0) + (p.comments ?? 0)) / followers));
       engagementBasis = "followers";
