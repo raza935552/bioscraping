@@ -70,6 +70,9 @@ importers:
       '@biolinx/jobs':
         specifier: workspace:*
         version: link:../../packages/jobs
+      '@biolinx/scraping':
+        specifier: workspace:*
+        version: link:../../packages/scraping
       '@fastify/cookie':
         specifier: ^11.0.1
         version: 11.1.2

@@ -31,8 +31,12 @@ import {
   suggestClassification,
   BLACK_FRIDAY,
   EXTERNAL_AFFILIATE_GOAL,
+  NICHE_PRIORITY,
   SETTINGS_SECTIONS,
+  brandFitForNiche,
+  normalizeNiche,
 } from "@biolinx/core";
+import { DEFAULT_EXCLUDE_TERMS } from "@biolinx/scraping";
 import {
   approveMessage,
   confirmSent,
@@ -40,8 +44,10 @@ import {
   ingestReply,
   instantlyPusher,
   provisionSignup,
+  runCustomerioSync,
   runEnrichPersonalize,
   runIdevSync,
+  runLeadIngest,
   runMetricsDigest,
   runOutreachDispatch,
   runRankRecompute,
@@ -129,6 +135,15 @@ async function audit(req: { user: SessionUser | null }, action: string, subjectT
     subjectId,
     detail,
   });
+}
+
+interface SamplePost {
+  url: string;
+  text: string;
+  postedAt: string | null;
+  likes?: number;
+  views?: number;
+  comments?: number;
 }
 
 // ── Health ──────────────────────────────────────────────────────────────
@@ -385,12 +400,16 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     sp?: string;
   };
   const rows = await db.select().from(schema.leads);
+  const reviewable = (l: { sourcingReview: string | null }) => l.sourcingReview == null || l.sourcingReview === "accepted";
   let filtered =
     q.view === "triage"
-      ? rows.filter((l) => l.needsTriage)
+      ? rows.filter((l) => l.needsTriage && reviewable(l))
+      : q.view === "sourced"
+        ? rows.filter((l) => l.sourcingReview === "pending")
       : q.view === "queue"
         ? rows.filter(
             (l) =>
+              reviewable(l) &&
               !l.isDead &&
               !isSp5(l.subProfile) &&
               !isConverted(l.affiliationStatus) &&
@@ -421,11 +440,12 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     verifiedReach: filtered.filter((l) => l.totalReach != null).length,
     personalized: filtered.filter((l) => hasUsableNotes(l.personalizationNotes)).length,
     dead: filtered.filter((l) => l.isDead).length,
+    sourcedPending: rows.filter((l) => l.sourcingReview === "pending").length,
   };
 
   // Sort — every comparator is ASCENDING; `dir` flips it. Each column has a
   // sensible default direction used when the user hasn't picked one.
-  const sort = q.sort ?? "rank";
+  const sort = q.sort ?? (q.view === "sourced" ? "score" : "rank");
   const asc: Record<string, (a: typeof rows[number], b: typeof rows[number]) => number> = {
     rank: (a, b) => (a.conversionRank ?? 1e9) - (b.conversionRank ?? 1e9),
     reach: (a, b) => (a.totalReach ?? -1) - (b.totalReach ?? -1),
@@ -434,8 +454,9 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     sp: (a, b) => (a.subProfile ?? "").localeCompare(b.subProfile ?? ""),
     lastTouch: (a, b) => new Date(a.lastReachedOut ?? 0).getTime() - new Date(b.lastReachedOut ?? 0).getTime(),
     name: (a, b) => (a.firstName ?? "").localeCompare(b.firstName ?? ""),
+    score: (a, b) => (a.sourcingScore ?? 0) - (b.sourcingScore ?? 0),
   };
-  const defaultDir: Record<string, 1 | -1> = { rank: 1, name: 1, status: 1, platform: 1, sp: 1, reach: -1, lastTouch: -1 };
+  const defaultDir: Record<string, 1 | -1> = { rank: 1, name: 1, status: 1, platform: 1, sp: 1, reach: -1, lastTouch: -1, score: -1 };
   const sorter = asc[sort] ?? asc.rank!;
   const dir = q.dir === "asc" ? 1 : q.dir === "desc" ? -1 : (defaultDir[sort] ?? 1);
   filtered.sort((a, b) => dir * sorter(a, b));
@@ -467,6 +488,18 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       lastReachedOut: l.lastReachedOut,
       followUpsSent: l.followUpsSent,
       hasNotes: hasUsableNotes(l.personalizationNotes),
+      sourcingScore: l.sourcingScore,
+      sourcingReason: l.sourcingReason,
+      sourcingReview: l.sourcingReview,
+      brandFit: l.brandFit,
+      affiliateCode: l.affiliateCode,
+      competitor: l.otherCreatorCompany,
+      lastPostAt: l.lastPostAt,
+      doesLive: l.doesLive,
+      promoTrackRecord: l.promoTrackRecord,
+      contentOriginal: l.contentOriginal,
+      scoreReasons: l.sourcingReview ? (l.notes ?? "").split("\n").filter(Boolean) : [],
+      sample: (l.sourcingSample as SamplePost[] | null) ?? [],
       enrichmentStatus: l.enrichmentStatus,
       profileUrl: profileUrlFor(l),
     })),
@@ -524,6 +557,219 @@ app.get("/api/leads/:id", { preHandler: requireAuth }, async (req, reply) => {
   return { lead, messages, replies, enrichments };
 });
 
+// ── Audiences (sourcing profiles) + competitors ─────────────────────────
+
+const PLATFORMS = ["tiktok", "youtube", "skool", "reddit", "instagram"] as const;
+type Platform = (typeof PLATFORMS)[number];
+
+const AUDIENCE_DEFAULTS = {
+  followerMin: { tiktok: 5000, instagram: 5000, youtube: 2000, skool: 100 } as Record<string, number>,
+  followerMax: { tiktok: 500000, instagram: 500000, youtube: 300000, skool: 20000 } as Record<string, number>,
+  countries: ["US", "CA", "GB", "AU"],
+  language: "en",
+  activityDays: 30,
+  excludeTerms: DEFAULT_EXCLUDE_TERMS,
+  dailyCap: 50,
+  spendCapUsd: "2.00",
+};
+
+function lines(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
+  if (typeof v === "string") return v.split(/\r?\n|,/).map((s) => s.trim()).filter(Boolean);
+  return [];
+}
+
+type AudienceInsert = Omit<typeof schema.sourcingProfiles.$inferInsert, "id">;
+
+/** Validate an audience body. Returns the row to write, or a plain-language error. */
+function parseAudience(body: Record<string, unknown>): { row: AudienceInsert } | { error: string } {
+  const name = String(body.name ?? "").trim();
+  if (!name || name.length > 120) return { error: "name is required (max 120 characters)" };
+  const niche = normalizeNiche(String(body.niche ?? ""));
+  if (!niche) return { error: `niche must be one of: ${NICHE_PRIORITY.join(", ")}` };
+  const platforms = lines(body.platforms).filter((p): p is Platform => (PLATFORMS as readonly string[]).includes(p));
+  if (platforms.length === 0) return { error: "pick at least one platform" };
+  const termsIn = (body.terms ?? {}) as Record<string, unknown>;
+  const terms: Partial<Record<Platform, string[]>> = {};
+  for (const p of platforms) {
+    const t = lines(termsIn[p]);
+    if (t.length === 0) return { error: `add at least one search term for ${p}` };
+    terms[p] = t;
+  }
+  const num = (v: unknown, lo: number, hi: number, label: string): number | { error: string } => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < lo || n > hi) return { error: `${label} must be between ${lo} and ${hi}` };
+    return n;
+  };
+  const dailyCap = num(body.dailyCap ?? AUDIENCE_DEFAULTS.dailyCap, 1, 200, "daily cap");
+  if (typeof dailyCap !== "number") return dailyCap;
+  const spend = num(body.spendCapUsd ?? AUDIENCE_DEFAULTS.spendCapUsd, 0.5, 10, "spend cap");
+  if (typeof spend !== "number") return spend;
+  const activityDays = num(body.activityDays ?? AUDIENCE_DEFAULTS.activityDays, 1, 365, "activity window");
+  if (typeof activityDays !== "number") return activityDays;
+  const bounds = (v: unknown): Partial<Record<Platform, number>> => {
+    const out: Partial<Record<Platform, number>> = {};
+    for (const p of platforms) {
+      const n = Number((v as Record<string, unknown> | undefined)?.[p]);
+      if (Number.isFinite(n) && n > 0) out[p] = n;
+    }
+    return out;
+  };
+  const brandFit = ["biolinx", "aro", "both"].includes(String(body.brandFit)) ? String(body.brandFit) : brandFitForNiche(niche);
+  return {
+    row: {
+      name,
+      active: body.active !== false,
+      niche,
+      brandFit,
+      platforms,
+      terms,
+      seedAccounts: body.seedAccounts ?? null,
+      followerMin: bounds(body.followerMin ?? AUDIENCE_DEFAULTS.followerMin),
+      followerMax: bounds(body.followerMax ?? AUDIENCE_DEFAULTS.followerMax),
+      activityDays,
+      countries: lines(body.countries ?? AUDIENCE_DEFAULTS.countries).map((c) => c.toUpperCase()),
+      language: String(body.language ?? AUDIENCE_DEFAULTS.language).slice(0, 8),
+      matchTerms: lines(body.matchTerms),
+      excludeTerms: lines(body.excludeTerms ?? AUDIENCE_DEFAULTS.excludeTerms),
+      excludeHandles: lines(body.excludeHandles).map((h) => h.replace(/^@/, "").toLowerCase()),
+      dailyCap,
+      spendCapUsd: spend.toFixed(2),
+    },
+  };
+}
+
+app.get("/api/audiences", { preHandler: requireRole("admin", "ops") }, async () => ({
+  profiles: await db.select().from(schema.sourcingProfiles).orderBy(desc(schema.sourcingProfiles.id)),
+  competitors: await db.select().from(schema.competitors).orderBy(schema.competitors.name),
+  niches: [...NICHE_PRIORITY],
+  platforms: [...PLATFORMS],
+  defaults: AUDIENCE_DEFAULTS,
+}));
+
+app.post("/api/audiences", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const parsed = parseAudience((req.body ?? {}) as Record<string, unknown>);
+  if ("error" in parsed) return reply.code(400).send({ error: parsed.error });
+  const [ins] = await db
+    .insert(schema.sourcingProfiles)
+    .values({ ...parsed.row, createdByUserId: req.user!.id, updatedByUserId: req.user!.id })
+    .$returningId();
+  await audit(req, "audience.create", "sourcing_profiles", ins!.id, { name: parsed.row.name });
+  return { ok: true, id: ins!.id };
+});
+
+app.put("/api/audiences/:id", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const parsed = parseAudience((req.body ?? {}) as Record<string, unknown>);
+  if ("error" in parsed) return reply.code(400).send({ error: parsed.error });
+  await db.update(schema.sourcingProfiles).set({ ...parsed.row, updatedByUserId: req.user!.id }).where(eq(schema.sourcingProfiles.id, id));
+  await audit(req, "audience.update", "sourcing_profiles", id, { name: parsed.row.name, active: parsed.row.active });
+  return { ok: true };
+});
+
+app.delete("/api/audiences/:id", { preHandler: requireRole("admin", "ops") }, async (req) => {
+  const id = Number((req.params as { id: string }).id);
+  await db.delete(schema.sourcingProfiles).where(eq(schema.sourcingProfiles.id, id));
+  await audit(req, "audience.delete", "sourcing_profiles", id, {});
+  return { ok: true };
+});
+
+app.post("/api/audiences/:id/run", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const result = await withMysqlLock(conn.pool, "job:lead-ingest", () => runLeadIngest(db, undefined, { profileId: id }));
+  if (result === null) return reply.code(409).send({ error: "sourcing is already running" });
+  await audit(req, "audience.run", "sourcing_profiles", id, { inserted: result.inserted, cost: result.estimatedCostUsd });
+  return { ok: true, result };
+});
+
+type CompetitorInsert = Omit<typeof schema.competitors.$inferInsert, "id">;
+
+function parseCompetitor(body: Record<string, unknown>): { row: CompetitorInsert } | { error: string } {
+  const name = String(body.name ?? "").trim();
+  if (!name) return { error: "name is required" };
+  const codePattern = body.codePattern ? String(body.codePattern).slice(0, 120) : null;
+  if (codePattern) {
+    try {
+      new RegExp(codePattern);
+    } catch {
+      return { error: "code pattern is not a valid regular expression" };
+    }
+  }
+  const pct = body.commissionPct == null || body.commissionPct === "" ? null : Number(body.commissionPct);
+  if (pct != null && (!Number.isFinite(pct) || pct < 0 || pct > 100)) return { error: "commission must be 0-100" };
+  return {
+    row: {
+      name,
+      domains: lines(body.domains).map((d) => d.toLowerCase()),
+      codePattern,
+      codePrefix: body.codePrefix ? String(body.codePrefix).trim().toUpperCase().slice(0, 24) : null,
+      commissionPct: pct,
+      recurring: typeof body.recurring === "boolean" ? body.recurring : null,
+      notes: body.notes ? String(body.notes) : null,
+      active: body.active !== false,
+    },
+  };
+}
+
+app.post("/api/competitors", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const parsed = parseCompetitor((req.body ?? {}) as Record<string, unknown>);
+  if ("error" in parsed) return reply.code(400).send({ error: parsed.error });
+  const [ins] = await db.insert(schema.competitors).values(parsed.row).$returningId();
+  await audit(req, "competitor.create", "competitors", ins!.id, { name: parsed.row.name });
+  return { ok: true, id: ins!.id };
+});
+app.put("/api/competitors/:id", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const parsed = parseCompetitor((req.body ?? {}) as Record<string, unknown>);
+  if ("error" in parsed) return reply.code(400).send({ error: parsed.error });
+  await db.update(schema.competitors).set(parsed.row).where(eq(schema.competitors.id, id));
+  await audit(req, "competitor.update", "competitors", id, { name: parsed.row.name });
+  return { ok: true };
+});
+app.delete("/api/competitors/:id", { preHandler: requireRole("admin", "ops") }, async (req) => {
+  const id = Number((req.params as { id: string }).id);
+  await db.delete(schema.competitors).where(eq(schema.competitors.id, id));
+  await audit(req, "competitor.delete", "competitors", id, {});
+  return { ok: true };
+});
+
+// ── Sourced-lead review ─────────────────────────────────────────────────
+
+app.post("/api/leads/:id/review", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, id) });
+  if (!lead) return reply.code(404).send({ error: "not found" });
+  if (lead.sourcingReview !== "pending") return reply.code(409).send({ error: "this lead is not waiting for review" });
+  // The only fields a human sets to true/false by hand. Unchecked = unknown, so absent keys stay null.
+  const flags: Partial<typeof schema.leads.$inferInsert> = {};
+  for (const k of ["doesLive", "promoTrackRecord", "contentOriginal"] as const) if (typeof b[k] === "boolean") flags[k] = b[k] as boolean;
+
+  if (b.decision === "reject") {
+    await db
+      .update(schema.leads)
+      .set({ sourcingReview: "rejected", sourcingRejectedReason: b.reason ? String(b.reason).slice(0, 120) : null, ...flags })
+      .where(eq(schema.leads.id, id));
+    await audit(req, "lead.sourcing.reject", "leads", id, { reason: b.reason ?? null });
+    return { ok: true };
+  }
+  if (b.decision !== "accept") return reply.code(400).send({ error: "decision must be accept or reject" });
+  const affiliation = String(b.affiliationStatus ?? "");
+  if (affiliation !== "Unsigned" && affiliation !== "Signed elsewhere") return reply.code(400).send({ error: "affiliation must be Unsigned or Signed elsewhere" });
+  const sp = String(b.subProfile ?? "").toUpperCase();
+  if (!["SP1", "SP2", "SP3", "SP4"].includes(sp)) return reply.code(400).send({ error: "sub-profile must be SP1-SP4 (reject goodwill advocates instead)" });
+  const niche = normalizeNiche(String(b.niche ?? lead.niche ?? ""));
+  if (!niche) return reply.code(400).send({ error: "niche is required" });
+  const brandFit = ["biolinx", "aro", "both"].includes(String(b.brandFit)) ? String(b.brandFit) : (lead.brandFit ?? brandFitForNiche(niche));
+  await db
+    .update(schema.leads)
+    .set({ sourcingReview: "accepted", affiliationStatus: affiliation, subProfile: sp, subProfileConfidence: "human", niche, brandFit, enrichmentStatus: "pending", ...flags })
+    .where(eq(schema.leads.id, id));
+  await audit(req, "lead.sourcing.accept", "leads", id, { affiliation, subProfile: sp, niche });
+  if (lead.email) void runCustomerioSync(db, undefined, { leadIds: [id] }).catch(() => {});
+  return { ok: true };
+});
+
 // ── Jobs (manual triggers, lock-guarded) ────────────────────────────────
 
 const jobTriggers: Record<string, () => Promise<unknown>> = {
@@ -532,6 +778,8 @@ const jobTriggers: Record<string, () => Promise<unknown>> = {
   "referral-expiry": () => runReferralExpiry(db),
   "metrics-digest": () => runMetricsDigest(db),
   "enrich-personalize": () => runEnrichPersonalize(db),
+  "lead-ingest": () => runLeadIngest(db),
+  "customerio-sync": () => runCustomerioSync(db),
 };
 
 app.post("/api/jobs/:job", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
