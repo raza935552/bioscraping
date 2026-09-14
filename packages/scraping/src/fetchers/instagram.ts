@@ -2,7 +2,7 @@
 
 import { runActorSync } from "../apify.js";
 import type { Fetcher, SourceItem } from "../types.js";
-import { clip, takeItems, toIso, toNumber } from "./shared.js";
+import { clip, engagement, takeItems, toIso, toNumber } from "./shared.js";
 
 interface InstagramRow {
   username?: string;
@@ -12,7 +12,7 @@ interface InstagramRow {
   url?: string;
   private?: boolean;
   error?: string;
-  latestPosts?: Array<{ caption?: string; url?: string | null; timestamp?: string | null }>;
+  latestPosts?: Array<{ caption?: string; url?: string | null; timestamp?: string | null; likesCount?: number; commentsCount?: number; videoViewCount?: number }>;
 }
 
 export const fetchInstagram: Fetcher = async (c, deps) => {
@@ -23,7 +23,12 @@ export const fetchInstagram: Fetcher = async (c, deps) => {
   );
   const p = rows.find((r) => !r.error);
   const posts = p && !p.private ? (p.latestPosts ?? []) : [];
-  const items: SourceItem[] = posts.map((x) => ({ url: x.url ?? "", text: clip(x.caption), postedAt: toIso(x.timestamp) }));
+  const items: SourceItem[] = posts.map((x) => ({
+    url: x.url ?? "",
+    text: clip(x.caption),
+    postedAt: toIso(x.timestamp),
+    ...engagement({ likes: x.likesCount, comments: x.commentsCount, views: x.videoViewCount }),
+  }));
   return {
     platform: "instagram",
     profileUrl: p?.url ?? c.url,

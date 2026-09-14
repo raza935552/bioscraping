@@ -16,6 +16,11 @@ export interface SourceItem {
   url: string;
   text: string;
   postedAt: string | null; // ISO 8601 or null
+  /** Engagement when the platform read provides it; omitted otherwise. */
+  likes?: number;
+  views?: number;
+  comments?: number;
+  isRepost?: boolean;
 }
 
 export interface SourceBundle {

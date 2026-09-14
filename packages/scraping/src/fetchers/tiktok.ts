@@ -5,13 +5,17 @@
 
 import { runActorSync } from "../apify.js";
 import type { Fetcher, SourceItem } from "../types.js";
-import { clip, takeItems, toIso, toNumber } from "./shared.js";
+import { clip, engagement, takeItems, toIso, toNumber } from "./shared.js";
 
 interface TikTokRow {
   text?: string;
   webVideoUrl?: string;
   createTimeISO?: string;
   error?: string;
+  diggCount?: number;
+  playCount?: number;
+  commentCount?: number;
+  isRepost?: boolean;
   authorMeta?: { name?: string; nickName?: string; signature?: string; fans?: number; profileUrl?: string };
 }
 
@@ -23,7 +27,12 @@ export const fetchTikTok: Fetcher = async (c, deps) => {
   );
   const videos = rows.filter((r) => !r.error);
   const meta = videos[0]?.authorMeta;
-  const items: SourceItem[] = videos.map((r) => ({ url: r.webVideoUrl ?? "", text: clip(r.text), postedAt: toIso(r.createTimeISO) }));
+  const items: SourceItem[] = videos.map((r) => ({
+    url: r.webVideoUrl ?? "",
+    text: clip(r.text),
+    postedAt: toIso(r.createTimeISO),
+    ...engagement({ likes: r.diggCount, views: r.playCount, comments: r.commentCount, isRepost: r.isRepost }),
+  }));
   return {
     platform: "tiktok",
     profileUrl: meta?.profileUrl ?? c.url,

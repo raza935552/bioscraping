@@ -28,3 +28,17 @@ export function takeItems(items: SourceItem[], max = MAX_ITEMS): SourceItem[] {
 export function toNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
+
+/** Build the optional engagement fields, omitting anything not numeric
+ *  (exactOptionalPropertyTypes forbids `views: undefined`). */
+export function engagement(o: { likes?: unknown; views?: unknown; comments?: unknown; isRepost?: unknown }): Pick<SourceItem, "likes" | "views" | "comments" | "isRepost"> {
+  const out: Pick<SourceItem, "likes" | "views" | "comments" | "isRepost"> = {};
+  const l = toNumber(o.likes);
+  const v = toNumber(o.views);
+  const c = toNumber(o.comments);
+  if (l != null) out.likes = l;
+  if (v != null) out.views = v;
+  if (c != null) out.comments = c;
+  if (typeof o.isRepost === "boolean") out.isRepost = o.isRepost;
+  return out;
+}

@@ -3,7 +3,7 @@
 
 import { runActorSync } from "../apify.js";
 import type { Fetcher, SourceItem } from "../types.js";
-import { clip, takeItems, toIso, toNumber } from "./shared.js";
+import { clip, engagement, takeItems, toIso, toNumber } from "./shared.js";
 
 interface YouTubeRow {
   title?: string;
@@ -14,6 +14,9 @@ interface YouTubeRow {
   numberOfSubscribers?: number | null;
   channelUrl?: string;
   error?: string;
+  viewCount?: number;
+  likes?: number;
+  commentsCount?: number;
 }
 
 export const fetchYouTube: Fetcher = async (c, deps) => {
@@ -24,7 +27,12 @@ export const fetchYouTube: Fetcher = async (c, deps) => {
   );
   const videos = rows.filter((r) => !r.error && r.url);
   const first = videos[0];
-  const items: SourceItem[] = videos.map((r) => ({ url: r.url ?? "", text: clip(r.title), postedAt: toIso(r.date) }));
+  const items: SourceItem[] = videos.map((r) => ({
+    url: r.url ?? "",
+    text: clip(r.title),
+    postedAt: toIso(r.date),
+    ...engagement({ views: r.viewCount, likes: r.likes, comments: r.commentsCount }),
+  }));
   return {
     platform: "youtube",
     profileUrl: first?.channelUrl ?? c.url,

@@ -38,6 +38,9 @@ describe("fetchTikTok", () => {
           text: "what I eat in a day pregnant",
           webVideoUrl: "https://www.tiktok.com/@maryanadvorska/video/1",
           createTimeISO: "2026-08-01T10:00:00.000Z",
+          diggCount: 500,
+          playCount: 12000,
+          commentCount: 40,
           authorMeta: {
             name: "maryanadvorska",
             nickName: "Maryana",
@@ -66,6 +69,9 @@ describe("fetchTikTok", () => {
       url: "https://www.tiktok.com/@maryanadvorska/video/1",
       text: "what I eat in a day pregnant",
       postedAt: "2026-08-01T10:00:00.000Z",
+      likes: 500,
+      views: 12000,
+      comments: 40,
     });
   });
 
@@ -99,7 +105,7 @@ describe("fetchInstagram", () => {
           followersCount: 42000,
           url: "https://www.instagram.com/annie/",
           latestPosts: [
-            { caption: "The exact list I pull…", url: "https://www.instagram.com/p/abc/", timestamp: "2026-08-20T00:00:00.000Z" },
+            { caption: "The exact list I pull…", url: "https://www.instagram.com/p/abc/", timestamp: "2026-08-20T00:00:00.000Z", likesCount: 900, commentsCount: 12 },
           ],
         },
       ],
@@ -111,7 +117,7 @@ describe("fetchInstagram", () => {
     expect(b.bio).toBe("NP · hormones");
     expect(b.followers).toBe(42000);
     expect(b.items).toEqual([
-      { url: "https://www.instagram.com/p/abc/", text: "The exact list I pull…", postedAt: "2026-08-20T00:00:00.000Z" },
+      { url: "https://www.instagram.com/p/abc/", text: "The exact list I pull…", postedAt: "2026-08-20T00:00:00.000Z", likes: 900, comments: 12 },
     ]);
   });
 
@@ -136,6 +142,7 @@ describe("fetchYouTube", () => {
           title: "Fasting mistakes",
           url: "https://www.youtube.com/watch?v=1",
           date: "2026-08-01T00:00:00.000Z",
+          viewCount: 1500,
           channelName: "Thomas",
           channelDescription: "Science-based nutrition",
           numberOfSubscribers: 3600000,
@@ -157,7 +164,7 @@ describe("fetchYouTube", () => {
     });
     expect(b.displayName).toBe("Thomas");
     expect(b.followers).toBe(3600000);
-    expect(b.items).toEqual([{ url: "https://www.youtube.com/watch?v=1", text: "Fasting mistakes", postedAt: "2026-08-01T00:00:00.000Z" }]);
+    expect(b.items).toEqual([{ url: "https://www.youtube.com/watch?v=1", text: "Fasting mistakes", postedAt: "2026-08-01T00:00:00.000Z", views: 1500 }]);
   });
 });
 
@@ -167,7 +174,7 @@ describe("fetchReddit", () => {
     const d = deps(
       [
         { dataType: "user", username: "pete", profileDescription: "peptide nerd", followersCount: 12, profileUrl: "https://www.reddit.com/user/pete/" },
-        { dataType: "post", title: "My BPC experience", body: "long story", postUrl: "https://www.reddit.com/r/x/comments/1/", createdAt: "2026-08-01T00:00:00.000Z" },
+        { dataType: "post", title: "My BPC experience", body: "long story", postUrl: "https://www.reddit.com/r/x/comments/1/", createdAt: "2026-08-01T00:00:00.000Z", score: 33, numComments: 4 },
         { dataType: "comment", body: "agreed, purity matters", postUrl: "https://www.reddit.com/r/x/comments/2/c1/", createdAt: "2026-08-02T00:00:00.000Z" },
       ],
       (b) => (sent = b),
@@ -176,7 +183,7 @@ describe("fetchReddit", () => {
     expect(sent).toEqual({ usernames: ["pete"], maxPostsCount: 8, maxCommentsCount: 8, includeNSFW: false });
     expect(b.bio).toBe("peptide nerd");
     expect(b.items).toEqual([
-      { url: "https://www.reddit.com/r/x/comments/1/", text: "My BPC experience — long story", postedAt: "2026-08-01T00:00:00.000Z" },
+      { url: "https://www.reddit.com/r/x/comments/1/", text: "My BPC experience — long story", postedAt: "2026-08-01T00:00:00.000Z", likes: 33, comments: 4 },
       { url: "https://www.reddit.com/r/x/comments/2/c1/", text: "agreed, purity matters", postedAt: "2026-08-02T00:00:00.000Z" },
     ]);
   });

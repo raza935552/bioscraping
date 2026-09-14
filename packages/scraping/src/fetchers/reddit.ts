@@ -3,7 +3,7 @@
 
 import { runActorSync } from "../apify.js";
 import type { Fetcher, SourceItem } from "../types.js";
-import { clip, takeItems, toIso, toNumber } from "./shared.js";
+import { clip, engagement, takeItems, toIso, toNumber } from "./shared.js";
 
 interface RedditRow {
   dataType?: string;
@@ -16,6 +16,8 @@ interface RedditRow {
   postUrl?: string;
   contentUrl?: string;
   createdAt?: string;
+  score?: number;
+  numComments?: number;
 }
 
 export const fetchReddit: Fetcher = async (c, deps) => {
@@ -32,6 +34,7 @@ export const fetchReddit: Fetcher = async (c, deps) => {
       url: r.postUrl ?? r.contentUrl ?? "",
       text: r.dataType === "post" ? clip([r.title, r.body].filter(Boolean).join(" — ")) : clip(r.body),
       postedAt: toIso(r.createdAt),
+      ...engagement({ likes: r.score, comments: r.numComments }),
     }));
   return {
     platform: "reddit",
