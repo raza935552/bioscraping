@@ -19,7 +19,8 @@ describe("niche tiers", () => {
     expect(normalizeNiche("Gym/Bodybuilding")).toBe("Gym / PED-curious");
     expect(normalizeNiche("MMA")).toBe("Gym / PED-curious");
     expect(normalizeNiche("MMA/Combat")).toBe("Gym / PED-curious");
-    expect(normalizeNiche("Women's Wellness")).toBe("Anti-aging");
+    expect(normalizeNiche("Women's Wellness")).toBe("Weight-loss seeker"); // A1, per the 2026-09-11 scoring spec
+    expect(normalizeNiche("Menopause")).toBe("Weight-loss seeker");
     expect(normalizeNiche("weight-loss seeker")).toBe("Weight-loss seeker");
     expect(normalizeNiche("nonsense")).toBeNull();
   });

@@ -30,7 +30,12 @@ export function brandFitForNiche(niche: Niche): BrandFit {
 
 const NICHE_ALIASES: Record<string, Niche> = {
   longevity: "Anti-aging",
-  "women's wellness": "Anti-aging",
+  // Decision A1, resolved by the marketing scoring spec (2026-09-11, tier 1A): the
+  // Women's Wellness board (hormonal/menopausal women, 134 leads, largest TikTok cell)
+  // is the Weight-loss seeker niche and Aro's ICP, not Anti-aging.
+  "women's wellness": "Weight-loss seeker",
+  menopause: "Weight-loss seeker",
+  pcos: "Weight-loss seeker",
   biohacking: "Biohacker",
   nootropics: "Biohacker",
   "nootropics/cognitive": "Biohacker",

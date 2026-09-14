@@ -107,8 +107,11 @@ built lead sourcing.
   leads, false competitor matches, YouTube relative dates, Reddit and Skool
   output changes. 7 of the 10 were rejected with reasons, 3 await review.
   Quality gates live in `packages/scraping/src/quality.ts`.
-- **Audiences:** 20 active (5 niches × TikTok+IG, YouTube, Skool, Reddit),
-  caps summing to $8.55 under the $10 daily limit, run in niche-priority
+- **Audiences:** 20 defined (5 niches × TikTok+IG, YouTube, Skool, Reddit).
+  8 active ($4.95/day caps): TikTok+IG and YouTube for tiers 1–3. Sexual
+  wellness is paused until it gets a research pass; Reddit and Skool are held
+  as a second wave (marketing scoring spec, 2026-09-11). Weight-loss seeker
+  carries the menopause/PCOS terms. Audiences are run in niche-priority
   order, searches shared across audiences paid once per run, term memory in
   config `sourcing_term_stats:<id>`, gated handles in `sourcing_gated_handles`.
 - **Competitors:** 16 seeded from the imported leads' `other_creator_company`
@@ -128,7 +131,7 @@ this), Telegram community troubleshooting.
 
 | # | Default in code | Where to change |
 |---|---|---|
-| A1 | Women's Wellness → Anti-aging | `packages/core/src/enums.ts` aliases |
+| A1 | Women's Wellness (and Menopause, PCOS) → Weight-loss seeker, per the marketing scoring spec of 2026-09-11 (was Anti-aging) | `packages/core/src/enums.ts` aliases |
 | A2 | Followers: TikTok/Instagram 5K–500K, YouTube 2K–300K, Skool 100–20K, Reddit unbounded | per audience on the Audiences page |
 | A3 | Dedupe keys: code, platform handle, email, website URL, name+platform | `packages/scraping/src/dedupe.ts` |
 | A4 | Countries US, CA, GB, AU; English | per audience |
