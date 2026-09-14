@@ -10,8 +10,8 @@ git pull --ff-only
 echo "▸ installing deps"
 pnpm install --frozen-lockfile
 
-echo "▸ applying database schema"
-pnpm --filter @biolinx/db exec drizzle-kit push
+echo "▸ applying database schema (idempotent SQL files)"
+pnpm --filter @biolinx/db apply-sql sql
 
 echo "▸ building admin panel"
 pnpm --filter @biolinx/admin build

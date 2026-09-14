@@ -62,7 +62,8 @@ chmod 600 .env
 ## 4. Schema, build, first admin
 
 ```bash
-pnpm --filter @biolinx/db exec drizzle-kit push
+pnpm --filter @biolinx/db exec drizzle-kit push   # first-time only: creates the base tables
+pnpm --filter @biolinx/db apply-sql sql            # every later change, safe to re-run
 pnpm --filter @biolinx/admin build
 pnpm --filter @biolinx/api seed:admin you@biolinxlabs.com "Your Name"
 # prints an invite link — open it once the site is live to set your password.
