@@ -603,7 +603,8 @@ function parseAudience(body: Record<string, unknown>): { row: AudienceInsert } |
   };
   const dailyCap = num(body.dailyCap ?? AUDIENCE_DEFAULTS.dailyCap, 1, 200, "daily cap");
   if (typeof dailyCap !== "number") return dailyCap;
-  const spend = num(body.spendCapUsd ?? AUDIENCE_DEFAULTS.spendCapUsd, 0.5, 10, "spend cap");
+  // Low floor so many small audiences (Skool, Reddit) can share the daily limit.
+  const spend = num(body.spendCapUsd ?? AUDIENCE_DEFAULTS.spendCapUsd, 0.1, 10, "spend cap");
   if (typeof spend !== "number") return spend;
   const activityDays = num(body.activityDays ?? AUDIENCE_DEFAULTS.activityDays, 1, 365, "activity window");
   if (typeof activityDays !== "number") return activityDays;

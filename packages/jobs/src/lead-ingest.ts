@@ -3,7 +3,7 @@
 // planProfile is the testable core; runLeadIngest wraps it with the DB.
 
 import { and, eq, gte } from "drizzle-orm";
-import { brandFitForNiche, handleKey, normalizeEmail, normalizeNiche, type Niche } from "@biolinx/core";
+import { NICHE_PRIORITY, brandFitForNiche, handleKey, normalizeEmail, normalizeNiche, type Niche } from "@biolinx/core";
 import { createDb, schema, type Db } from "@biolinx/db";
 import { alert, telegramFromEnv } from "@biolinx/notify";
 import {
@@ -78,6 +78,15 @@ export interface ProfileRow {
   dailyCap: number;
   spendCapUsd: string | number;
   lastRunAt?: Date | string | null;
+}
+
+/** Run order: Jakob's niche priority (tier 1 first), then oldest audience first. */
+export function byNichePriority(a: Pick<ProfileRow, "niche" | "id">, b: Pick<ProfileRow, "niche" | "id">): number {
+  const rank = (n: string) => {
+    const i = NICHE_PRIORITY.indexOf((normalizeNiche(n) ?? n) as Niche);
+    return i < 0 ? NICHE_PRIORITY.length : i;
+  };
+  return rank(a.niche) - rank(b.niche) || a.id - b.id;
 }
 
 /** The daily schedule runs an audience at most once per business day. A manual
@@ -568,6 +577,8 @@ export function planSearches(
   perTerm: number,
   rotation = 0,
   resting: (platform: DiscoveryPlatform, term: string) => boolean = () => false,
+  /** termStatKey()s another audience already searched in this run: skipped, not paid for twice. */
+  alreadySearched: ReadonlySet<string> = new Set(),
 ): { run: PlannedSearch[]; skipped: PlannedSearch[]; resting: PlannedSearch[]; budgetUsd: number } {
   const restingOut: PlannedSearch[] = [];
   const budgetUsd = round4(Math.max(0, Number(profile.spendCapUsd) - verifyReserveUsd(profile)));
@@ -589,6 +600,7 @@ export function planSearches(
     if (!key || s.has(key)) return null;
     s.add(key);
     const planned = { platform, term, estimatedCostUsd: round4(ACTOR_UNIT_PRICE[platform] * perTerm) };
+    if (alreadySearched.has(termStatKey(platform, term))) return null;
     if (resting(platform, term)) {
       restingOut.push(planned);
       return null;
@@ -707,6 +719,10 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
     summary.dailyLimitUsd = limit;
     summary.spentEarlierTodayUsd = spentEarlier;
 
+    // Competitor names are searched by every audience; each search is paid for once per run.
+    const searchedThisRun = new Set<string>();
+    // Highest-tier niches spend first, so a tight daily limit cuts the lowest tiers.
+    profiles.sort(byNichePriority);
     for (const configured of profiles) {
       const { capUsd, limitedByDaily } = effectiveSpendCap(Number(configured.spendCapUsd), limit, round4(spentEarlier + summary.estimatedCostUsd));
       const profile: ProfileRow = { ...configured, spendCapUsd: capUsd };
@@ -715,7 +731,8 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
       const dayNumber = Math.floor(startOfBusinessDay(now).getTime() / 86_400_000);
       const statsRow = await db.query.config.findFirst({ where: eq(schema.config.key, termStatsConfigKey(profile.id)) });
       let stats = (statsRow?.value as TermStats | undefined) ?? {};
-      const searches = planSearches(profile, competitors, PER_TERM, dayNumber + profile.id, (p, t) => isResting(stats, p, t, now));
+      const searches = planSearches(profile, competitors, PER_TERM, dayNumber + profile.id, (p, t) => isResting(stats, p, t, now), searchedThisRun);
+      for (const s of searches.run) searchedThisRun.add(termStatKey(s.platform, s.term));
       const termYield: Array<{ search: string; hits: number; fresh: number }> = [];
       for (const { platform, term } of searches.run) {
         try {

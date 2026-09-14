@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
-import { activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
+import { byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
   id: 1,
@@ -320,5 +320,27 @@ describe("quality in planProfile (first live run lessons)", () => {
     const t0 = new Date("2026-09-14T14:00:00Z");
     const mem = { "tiktok:a": { reason: "dead" as const, at: "2026-09-01T00:00:00Z" }, "tiktok:b": { reason: "dead" as const, at: "2026-05-01T00:00:00Z" } };
     expect(activeGated(mem, t0)).toEqual(["tiktok:a"]);
+  });
+});
+
+describe("many audiences sharing a run", () => {
+  it("a search another audience already ran this run is skipped and not paid for", () => {
+    const p = { platforms: ["tiktok"] as ProfileRow["platforms"], terms: { tiktok: ["#biohacking"] }, dailyCap: 10, spendCapUsd: "1.00" };
+    const done = new Set(["tiktok:aminoclub"]);
+    const { run, skipped, resting } = planSearches(p, [{ name: "Amino Club" }, { name: "Swiss Chems" }], 30, 0, () => false, done);
+    expect(run.map((s) => s.term)).toEqual(["#biohacking", "Swiss Chems"]);
+    expect([...skipped, ...resting]).toEqual([]);
+  });
+
+  it("audiences run in niche priority order, then oldest first", () => {
+    const rows = [
+      { id: 5, niche: "Sexual wellness" },
+      { id: 9, niche: "Biohacker" },
+      { id: 2, niche: "Anti-aging" },
+      { id: 1, niche: "Weight-loss seeker" },
+      { id: 3, niche: "Biohacker" },
+      { id: 4, niche: "Gym / PED-curious" },
+    ];
+    expect([...rows].sort(byNichePriority).map((r) => r.id)).toEqual([1, 3, 9, 4, 2, 5]);
   });
 });

@@ -180,7 +180,7 @@ describe("fetchReddit", () => {
       (b) => (sent = b),
     );
     const b = await fetchReddit({ platform: "reddit", handle: "pete", url: "https://www.reddit.com/user/pete/" }, d);
-    expect(sent).toEqual({ usernames: ["pete"], maxPostsCount: 8, maxCommentsCount: 8, includeNSFW: false });
+    expect(sent).toEqual({ usernames: ["https://www.reddit.com/user/pete/"], maxPostsCount: 8, maxCommentsCount: 8, includeNSFW: false });
     expect(b.bio).toBe("peptide nerd");
     expect(b.items).toEqual([
       { url: "https://www.reddit.com/r/x/comments/1/", text: "My BPC experience — long story", postedAt: "2026-08-01T00:00:00.000Z", likes: 33, comments: 4 },
@@ -209,5 +209,35 @@ describe("fetchX", () => {
     expect(b.followers).toBe(900);
     expect(b.items[0]?.text).toBe("Sleep is the cheapest nootropic");
     expect(b.items[0]?.postedAt).toBe("2026-08-04T12:00:00.000Z");
+  });
+});
+
+describe("live output formats (2026-09-14)", () => {
+  it("YouTube relative upload dates parse", async () => {
+    const { relativeAgo, toIso } = await import("../src/fetchers/shared.js");
+    const now = new Date("2026-09-14T12:00:00Z");
+    expect(relativeAgo("5d ago", now)).toBe("2026-09-09T12:00:00.000Z");
+    expect(relativeAgo("12 days ago", now)).toBe("2026-09-02T12:00:00.000Z");
+    expect(relativeAgo("3 weeks ago", now)).toBe("2026-08-24T12:00:00.000Z");
+    expect(relativeAgo("Streamed 2 months ago", now)).toBe("2026-07-16T12:00:00.000Z");
+    expect(relativeAgo("1 year ago", now)).toBe("2025-09-14T12:00:00.000Z");
+    expect(relativeAgo("yesterday", now)).toBe("2026-09-13T12:00:00.000Z");
+    expect(relativeAgo("Feb 6, 2019", now)).toBeNull();
+    expect(toIso("5d ago", now)).toBe("2026-09-09T12:00:00.000Z");
+    expect(toIso("2026-08-01T00:00:00.000Z")).toBe("2026-08-01T00:00:00.000Z");
+  });
+
+  it("Reddit user scraper: user_profile rows, comment dates, exact-case URL as input", async () => {
+    let sent: any;
+    const rows = [
+      { dataType: "user_profile", username: "Vegetable-Today", bio: "I have tattoos and I like cheese.", profileDescription: "", followersCount: 0, profileUrl: "https://www.reddit.com/user/Vegetable-Today/" },
+      { dataType: "comment", url: "https://www.reddit.com/r/Peptides/comments/1w470yj/x/", body: "Been over 2 years for me", commentCreatedAt: "2026-09-01T16:26:08.000Z", commentUpVotes: 3 },
+    ];
+    const fetchImpl = (async (_u: string, init?: RequestInit) => { sent = JSON.parse(String(init?.body)); return new Response(JSON.stringify(rows)); }) as unknown as typeof fetch;
+    const b = await fetchReddit({ platform: "reddit", handle: "vegetable-today", url: "https://www.reddit.com/user/Vegetable-Today/" }, { fetchImpl, apify: { token: "t", actors: {} }, maxItems: 12 });
+    expect(sent.usernames).toEqual(["https://www.reddit.com/user/Vegetable-Today/"]);
+    expect(b.bio).toBe("I have tattoos and I like cheese.");
+    expect(b.followers).toBeNull(); // invariant: Reddit reach stays null
+    expect(b.items).toEqual([{ url: "https://www.reddit.com/r/Peptides/comments/1w470yj/x/", text: "Been over 2 years for me", postedAt: "2026-09-01T16:26:08.000Z", likes: 3 }]);
   });
 });

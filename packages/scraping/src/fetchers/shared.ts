@@ -14,10 +14,36 @@ export function clip(text: string | null | undefined, max = 600): string {
 }
 
 /** Best-effort ISO date from an ISO string, epoch seconds, or ms. */
-export function toIso(value: unknown): string | null {
+export function toIso(value: unknown, now: Date = new Date()): string | null {
   if (value == null) return null;
+  if (typeof value === "string") {
+    const rel = relativeAgo(value, now);
+    if (rel) return rel;
+  }
   const d = typeof value === "number" ? new Date(value < 1e12 ? value * 1000 : value) : new Date(String(value));
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+const UNIT_MS: Array<[RegExp, number]> = [
+  [/^(s|sec|secs|second|seconds)$/, 1_000],
+  [/^(m|min|mins|minute|minutes)$/, 60_000],
+  [/^(h|hr|hrs|hour|hours)$/, 3_600_000],
+  [/^(d|day|days)$/, 86_400_000],
+  [/^(w|wk|wks|week|weeks)$/, 7 * 86_400_000],
+  [/^(mo|mos|month|months)$/, 30 * 86_400_000],
+  [/^(y|yr|yrs|year|years)$/, 365 * 86_400_000],
+];
+
+/** "5d ago", "12 days ago", "3 weeks ago", "Streamed 2 months ago", "yesterday" → ISO, else null.
+ *  YouTube's channel scraper returns upload dates only in this relative form. */
+export function relativeAgo(value: string, now: Date = new Date()): string | null {
+  const s = value.trim().toLowerCase();
+  if (s === "yesterday") return new Date(now.getTime() - 86_400_000).toISOString();
+  if (s === "today" || s === "just now") return now.toISOString();
+  const m = s.match(/^(?:streamed|premiered|updated)?\s*(\d+)\s*([a-z]+)\s+ago$/);
+  if (!m) return null;
+  const unit = UNIT_MS.find(([re]) => re.test(m[2]!));
+  return unit ? new Date(now.getTime() - Number(m[1]) * unit[1]).toISOString() : null;
 }
 
 /** Drop empty-text items, keep insertion order, cap at max. */

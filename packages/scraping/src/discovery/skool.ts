@@ -26,7 +26,8 @@ export const discoverSkool: Discoverer = async (term, deps) => {
   const byHandle = new Map<string, DiscoveryHit>();
   for (const r of rows) {
     const ownerUrl = isHttpUrl(r.ownerProfileUrl) ? r.ownerProfileUrl : null;
-    const handle = ownerUrl?.match(/skool\.com\/@([^/?#]+)/)?.[1]?.toLowerCase();
+    // Owner profile links are skool.com/u/<name> today; skool.com/@<name> is the older form.
+    const handle = ownerUrl?.match(/skool\.com\/(?:@|u\/)([^/?#]+)/)?.[1]?.toLowerCase();
     if (!handle || !ownerUrl) continue;
     const country = r.ownerLocation?.split(",").pop()?.trim() ?? null;
     const title = [r.displayName ?? r.name, r.description].filter((s) => s && s.trim()).join(" — ");

@@ -180,3 +180,12 @@ describe("countryCode", () => {
     expect(countryCode(null)).toBeNull();
   });
 });
+
+describe("Skool owner links in the /u/ form (live 2026-09-14)", () => {
+  it("keeps communities whose owner link is skool.com/u/<name>", async () => {
+    const rows = [{ displayName: "BiohackwithBails", description: "peptides explained", totalMembers: 288, communityUrl: "https://www.skool.com/biohackwithbails-4408", ownerName: "bailey-jacobson-9131", ownerBio: "Happy to help", ownerLocation: "", ownerProfileUrl: "https://www.skool.com/u/bailey-jacobson-9131" }];
+    const hits = await discoverSkool("biohacking", deps(rows), {});
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ handle: "bailey-jacobson-9131", followers: 288, profileUrl: "https://www.skool.com/u/bailey-jacobson-9131", postUrl: "https://www.skool.com/biohackwithbails-4408", country: null });
+  });
+});
