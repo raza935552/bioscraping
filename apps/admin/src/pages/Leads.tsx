@@ -35,6 +35,13 @@ const isHttp = (u: string | null | undefined): u is string => !!u && /^https?:\/
 export function Leads({ me }: { me: Me }) {
   const [view, setView] = useState("queue");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => {
+    try {
+      return localStorage.getItem("leads.pageSize") ?? "100";
+    } catch {
+      return "100";
+    }
+  });
   const [sort, setSort] = useState("rank");
   const [dir, setDir] = useState<"asc" | "desc" | "">("");
   const [search, setSearch] = useState("");
@@ -68,7 +75,7 @@ export function Leads({ me }: { me: Me }) {
   };
 
   const params = useMemo(() => {
-    const p = new URLSearchParams({ view, page: String(page), pageSize: "50", sort });
+    const p = new URLSearchParams({ view, page: String(page), pageSize, sort });
     if (dir) p.set("dir", dir);
     if (search) p.set("search", search);
     if (status) p.set("status", status);
@@ -81,7 +88,7 @@ export function Leads({ me }: { me: Me }) {
     }
     return p;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, page, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
+  }, [view, page, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName, pageSize]);
 
   const load = useCallback(async () => {
     try {
@@ -104,7 +111,7 @@ export function Leads({ me }: { me: Me }) {
   }, [open]);
 
   // Reset to page 1 when filters/sort change.
-  useEffect(() => setPage(1), [view, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
+  useEffect(() => setPage(1), [pageSize, view, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
   // The Sourced view ranks by score; the other views by conversion rank.
   useEffect(() => {
     if (view === "sourced" && !SOURCED_SORTS.has(sort)) { setSort("score"); setDir(""); }
@@ -407,7 +414,26 @@ export function Leads({ me }: { me: Me }) {
       </div>
       )}
 
-      <Pagination page={data?.page ?? 1} totalPages={data?.totalPages ?? 1} onPage={setPage} />
+      <div className="toolbar" style={{ marginTop: 12 }}>
+        <Pagination page={data?.page ?? 1} totalPages={data?.totalPages ?? 1} onPage={setPage} />
+        <div className="grow" />
+        <label className="muted" style={{ fontSize: 12 }}>
+          Rows per page{" "}
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(e.target.value);
+              try {
+                localStorage.setItem("leads.pageSize", e.target.value);
+              } catch {
+                /* private window: just don't remember it */
+              }
+            }}
+          >
+            {["25", "50", "100", "200"].map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+      </div>
 
       {detail && (
         <>
