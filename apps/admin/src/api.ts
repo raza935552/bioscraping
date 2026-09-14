@@ -109,6 +109,7 @@ export interface LeadRow {
   scoreReasons: string[];
   sample: SamplePost[];
   country?: string | null;
+  currentOffer?: string | null;
   rejectedReason?: string | null;
   /** Sourced view only: values derived from the profile read. */
   details?: SourcedDetails | null;
@@ -135,6 +136,7 @@ export interface SourcedFacets {
   countries: string[];
   audiences: string[];
   platforms: string[];
+  competitors: Array<{ name: string; n: number }>;
   review: { pending: number; accepted: number; rejected: number };
 }
 

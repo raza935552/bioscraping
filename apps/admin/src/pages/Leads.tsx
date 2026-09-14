@@ -10,11 +10,16 @@ const VIEWS: Array<[string, string]> = [
   ["triage", "Needs triage"],
 ];
 
-const SORTS: Array<[string, string]> = [
+const SORTS: Array<[string, string, string?]> = [
   ["rank", "Rank"],
   ["name", "Name"],
+  ["niche", "Niche"],
   ["platform", "Platform"],
   ["reach", "Reach"],
+  ["avgViews", "Avg views", "Average views across recent posts, from the latest profile read"],
+  ["engagement", "Engagement", "(likes + comments) ÷ views over recent posts, or per follower when posts have no views"],
+  ["posts30", "Posts 30d", "Posts in the last 30 days, out of the posts read"],
+  ["competitor", "Competitor"],
   ["status", "Status"],
   ["sp", "Sub-profile"],
   ["lastTouch", "Last touch"],
@@ -22,7 +27,7 @@ const SORTS: Array<[string, string]> = [
 
 const NICHES = Object.keys(NICHE_BRAND);
 const SOURCED_SORTS = new Set(["score", "name", "niche", "platform", "reach", "avgViews", "engagement", "posts30", "lastPost", "competitor"]);
-const SOURCED_ONLY_SORTS = new Set(["score", "niche", "avgViews", "engagement", "posts30", "lastPost", "competitor"]);
+const SOURCED_ONLY_SORTS = new Set(["score", "lastPost"]);
 const compact = (n: number | null | undefined): string =>
   n == null ? "—" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}K` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 const isHttp = (u: string | null | undefined): u is string => !!u && /^https?:\/\//i.test(u);
@@ -56,9 +61,10 @@ export function Leads({ me }: { me: Me }) {
   const [minEngagement, setMinEngagement] = useState("");
   const [country, setCountry] = useState("");
   const [audience, setAudience] = useState("");
-  const sourcedFilters = { review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience };
+  const [competitorName, setCompetitorName] = useState("");
+  const sourcedFilters = { review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName };
   const clearSourcedFilters = () => {
-    setNiche(""); setCompetitor(""); setStore(""); setActive(""); setMinReach(""); setMinScore(""); setMinEngagement(""); setCountry(""); setAudience("");
+    setNiche(""); setCompetitor(""); setStore(""); setActive(""); setMinReach(""); setMinScore(""); setMinEngagement(""); setCountry(""); setAudience(""); setCompetitorName("");
   };
 
   const params = useMemo(() => {
@@ -68,10 +74,14 @@ export function Leads({ me }: { me: Me }) {
     if (status) p.set("status", status);
     if (platform) p.set("platform", platform);
     if (sp) p.set("sp", sp);
-    if (view === "sourced") for (const [k, v] of Object.entries(sourcedFilters)) if (v) p.set(k, v);
+    for (const [k, v] of Object.entries(sourcedFilters)) {
+      if (!v) continue;
+      if (view !== "sourced" && (k === "review" || k === "audience" || k === "minScore")) continue;
+      p.set(k, v);
+    }
     return p;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, page, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience]);
+  }, [view, page, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
 
   const load = useCallback(async () => {
     try {
@@ -94,7 +104,7 @@ export function Leads({ me }: { me: Me }) {
   }, [open]);
 
   // Reset to page 1 when filters/sort change.
-  useEffect(() => setPage(1), [view, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience]);
+  useEffect(() => setPage(1), [view, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
   // The Sourced view ranks by score; the other views by conversion rank.
   useEffect(() => {
     if (view === "sourced" && !SOURCED_SORTS.has(sort)) { setSort("score"); setDir(""); }
@@ -262,15 +272,14 @@ export function Leads({ me }: { me: Me }) {
         )}
       </div>
 
-      {view === "sourced" && (
-        <SourcedFilterBar
-          facets={data?.facets ?? null}
-          values={sourcedFilters}
-          set={{ setReview, setNiche, setCompetitor, setStore, setActive, setMinReach, setMinScore, setMinEngagement, setCountry, setAudience }}
-          onClear={clearSourcedFilters}
-          shown={data?.analytics.total ?? 0}
-        />
-      )}
+      <SourcedFilterBar
+        sourced={view === "sourced"}
+        facets={data?.facets ?? null}
+        values={sourcedFilters}
+        set={{ setReview, setNiche, setCompetitor, setStore, setActive, setMinReach, setMinScore, setMinEngagement, setCountry, setAudience, setCompetitorName }}
+        onClear={clearSourcedFilters}
+        shown={data?.analytics.total ?? 0}
+      />
 
       {error && <div className="error">{error}</div>}
 
@@ -289,14 +298,15 @@ export function Leads({ me }: { me: Me }) {
         />
       ) : (
       <div className="tablewrap">
-        <table>
+        <table className="sourced">
           <thead>
             <tr>
-              {SORTS.map(([col, label]) => (
+              {SORTS.map(([col, label, help]) => (
                 <th
                   key={col}
                   className={`sortable ${sort === col ? "active" : ""}`}
                   onClick={() => clickSort(col)}
+                  title={help}
                 >
                   {label}
                   {sort === col ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
@@ -323,12 +333,41 @@ export function Leads({ me }: { me: Me }) {
                     </span>
                   )}
                 </td>
-                <td>
-                  {l.name} {l.needsTriage && <span className="chip suggest">needs triage</span>}
-                  {l.isDead && <span className="chip failed">unreachable</span>}
+                <td className="creator">
+                  <div>
+                    {l.name}
+                    {l.details?.handle && <span className="muted"> @{l.details.handle}</span>}{" "}
+                    {l.needsTriage && <span className="chip suggest">needs triage</span>}
+                    {l.isDead && <span className="chip failed">unreachable</span>}
+                    {l.details?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">store</span>}
+                  </div>
+                  {l.details?.bio && <div className="bio" title={l.details.bio}>{l.details.bio}</div>}
                 </td>
-                <td className="muted">{l.platform ?? "—"}</td>
+                <td>
+                  {l.details?.niche ?? l.niche ?? "—"}
+                  {l.brandFit && <div className="muted" style={{ fontSize: 11 }}>{BRAND_LABEL[l.brandFit] ?? l.brandFit}</div>}
+                </td>
+                <td className="muted">
+                  {l.platform ?? "—"}
+                  {l.country && <div style={{ fontSize: 11 }}>{l.country}</div>}
+                </td>
                 <td>{l.reach != null ? l.reach.toLocaleString() : <span className="muted">unverified</span>}</td>
+                <td>{l.details?.avgViews != null ? compact(l.details.avgViews) : <span className="muted">—</span>}</td>
+                <td title={l.details?.engagementBasis === "followers" ? "per follower (posts have no view count)" : "per view"}>
+                  {l.details?.engagementRate != null ? `${(l.details.engagementRate * 100).toFixed(1)}%` : <span className="muted">—</span>}
+                  {l.details?.engagementBasis === "followers" && <span className="muted" style={{ fontSize: 11 }}> /fol.</span>}
+                </td>
+                <td>
+                  {l.details?.postsLast30 != null ? <>{l.details.postsLast30}<span className="muted" style={{ fontSize: 11 }}> /{l.details.postsRead}</span></> : <span className="muted">—</span>}
+                </td>
+                <td>
+                  {l.competitor ? <span className="chip suggest">{l.competitor}</span> : <span className="muted">—</span>}
+                  {(l.affiliateCode || l.currentOffer) && (
+                    <div className="muted" style={{ fontSize: 11 }} title="Their code or offer with that competitor">
+                      {l.affiliateCode ? <code>{l.affiliateCode}</code> : l.currentOffer}
+                    </div>
+                  )}
+                </td>
                 <td className="muted">{l.status ?? "—"}</td>
                 <td>
                   {(() => {
@@ -461,37 +500,45 @@ export function Leads({ me }: { me: Me }) {
 
 interface SourcedFilterValues {
   review: string; niche: string; competitor: string; store: string; active: string;
-  minReach: string; minScore: string; minEngagement: string; country: string; audience: string;
+  minReach: string; minScore: string; minEngagement: string; country: string; audience: string; competitorName: string;
 }
 interface SourcedFilterSetters {
   setReview: (v: string) => void; setNiche: (v: string) => void; setCompetitor: (v: string) => void; setStore: (v: string) => void;
   setActive: (v: string) => void; setMinReach: (v: string) => void; setMinScore: (v: string) => void; setMinEngagement: (v: string) => void;
-  setCountry: (v: string) => void; setAudience: (v: string) => void;
+  setCountry: (v: string) => void; setAudience: (v: string) => void; setCompetitorName: (v: string) => void;
 }
 
-function SourcedFilterBar({ facets, values: v, set, onClear, shown }: { facets: SourcedFacets | null; values: SourcedFilterValues; set: SourcedFilterSetters; onClear: () => void; shown: number }) {
-  const any = [v.niche, v.competitor, v.store, v.active, v.minReach, v.minScore, v.minEngagement, v.country, v.audience].some(Boolean);
+function SourcedFilterBar({ sourced, facets, values: v, set, onClear, shown }: { sourced: boolean; facets: SourcedFacets | null; values: SourcedFilterValues; set: SourcedFilterSetters; onClear: () => void; shown: number }) {
+  const any = [v.niche, v.competitor, v.store, v.active, v.minReach, v.minEngagement, v.country, v.competitorName, ...(sourced ? [v.minScore, v.audience] : [])].some(Boolean);
   const r = facets?.review;
   return (
     <div className="toolbar filterbar">
+      {sourced && (
       <select value={v.review} onChange={(e) => set.setReview(e.target.value)} title="Review status">
         <option value="pending">Waiting for review{r ? ` (${r.pending})` : ""}</option>
         <option value="accepted">Accepted{r ? ` (${r.accepted})` : ""}</option>
         <option value="rejected">Rejected{r ? ` (${r.rejected})` : ""}</option>
         <option value="all">All sourced</option>
       </select>
+      )}
       <select value={v.niche} onChange={(e) => set.setNiche(e.target.value)}>
         <option value="">All niches</option>
         {(facets?.niches ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
       </select>
+      {sourced && (
       <select value={v.audience} onChange={(e) => set.setAudience(e.target.value)}>
         <option value="">All audiences</option>
         {(facets?.audiences ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
       </select>
+      )}
       <select value={v.competitor} onChange={(e) => set.setCompetitor(e.target.value)}>
         <option value="">Competitor: any</option>
         <option value="yes">Promotes a competitor</option>
         <option value="no">No competitor seen</option>
+      </select>
+      <select value={v.competitorName} onChange={(e) => set.setCompetitorName(e.target.value)}>
+        <option value="">Any competitor</option>
+        {(facets?.competitors ?? []).map((c) => <option key={c.name} value={c.name}>{c.name} ({c.n})</option>)}
       </select>
       <select value={v.store} onChange={(e) => set.setStore(e.target.value)}>
         <option value="">Stores: show</option>
@@ -507,7 +554,7 @@ function SourcedFilterBar({ facets, values: v, set, onClear, shown }: { facets: 
         {(facets?.countries ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
       </select>
       <input type="number" min={0} placeholder="Min reach" value={v.minReach} onChange={(e) => set.setMinReach(e.target.value)} style={{ width: 110 }} />
-      <input type="number" min={0} max={100} placeholder="Min score" value={v.minScore} onChange={(e) => set.setMinScore(e.target.value)} style={{ width: 100 }} />
+      {sourced && <input type="number" min={0} max={100} placeholder="Min score" value={v.minScore} onChange={(e) => set.setMinScore(e.target.value)} style={{ width: 100 }} />}
       <input type="number" min={0} step={0.5} placeholder="Min eng. %" value={v.minEngagement} onChange={(e) => set.setMinEngagement(e.target.value)} style={{ width: 105 }} title="Minimum engagement rate, in percent" />
       {any && <button onClick={onClear}>Clear filters</button>}
       <span className="muted" style={{ fontSize: 12 }}>{shown} shown</span>

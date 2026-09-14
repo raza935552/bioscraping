@@ -726,7 +726,12 @@ export function isDuplicateKey(err: unknown): boolean {
   return false;
 }
 
-export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts: { profileId?: number } = {}): Promise<IngestSummary> {
+export async function runLeadIngest(
+  db: Db = createDb(),
+  deps?: IngestDeps,
+  /** profileId: run just that audience. allActive: run every active audience even if it already ran today (manual test runs). */
+  opts: { profileId?: number; allActive?: boolean } = {},
+): Promise<IngestSummary> {
   const telegram = telegramFromEnv();
   const startedAt = new Date();
   const [run] = await db.insert(schema.syncRuns).values({ job: "lead-ingest", status: "running", startedAt }).$returningId();
@@ -738,7 +743,7 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
     }
     const all = (await db.select().from(schema.sourcingProfiles)) as unknown as ProfileRow[];
     const now0 = deps.now();
-    const profiles = all.filter((p) => (opts.profileId ? p.id === opts.profileId : p.active && !ranToday(p, now0)));
+    const profiles = all.filter((p) => (opts.profileId ? p.id === opts.profileId : p.active && (opts.allActive || !ranToday(p, now0))));
     const competitors = competitorRules(await db.select().from(schema.competitors));
     const known = await loadKnownPeople(db);
     // People dropped after a paid read in the last 90 days count as known: don't pay to read them again.

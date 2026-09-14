@@ -412,22 +412,17 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     minEngagement?: string;
     country?: string;
     audience?: string;
+    competitorName?: string;
   };
   const rows = await db.select().from(schema.leads);
   const sourcedView = q.view === "sourced";
-  // Sourced view: derived details (engagement, activity, bio, surfaced post) from the profile-read bundles.
+  // Derived details for every lead (engagement, activity, bio, surfaced post) from its latest
+  // profile read: the sourcing read, or a research run's read for imported leads.
   const details = new Map<number, ReturnType<typeof sourcedDetails>>();
-  if (sourcedView) {
+  {
     const now = new Date();
-    const bundles = new Map<number, DetailBundle>();
-    for (const e of await db
-      .select({ leadId: schema.leadEnrichments.leadId, bundle: schema.leadEnrichments.bundle })
-      .from(schema.leadEnrichments)
-      .where(eq(schema.leadEnrichments.status, "sourced"))
-      .orderBy(desc(schema.leadEnrichments.id))) {
-      if (!bundles.has(e.leadId)) bundles.set(e.leadId, (e.bundle as DetailBundle) ?? null);
-    }
-    for (const l of rows) if (l.source === "sourcing") details.set(l.id, sourcedDetails(l, bundles.get(l.id) ?? null, now));
+    const bundles = await latestReadBundles();
+    for (const l of rows) details.set(l.id, sourcedDetails(l, bundles.get(l.id) ?? null, now));
   }
   const reviewable = (l: { sourcingReview: string | null }) => l.sourcingReview == null || l.sourcingReview === "accepted";
   let filtered =
@@ -459,7 +454,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
         .some((v) => v!.toLowerCase().includes(s));
     });
   }
-  if (sourcedView) {
+  {
     const num = (v?: string) => (v != null && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
     const minReach = num(q.minReach);
     const minScore = num(q.minScore);
@@ -469,6 +464,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       if (q.niche && d?.niche !== q.niche) return false;
       if (q.competitor === "yes" && !l.otherCreatorCompany) return false;
       if (q.competitor === "no" && l.otherCreatorCompany) return false;
+      if (q.competitorName && l.otherCreatorCompany !== q.competitorName) return false;
       if (q.store === "hide" && d?.isStore) return false;
       if (q.store === "only" && !d?.isStore) return false;
       if (q.active === "yes" && !(d?.daysSinceLastPost != null && d.daysSinceLastPost <= 30)) return false;
@@ -524,24 +520,26 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
   const start = (page - 1) * pageSize;
   const pageRows = filtered.slice(start, start + pageSize);
 
-  // Dropdown options for the Sourced filters, from every sourced lead (not just this page).
-  const facets = sourcedView
-    ? (() => {
-        const all = rows.filter((l) => l.source === "sourcing");
-        const uniq = (vals: Array<string | null | undefined>) => [...new Set(vals.filter((v): v is string => !!v))].sort();
-        return {
-          niches: uniq(all.map((l) => details.get(l.id)?.niche)),
-          countries: uniq(all.map((l) => l.geoCountry)),
-          audiences: uniq(all.map((l) => details.get(l.id)?.audience)),
-          platforms: uniq(all.map((l) => l.primaryPlatform)),
-          review: {
-            pending: all.filter((l) => l.sourcingReview === "pending").length,
-            accepted: all.filter((l) => l.sourcingReview === "accepted").length,
-            rejected: all.filter((l) => l.sourcingReview === "rejected").length,
-          },
-        };
-      })()
-    : null;
+  // Dropdown options for the filters, from every lead this view can show (not just this page).
+  const facets = (() => {
+    const all = sourcedView ? rows.filter((l) => l.source === "sourcing") : rows;
+    const sourced = rows.filter((l) => l.source === "sourcing");
+    const uniq = (vals: Array<string | null | undefined>) => [...new Set(vals.filter((v): v is string => !!v))].sort();
+    const counts = new Map<string, number>();
+    for (const l of all) if (l.otherCreatorCompany) counts.set(l.otherCreatorCompany, (counts.get(l.otherCreatorCompany) ?? 0) + 1);
+    return {
+      niches: uniq(all.map((l) => details.get(l.id)?.niche)),
+      countries: uniq(all.map((l) => l.geoCountry)),
+      audiences: uniq(all.map((l) => details.get(l.id)?.audience)),
+      platforms: uniq(all.map((l) => l.primaryPlatform)),
+      competitors: [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, n]) => ({ name, n })),
+      review: {
+        pending: sourced.filter((l) => l.sourcingReview === "pending").length,
+        accepted: sourced.filter((l) => l.sourcingReview === "accepted").length,
+        rejected: sourced.filter((l) => l.sourcingReview === "rejected").length,
+      },
+    };
+  })();
 
   return {
     analytics,
@@ -580,6 +578,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       enrichmentStatus: l.enrichmentStatus,
       profileUrl: profileUrlFor(l),
       country: l.geoCountry,
+      currentOffer: l.currentOffer,
       rejectedReason: l.sourcingRejectedReason,
       details: details.get(l.id) ?? null,
     })),
@@ -611,6 +610,20 @@ function profileUrlFor(lead: { websiteUrl: string | null; whereFound: string | n
   return safeHttpUrl(lead.websiteUrl) ?? safeHttpUrl(lead.whereFound) ?? fromSocial;
 }
 
+/** Latest profile-read bundle per lead: sourcing reads and research-run reads (not failed runs). */
+async function latestReadBundles(): Promise<Map<number, DetailBundle>> {
+  const out = new Map<number, DetailBundle>();
+  for (const e of await db
+    .select({ leadId: schema.leadEnrichments.leadId, bundle: schema.leadEnrichments.bundle, status: schema.leadEnrichments.status })
+    .from(schema.leadEnrichments)
+    .orderBy(desc(schema.leadEnrichments.id))) {
+    if (out.has(e.leadId) || e.status === "failed") continue;
+    const b = e.bundle as DetailBundle | null;
+    if (b && (Array.isArray(b.items) || b.bio || b.followers != null)) out.set(e.leadId, b);
+  }
+  return out;
+}
+
 /** CSV of sourced leads for marketing to check (columns follow their scoring spec).
  *  ?review=pending (default) | accepted | rejected | all. Holds PII: admin/ops only, audited. */
 app.get("/api/leads/sourced.csv", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
@@ -620,14 +633,7 @@ app.get("/api/leads/sourced.csv", { preHandler: requireRole("admin", "ops") }, a
     .filter((l) => review === "all" || l.sourcingReview === review)
     .sort((a, b) => (b.sourcingScore ?? 0) - (a.sourcingScore ?? 0));
   await audit(req, "leads.sourced.export", "leads", null, { review, count: rows.length });
-  const bundles = new Map<number, DetailBundle>();
-  for (const e of await db
-    .select({ leadId: schema.leadEnrichments.leadId, bundle: schema.leadEnrichments.bundle })
-    .from(schema.leadEnrichments)
-    .where(eq(schema.leadEnrichments.status, "sourced"))
-    .orderBy(desc(schema.leadEnrichments.id))) {
-    if (!bundles.has(e.leadId)) bundles.set(e.leadId, (e.bundle as DetailBundle) ?? null);
-  }
+  const bundles = await latestReadBundles();
   const now = new Date();
   const byId = new Map(rows.map((l) => [l.id, l]));
   const stamp = new Date().toISOString().slice(0, 10);
