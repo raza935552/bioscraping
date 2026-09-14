@@ -14,8 +14,15 @@ interface Row {
   locationMeta?: { countryCode?: string };
 }
 
+/** TikTok hashtags are one token: "#Peptide Sciences" → "peptidesciences".
+ *  Spaces and punctuation would make the actor search a tag that can't exist. */
 export function tagOf(term: string): string {
-  return term.trim().replace(/^#/, "").toLowerCase();
+  return term
+    .trim()
+    .replace(/^#/, "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}_]/gu, "");
 }
 
 export const discoverTikTok: Discoverer = async (term, deps) => {

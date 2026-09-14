@@ -79,6 +79,8 @@ export interface ProfileRunSummary {
   estimatedCostUsd: number;
   stoppedBy: "cap" | "spend" | "exhausted";
   termErrors: string[];
+  /** Searches not run because they would have pushed the run past its spend cap. */
+  termsSkipped: string[];
 }
 
 export interface IngestSummary {
@@ -151,6 +153,7 @@ export async function planProfile(
     estimatedCostUsd: 0,
     stoppedBy: "exhausted",
     termErrors: [],
+    termsSkipped: [],
   };
   const spendCap = Number(profile.spendCapUsd);
 
@@ -366,6 +369,60 @@ function discoveryOptsFor(profile: ProfileRow, platform: DiscoveryPlatform): Dis
   return opts;
 }
 
+/** Platforms whose discoverer can search a competitor's name. Reddit reads a
+ *  subreddit by name, so "Peptide Sciences" would be a subreddit that doesn't exist. */
+const COMPETITOR_NAME_PLATFORMS = new Set<DiscoveryPlatform>(["tiktok", "instagram", "youtube", "skool"]);
+
+export interface PlannedSearch {
+  platform: DiscoveryPlatform;
+  term: string;
+  /** Worst case: every requested item comes back and is billed. */
+  estimatedCostUsd: number;
+}
+
+/** Most of a run's spend budget can go to searching, but a slice is held back
+ *  so the best hits can still be verified: enough for a full day's cap of
+ *  profile reads, never more than half the budget. */
+export function verifyReserveUsd(profile: Pick<ProfileRow, "dailyCap" | "spendCapUsd">): number {
+  const cap = Number(profile.spendCapUsd);
+  return round4(Math.min(profile.dailyCap * VERIFY_UNIT_PRICE, cap / 2));
+}
+
+/** Every search a profile wants, audience terms first, then competitor names,
+ *  deduped per platform, split into what fits the search budget and what doesn't.
+ *  Nothing runs before this: the spend cap gates searching, not only verification. */
+export function planSearches(
+  profile: Pick<ProfileRow, "platforms" | "terms" | "dailyCap" | "spendCapUsd">,
+  competitors: Pick<CompetitorRule, "name">[],
+  perTerm: number,
+): { run: PlannedSearch[]; skipped: PlannedSearch[]; budgetUsd: number } {
+  const budgetUsd = round4(Math.max(0, Number(profile.spendCapUsd) - verifyReserveUsd(profile)));
+  const all: PlannedSearch[] = [];
+  for (const platform of profile.platforms) {
+    const names = COMPETITOR_NAME_PLATFORMS.has(platform) ? competitors.map((c) => c.name) : [];
+    const seen = new Set<string>();
+    for (const raw of [...(profile.terms[platform] ?? []), ...names]) {
+      const term = raw.trim();
+      const key = term.replace(/^#/, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      all.push({ platform, term, estimatedCostUsd: round4(ACTOR_UNIT_PRICE[platform] * perTerm) });
+    }
+  }
+  const run: PlannedSearch[] = [];
+  const skipped: PlannedSearch[] = [];
+  let spent = 0;
+  for (const s of all) {
+    if (spent + s.estimatedCostUsd <= budgetUsd) {
+      run.push(s);
+      spent = round4(spent + s.estimatedCostUsd);
+    } else skipped.push(s);
+  }
+  return { run, skipped, budgetUsd };
+}
+
+const PER_TERM = 30;
+
 export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts: { profileId?: number } = {}): Promise<IngestSummary> {
   const telegram = telegramFromEnv();
   const startedAt = new Date();
@@ -386,20 +443,19 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
     for (const profile of profiles) {
       const hitsByTerm = new Map<string, DiscoveryHit[]>();
       const termErrors: string[] = [];
-      for (const platform of profile.platforms) {
-        const terms = [...(profile.terms[platform] ?? []), ...competitors.map((c) => c.name)];
-        const discoveryOpts = discoveryOptsFor(profile, platform);
-        for (const term of terms) {
-          try {
-            const hits = await deps.discovererFor(platform)(term, { fetchImpl: deps.fetchImpl, apify: deps.apify, perTerm: 30 }, discoveryOpts);
-            hitsByTerm.set(`${platform}:${term}`, hits);
-          } catch (err) {
-            termErrors.push(`${platform} ${term}: ${(err as Error).message}`);
-          }
+      const searches = planSearches(profile, competitors, PER_TERM);
+      for (const { platform, term } of searches.run) {
+        try {
+          const hits = await deps.discovererFor(platform)(term, { fetchImpl: deps.fetchImpl, apify: deps.apify, perTerm: PER_TERM }, discoveryOptsFor(profile, platform));
+          hitsByTerm.set(`${platform}:${term}`, hits);
+        } catch (err) {
+          termErrors.push(`${platform} ${term}: ${(err as Error).message}`);
         }
       }
       const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now);
       ps.termErrors = termErrors;
+      ps.termsSkipped = searches.skipped.map((s) => `${s.platform} ${s.term}`);
+      if (ps.termsSkipped.length > 0 && ps.stoppedBy === "exhausted") ps.stoppedBy = "spend";
       for (const c of candidates) {
         const [ins] = await db.insert(schema.leads).values(c.lead).$returningId();
         const leadId = ins!.id;

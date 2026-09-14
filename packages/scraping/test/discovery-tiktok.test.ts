@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { discoverTikTok } from "../src/discovery/tiktok.js";
+import { discoverTikTok, tagOf } from "../src/discovery/tiktok.js";
 import type { DiscoveryDeps } from "../src/discovery/types.js";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -61,5 +61,13 @@ describe("discoverTikTok", () => {
     expect(await discoverTikTok("#x", deps([]), {})).toEqual([]);
     const bad: DiscoveryDeps = { ...deps([]), fetchImpl: (async () => json({ error: { message: "boom" } }, 500)) as typeof fetch };
     await expect(discoverTikTok("#x", bad, {})).rejects.toThrow(/boom/);
+  });
+});
+
+describe("tagOf", () => {
+  it("makes a single-token hashtag from a name with spaces and punctuation", () => {
+    expect(tagOf("Peptide Sciences")).toBe("peptidesciences");
+    expect(tagOf("#Limitless-Life Co.")).toBe("limitlesslifeco");
+    expect(tagOf(" #glp1_journey ")).toBe("glp1_journey");
   });
 });

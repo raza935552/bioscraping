@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
-import { planProfile, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
+import { planProfile, planSearches, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
   id: 1,
@@ -120,5 +120,40 @@ describe("planProfile", () => {
     expect(summary.verifyFailed).toBe(1);
     expect(candidates[0]?.lead.totalReach).toBeNull(); // never the search-row number
     expect(candidates[0]?.enrichment).toBeNull();
+  });
+});
+
+describe("planSearches", () => {
+  const base = { platforms: ["tiktok", "reddit"] as ProfileRow["platforms"], terms: { tiktok: ["#weightloss", "#glp1journey"], reddit: ["r/loseit"] }, dailyCap: 10, spendCapUsd: "1.00" };
+  const competitors = [{ name: "Peptide Sciences" }, { name: "Limitless Life" }];
+
+  it("audience terms first, competitor names after, never competitor names on Reddit", () => {
+    const { run, skipped } = planSearches(base, competitors, 30);
+    expect(skipped).toEqual([]);
+    expect(run.map((s) => `${s.platform} ${s.term}`)).toEqual([
+      "tiktok #weightloss",
+      "tiktok #glp1journey",
+      "tiktok Peptide Sciences",
+      "tiktok Limitless Life",
+      "reddit r/loseit",
+    ]);
+  });
+
+  it("the spend cap gates searching and keeps a reserve for profile reads", () => {
+    // $0.20 cap, 10 reads reserved ($0.05) → $0.15 for searches at $0.06 each → 2 run.
+    const { run, skipped, budgetUsd } = planSearches({ ...base, spendCapUsd: "0.20" }, competitors, 30);
+    expect(budgetUsd).toBe(0.15);
+    expect(run.map((s) => s.term)).toEqual(["#weightloss", "#glp1journey"]);
+    expect(skipped.map((s) => s.term)).toEqual(["Peptide Sciences", "Limitless Life", "r/loseit"]);
+    expect(run.reduce((a, s) => a + s.estimatedCostUsd, 0) + verifyReserveUsd({ ...base, spendCapUsd: "0.20" })).toBeLessThanOrEqual(0.2);
+  });
+
+  it("the reserve never takes more than half the budget", () => {
+    expect(verifyReserveUsd({ dailyCap: 500, spendCapUsd: "1.00" })).toBe(0.5);
+  });
+
+  it("dedupes a competitor name that is already an audience term", () => {
+    const { run } = planSearches({ ...base, platforms: ["tiktok"], terms: { tiktok: ["#peptidesciences"] } }, competitors, 30);
+    expect(run.map((s) => s.term)).toEqual(["#peptidesciences", "Limitless Life"]);
   });
 });
