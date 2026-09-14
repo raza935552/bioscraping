@@ -136,7 +136,7 @@ export function describeRun(job: string, detail: unknown): string {
       return parts.join(" · ");
     }
     case "rank-recompute":
-      return `${n("total") ?? 0} leads ranked · ${n("changed") ?? 0} moved · ${n("triage") ?? 0} need triage · ${n("sp5Excluded") ?? 0} do-not-contact`;
+      return `${n("total") ?? 0} leads ranked · ${n("changed") ?? 0} moved · ${n("triage") ?? 0} need triage · ${n("sp5Excluded") ?? 0} do-not-contact${n("notReviewed") ? ` · ${n("notReviewed")} sourced leads waiting for review (not ranked)` : ""}`;
     case "referral-expiry":
       return `${n("stamped") ?? 0} dated · ${n("newlyExpired") ?? 0} newly expired · ${n("expiredTotal") ?? 0} expired total`;
     case "outreach-dispatch:dm":

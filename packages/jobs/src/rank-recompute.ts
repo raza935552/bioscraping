@@ -11,6 +11,14 @@ export interface RankSummary {
   changed: number;
   triage: number;
   sp5Excluded: number;
+  /** Sourced leads left out because they are pending review or rejected. */
+  notReviewed: number;
+}
+
+/** Sourced leads are ranked only once a human accepts them. Pending and rejected ones
+ *  stay out of the ordinals, so they never shift the ranks of leads the team works. */
+export function isRankable(lead: { sourcingReview: string | null }): boolean {
+  return lead.sourcingReview == null || lead.sourcingReview === "accepted";
 }
 
 export async function runRankRecompute(db: Db = createDb()): Promise<RankSummary> {
@@ -21,7 +29,14 @@ export async function runRankRecompute(db: Db = createDb()): Promise<RankSummary
     .$returningId();
 
   try {
-    const leads = await db.select().from(schema.leads);
+    const all = await db.select().from(schema.leads);
+    const leads = all.filter(isRankable);
+    let unranked = 0;
+    for (const l of all) {
+      if (isRankable(l) || (l.conversionRank == null && l.rankBand == null && !l.needsTriage)) continue;
+      await db.update(schema.leads).set({ conversionRank: null, rankBand: null, needsTriage: false }).where(eq(schema.leads.id, l.id));
+      unranked++;
+    }
     const inputs: RankInput[] = leads.map((l) => ({
       id: String(l.id),
       affiliationStatus: (l.affiliationStatus as AffiliationStatus) ?? null,
@@ -50,7 +65,7 @@ export async function runRankRecompute(db: Db = createDb()): Promise<RankSummary
       }
     }
 
-    const summary: RankSummary = { total: results.length, changed, triage, sp5Excluded: sp5 };
+    const summary: RankSummary = { total: results.length, changed: changed + unranked, triage, sp5Excluded: sp5, notReviewed: all.length - leads.length };
     await db
       .update(schema.syncRuns)
       .set({ status: "ok", finishedAt: new Date(), detail: summary })
