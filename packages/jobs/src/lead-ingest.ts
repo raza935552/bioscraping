@@ -8,7 +8,8 @@ import { createDb, schema, type Db } from "@biolinx/db";
 import { alert, telegramFromEnv } from "@biolinx/notify";
 import {
   ACTOR_UNIT_PRICE,
-  VERIFY_UNIT_PRICE,
+  VERIFY_ITEMS,
+  VERIFY_PRICE,
   apifyConfigFromEnv,
   applyFilters,
   discovererFor as defaultDiscovererFor,
@@ -84,6 +85,58 @@ export interface ProfileRunSummary {
   termErrors: string[];
   /** Searches not run because they would have pushed the run past its spend cap. */
   termsSkipped: string[];
+  /** Searches not run because they recently stopped finding new people (see restUntilAfterRun). */
+  termsResting?: string[];
+  /** Per search: results paid for, and how many were people we didn't already have. */
+  termYield?: Array<{ search: string; hits: number; fresh: number }>;
+}
+
+/** What one search term has been worth, kept per audience in config `sourcing_term_stats:<id>`. */
+export interface TermStat {
+  runs: number;
+  lastRunAt: string;
+  lastHits: number;
+  lastFresh: number;
+  totalHits: number;
+  totalFresh: number;
+  /** ISO time before which this search is not run again, or null. */
+  restUntil: string | null;
+}
+export type TermStats = Record<string, TermStat>;
+
+export function termStatKey(platform: DiscoveryPlatform, term: string): string {
+  return `${platform}:${term.trim().replace(/^#/, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")}`;
+}
+
+/** Hashtag searches return mostly the same top posts day after day, and every
+ *  result is billed. A search that stops surfacing new people rests:
+ *  nothing came back → 14 days; nobody new → 7 days; under 10% new → 3 days. */
+export function restUntilAfterRun(hits: number, fresh: number, now: Date): Date | null {
+  const days = hits === 0 ? 14 : fresh === 0 ? 7 : fresh / hits < 0.1 ? 3 : 0;
+  return days ? new Date(now.getTime() + days * 86_400_000) : null;
+}
+
+export function isResting(stats: TermStats, platform: DiscoveryPlatform, term: string, now: Date): boolean {
+  const until = stats[termStatKey(platform, term)]?.restUntil;
+  return !!until && new Date(until).getTime() > now.getTime();
+}
+
+export function recordTermRun(stats: TermStats, platform: DiscoveryPlatform, term: string, hits: number, fresh: number, now: Date): TermStats {
+  const key = termStatKey(platform, term);
+  const prev = stats[key];
+  const until = restUntilAfterRun(hits, fresh, now);
+  return {
+    ...stats,
+    [key]: {
+      runs: (prev?.runs ?? 0) + 1,
+      lastRunAt: now.toISOString(),
+      lastHits: hits,
+      lastFresh: fresh,
+      totalHits: (prev?.totalHits ?? 0) + hits,
+      totalFresh: (prev?.totalFresh ?? 0) + fresh,
+      restUntil: until ? until.toISOString() : null,
+    },
+  };
 }
 
 export interface IngestSummary {
@@ -138,6 +191,23 @@ function rulesFor(profile: ProfileRow, h: DiscoveryHit): ScoreRules {
   return rules;
 }
 
+function audienceRules(profile: ProfileRow) {
+  return {
+    followerMin: profile.followerMin ?? {},
+    followerMax: profile.followerMax ?? {},
+    countries: profile.countries ?? [],
+    language: profile.language,
+    excludeTerms: profile.excludeTerms ?? [],
+    excludeHandles: profile.excludeHandles ?? [],
+  };
+}
+
+/** People in one search's results who pass the audience filters and aren't
+ *  already known. Measured against the known set as it was before this run. */
+export function countFresh(profile: ProfileRow, hits: DiscoveryHit[], known: KnownPeople): number {
+  return applyFilters(hits, audienceRules(profile)).kept.filter((h) => !isKnown(h, null, known)).length;
+}
+
 /** Search hits → scored candidates for one profile. No DB, no network:
  *  discovery results and the verify function are injected. */
 export async function planProfile(
@@ -161,6 +231,8 @@ export async function planProfile(
     stoppedBy: "exhausted",
     termErrors: [],
     termsSkipped: [],
+    termsResting: [],
+    termYield: [],
   };
   const spendCap = Number(profile.spendCapUsd);
 
@@ -175,14 +247,7 @@ export async function planProfile(
     }
   }
 
-  const { kept, rejected } = applyFilters([...merged.values()], {
-    followerMin: profile.followerMin ?? {},
-    followerMax: profile.followerMax ?? {},
-    countries: profile.countries ?? [],
-    language: profile.language,
-    excludeTerms: profile.excludeTerms ?? [],
-    excludeHandles: profile.excludeHandles ?? [],
-  });
+  const { kept, rejected } = applyFilters([...merged.values()], audienceRules(profile));
   summary.rejected = rejected;
 
   const fresh = kept.filter((h) => {
@@ -204,11 +269,13 @@ export async function planProfile(
       summary.stoppedBy = "cap";
       break;
     }
-    if (summary.estimatedCostUsd + VERIFY_UNIT_PRICE > spendCap) {
+    const readPrice = VERIFY_PRICE[h.platform];
+    if (summary.estimatedCostUsd + readPrice > spendCap) {
+      // A cheaper platform's read may still fit, so keep looking instead of stopping.
       summary.stoppedBy = "spend";
-      break;
+      continue;
     }
-    summary.estimatedCostUsd = round4(summary.estimatedCostUsd + VERIFY_UNIT_PRICE);
+    summary.estimatedCostUsd = round4(summary.estimatedCostUsd + readPrice);
 
     let v: VerifiedRead | null = null;
     try {
@@ -290,7 +357,7 @@ export function makeVerify(deps: IngestDeps): VerifyFn {
     const platform: SourcePlatform = h.platform;
     const bundle = await deps.fetcherFor(platform)(
       { platform, handle: h.handle, url: h.profileUrl },
-      { fetchImpl: deps.fetchImpl, apify: deps.apify, maxItems: 12 },
+      { fetchImpl: deps.fetchImpl, apify: deps.apify, maxItems: VERIFY_ITEMS },
     );
     if (bundle.items.length === 0 && bundle.followers == null) return null; // private or gone
     const dated = bundle.items
@@ -385,32 +452,69 @@ export interface PlannedSearch {
 /** Most of a run's spend budget can go to searching, but a slice is held back
  *  so the best hits can still be verified: enough for a full day's cap of
  *  profile reads, never more than half the budget. */
-export function verifyReserveUsd(profile: Pick<ProfileRow, "dailyCap" | "spendCapUsd">): number {
+export function verifyReserveUsd(profile: Pick<ProfileRow, "dailyCap" | "spendCapUsd"> & Partial<Pick<ProfileRow, "platforms">>): number {
   const cap = Number(profile.spendCapUsd);
-  return round4(Math.min(profile.dailyCap * VERIFY_UNIT_PRICE, cap / 2));
+  // Reserve at the priciest read among the audience's platforms (TikTok if none given).
+  const prices = (profile.platforms ?? []).map((p) => VERIFY_PRICE[p]);
+  const priciest = prices.length > 0 ? Math.max(...prices) : VERIFY_PRICE.tiktok;
+  return round4(Math.min(profile.dailyCap * priciest, cap / 2));
 }
 
-/** Every search a profile wants, audience terms first, then competitor names,
- *  deduped per platform, split into what fits the search budget and what doesn't.
+/** Every search a profile wants, split into what fits the search budget and what doesn't.
+ *  Order: every platform's audience terms first (round-robin across platforms), then
+ *  competitor names round-robin across platforms. `rotation` (the run's day number)
+ *  shifts which competitor goes first, so a budget that only covers some of them
+ *  reaches all of them over successive days. Deduped per platform.
  *  Nothing runs before this: the spend cap gates searching, not only verification. */
 export function planSearches(
   profile: Pick<ProfileRow, "platforms" | "terms" | "dailyCap" | "spendCapUsd">,
   competitors: Pick<CompetitorRule, "name">[],
   perTerm: number,
-): { run: PlannedSearch[]; skipped: PlannedSearch[]; budgetUsd: number } {
+  rotation = 0,
+  resting: (platform: DiscoveryPlatform, term: string) => boolean = () => false,
+): { run: PlannedSearch[]; skipped: PlannedSearch[]; resting: PlannedSearch[]; budgetUsd: number } {
+  const restingOut: PlannedSearch[] = [];
   const budgetUsd = round4(Math.max(0, Number(profile.spendCapUsd) - verifyReserveUsd(profile)));
-  const all: PlannedSearch[] = [];
-  for (const platform of profile.platforms) {
-    const names = COMPETITOR_NAME_PLATFORMS.has(platform) ? competitors.map((c) => c.name) : [];
-    const seen = new Set<string>();
-    for (const raw of [...(profile.terms[platform] ?? []), ...names]) {
-      const term = raw.trim();
-      const key = term.replace(/^#/, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      all.push({ platform, term, estimatedCostUsd: round4(ACTOR_UNIT_PRICE[platform] * perTerm) });
+  const n = competitors.length;
+  // Advance by as many competitors as one day's budget covers, so tomorrow starts
+  // where today stopped instead of repeating most of today's searches.
+  const priceOf = (p: DiscoveryPlatform) => round4(ACTOR_UNIT_PRICE[p] * perTerm);
+  const audienceCost = profile.platforms.reduce((a, p) => a + (profile.terms[p]?.length ?? 0) * priceOf(p), 0);
+  const perCompetitor = profile.platforms.filter((p) => COMPETITOR_NAME_PLATFORMS.has(p)).reduce((a, p) => a + priceOf(p), 0);
+  const perDay = perCompetitor > 0 ? Math.max(1, Math.floor(Math.max(0, budgetUsd - audienceCost) / perCompetitor)) : 1;
+  const shift = n > 0 ? (((rotation * perDay) % n) + n) % n : 0;
+  const rotated = [...competitors.slice(shift), ...competitors.slice(0, shift)].map((c) => c.name);
+  const seen = new Map<DiscoveryPlatform, Set<string>>();
+  const make = (platform: DiscoveryPlatform, raw: string): PlannedSearch | null => {
+    const term = raw.trim();
+    const key = term.replace(/^#/, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+    const s = seen.get(platform) ?? new Set<string>();
+    seen.set(platform, s);
+    if (!key || s.has(key)) return null;
+    s.add(key);
+    const planned = { platform, term, estimatedCostUsd: round4(ACTOR_UNIT_PRICE[platform] * perTerm) };
+    if (resting(platform, term)) {
+      restingOut.push(planned);
+      return null;
     }
-  }
+    return planned;
+  };
+  const roundRobin = (listFor: (p: DiscoveryPlatform) => string[]): PlannedSearch[] => {
+    const lists = profile.platforms.map((p) => ({ p, terms: listFor(p) }));
+    const out: PlannedSearch[] = [];
+    const longest = Math.max(0, ...lists.map((l) => l.terms.length));
+    for (let i = 0; i < longest; i++) {
+      for (const { p, terms } of lists) {
+        const s = i < terms.length ? make(p, terms[i]!) : null;
+        if (s) out.push(s);
+      }
+    }
+    return out;
+  };
+  const all = [
+    ...roundRobin((p) => profile.terms[p] ?? []),
+    ...roundRobin((p) => (COMPETITOR_NAME_PLATFORMS.has(p) ? rotated : [])),
+  ];
   const run: PlannedSearch[] = [];
   const skipped: PlannedSearch[] = [];
   let spent = 0;
@@ -420,8 +524,10 @@ export function planSearches(
       spent = round4(spent + s.estimatedCostUsd);
     } else skipped.push(s);
   }
-  return { run, skipped, budgetUsd };
+  return { run, skipped, resting: restingOut, budgetUsd };
 }
+
+const termStatsConfigKey = (profileId: number) => `sourcing_term_stats:${profileId}`;
 
 const PER_TERM = 30;
 
@@ -503,17 +609,31 @@ export async function runLeadIngest(db: Db = createDb(), deps?: IngestDeps, opts
       const profile: ProfileRow = { ...configured, spendCapUsd: capUsd };
       const hitsByTerm = new Map<string, DiscoveryHit[]>();
       const termErrors: string[] = [];
-      const searches = planSearches(profile, competitors, PER_TERM);
+      const dayNumber = Math.floor(startOfBusinessDay(now).getTime() / 86_400_000);
+      const statsRow = await db.query.config.findFirst({ where: eq(schema.config.key, termStatsConfigKey(profile.id)) });
+      let stats = (statsRow?.value as TermStats | undefined) ?? {};
+      const searches = planSearches(profile, competitors, PER_TERM, dayNumber + profile.id, (p, t) => isResting(stats, p, t, now));
+      const termYield: Array<{ search: string; hits: number; fresh: number }> = [];
       for (const { platform, term } of searches.run) {
         try {
           const hits = await deps.discovererFor(platform)(term, { fetchImpl: deps.fetchImpl, apify: deps.apify, perTerm: PER_TERM }, discoveryOptsFor(profile, platform));
           hitsByTerm.set(`${platform}:${term}`, hits);
+          // Measured before planProfile adds this run's people to `known`.
+          const fresh = countFresh(profile, hits, known);
+          termYield.push({ search: `${platform} ${term}`, hits: hits.length, fresh });
+          stats = recordTermRun(stats, platform, term, hits.length, fresh, now);
         } catch (err) {
           termErrors.push(`${platform} ${term}: ${(err as Error).message}`);
         }
       }
+      await db
+        .insert(schema.config)
+        .values({ key: termStatsConfigKey(profile.id), value: stats })
+        .onDuplicateKeyUpdate({ set: { value: stats } });
       const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now);
       ps.termErrors = termErrors;
+      ps.termYield = termYield;
+      ps.termsResting = searches.resting.map((s) => `${s.platform} ${s.term}`);
       ps.termsSkipped = searches.skipped.map((s) => `${s.platform} ${s.term}`);
       if (ps.termsSkipped.length > 0 && ps.stoppedBy === "exhausted") ps.stoppedBy = "spend";
       if (limitedByDaily && ps.stoppedBy === "spend") ps.stoppedBy = "daily_limit";

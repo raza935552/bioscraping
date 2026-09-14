@@ -122,11 +122,12 @@ export function Audiences() {
 
 function lastRunText(p: AudienceProfile): string {
   if (!p.lastRunAt) return "never";
-  const s = p.lastRunSummary as { inserted?: number; estimatedCostUsd?: number; stoppedBy?: string; termsSkipped?: string[] } | null;
+  const s = p.lastRunSummary as { inserted?: number; estimatedCostUsd?: number; stoppedBy?: string; termsSkipped?: string[]; termsResting?: string[] } | null;
   const parts = [new Date(p.lastRunAt).toLocaleDateString(), `${s?.inserted ?? 0} added`];
   if (s?.estimatedCostUsd != null) parts.push(`≈ $${s.estimatedCostUsd}`);
   if (s?.stoppedBy === "spend") parts.push("stopped at spend cap");
   if (s?.stoppedBy === "daily_limit") parts.push("stopped at the daily limit for all audiences");
+  if (s?.termsResting?.length) parts.push(`${s.termsResting.length} search${s.termsResting.length === 1 ? "" : "es"} resting (no new people lately)`);
   if (s?.termsSkipped?.length) parts.push(`${s.termsSkipped.length} search${s.termsSkipped.length === 1 ? "" : "es"} skipped to stay under the cap`);
   return parts.join(" · ");
 }
