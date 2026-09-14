@@ -46,6 +46,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     ],
   },
   {
+    id: "customerio",
+    title: "Customer.io (email mirror)",
+    blurb: "Every lead email is mirrored as a person with lead attributes. Journeys are built in Customer.io.",
+    fields: [
+      { key: "CUSTOMERIO_SITE_ID", label: "Site ID", kind: "text" },
+      { key: "CUSTOMERIO_TRACK_API_KEY", label: "Track API key", kind: "secret" },
+      { key: "CUSTOMERIO_REGION", label: "Region (us or eu)", kind: "text", placeholder: "us" },
+    ],
+  },
+  {
     id: "ai",
     title: "AI drafting (Anthropic)",
     blurb: "The model that writes and classifies messages.",
