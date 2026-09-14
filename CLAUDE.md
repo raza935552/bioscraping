@@ -100,9 +100,20 @@ built lead sourcing.
   Settings. Plain-language labels live in `apps/admin/src/labels.ts`.
 - **Live acceptance so far:** enrichment ran on real leads (6 hand-verified
   with 0 fabricated citations, then a 40-lead boot batch: 20 ready, 14 no
-  match, 6 no source). Five DM drafts are queued for approval. **No live
-  sourcing run has happened yet.** Raza's rule: the first one runs on the
-  server, not locally.
+  match, 6 no source). Five DM drafts are queued for approval.
+- **Live sourcing (2026-09-14, on the server):** first run found 10 TikTok
+  leads for ~$0.76 real Apify spend; hand review exposed and fixed wrong
+  search actors, TikTok GeoNames country ids, non-English/dead/off-niche
+  leads, false competitor matches, YouTube relative dates, Reddit and Skool
+  output changes. 7 of the 10 were rejected with reasons, 3 await review.
+  Quality gates live in `packages/scraping/src/quality.ts`.
+- **Audiences:** 20 active (5 niches × TikTok+IG, YouTube, Skool, Reddit),
+  caps summing to $8.55 under the $10 daily limit, run in niche-priority
+  order, searches shared across audiences paid once per run, term memory in
+  config `sourcing_term_stats:<id>`, gated handles in `sourcing_gated_handles`.
+- **Competitors:** 16 seeded from the imported leads' `other_creator_company`
+  and websites (commission unknown except one note). Matt's own list still
+  hasn't arrived.
 
 ## Not built yet (from MASTER-PLAN v3 in the sibling `affiliate-system-spec`
 folder, not in this repo)
@@ -144,9 +155,12 @@ pnpm --filter @biolinx/worker run:ingest <audienceId>
 pnpm --filter @biolinx/worker run:dispatch dm 5
 ```
 
-Production: `cd /srv/engine && ./infra/deploy.sh` (pull, install, apply SQL,
-build admin, PM2 reload). Repo: `github.com/raza935552/bioscraping`. The
-older `biolinkxaffilaiteengine` repo is stale.
+Production runs at `/var/www/bioscraping` on the gemboxpk.com server (nginx →
+:3001). Node 22, pnpm and pm2 live in `/opt/node22/bin`; PM2 uses the untracked
+`infra/ecosystem.local.config.cjs` (the committed one points at the tsx shell
+wrapper and crashes), so `infra/deploy.sh` needs that config swapped in. Push
+via the `github-bioscraping` SSH alias. Repo: `github.com/raza935552/bioscraping`.
+The older `biolinkxaffilaiteengine` repo is stale.
 
 Settings (Apify token, Anthropic key, iDev keys, Instantly, Customer.io site
 ID + track key + app key, Telegram) are entered on the admin Settings page and
