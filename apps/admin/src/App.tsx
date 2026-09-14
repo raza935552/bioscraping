@@ -7,6 +7,7 @@ import { Approvals } from "./pages/Approvals.js";
 import { Dashboard } from "./pages/Dashboard.js";
 import { Email } from "./pages/Email.js";
 import { Leads } from "./pages/Leads.js";
+import { Audiences } from "./pages/Audiences.js";
 import { Login } from "./pages/Login.js";
 import { Replies } from "./pages/Replies.js";
 import { Settings } from "./pages/Settings.js";
@@ -51,6 +52,7 @@ export function App() {
   const nav = [
     ["/dashboard", "Dashboard", "📊"],
     ["/leads", "Leads", "🎯"],
+    ...(me.role === "admin" || me.role === "ops" ? ([["/audiences", "Audiences", "🔎"]] as const) : []),
     ["/approvals", "Send messages", "✉️"],
     ["/email", "Email ops", "📮"],
     ["/replies", "Replies", "💬"],
@@ -64,6 +66,8 @@ export function App() {
     switch (route) {
       case "/leads":
         return <Leads me={me} />;
+      case "/audiences":
+        return <Audiences />;
       case "/approvals":
         return <Approvals me={me} />;
       case "/email":

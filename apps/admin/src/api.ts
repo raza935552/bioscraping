@@ -96,6 +96,69 @@ export interface LeadRow {
   hasNotes: boolean;
   enrichmentStatus: string | null;
   profileUrl: string | null;
+  sourcingScore: number | null;
+  sourcingReason: string | null;
+  sourcingReview: string | null;
+  brandFit: string | null;
+  affiliateCode: string | null;
+  competitor: string | null;
+  lastPostAt: string | null;
+  doesLive: boolean | null;
+  promoTrackRecord: boolean | null;
+  contentOriginal: boolean | null;
+  scoreReasons: string[];
+  sample: SamplePost[];
+}
+
+export interface SamplePost {
+  url: string;
+  text: string;
+  postedAt: string | null;
+  likes?: number;
+  views?: number;
+  comments?: number;
+}
+
+export interface AudienceProfile {
+  id: number;
+  name: string;
+  active: boolean;
+  niche: string;
+  brandFit: string;
+  platforms: string[];
+  terms: Record<string, string[]>;
+  followerMin: Record<string, number> | null;
+  followerMax: Record<string, number> | null;
+  activityDays: number;
+  countries: string[] | null;
+  language: string;
+  matchTerms: string[] | null;
+  excludeTerms: string[] | null;
+  excludeHandles: string[] | null;
+  dailyCap: number;
+  spendCapUsd: string;
+  lastRunAt: string | null;
+  lastRunSummary: Record<string, unknown> | null;
+}
+
+export interface Competitor {
+  id: number;
+  name: string;
+  domains: string[] | null;
+  codePattern: string | null;
+  codePrefix: string | null;
+  commissionPct: number | null;
+  recurring: boolean | null;
+  notes: string | null;
+  active: boolean;
+}
+
+export interface AudiencesPayload {
+  profiles: AudienceProfile[];
+  competitors: Competitor[];
+  niches: string[];
+  platforms: string[];
+  defaults: Record<string, unknown>;
 }
 
 export interface LeadDetail {
@@ -151,6 +214,19 @@ export const api = {
   signups: () => request<SignupRow[]>("/api/signups"),
   provisionSignup: (id: number) => request<{ sagaState: string; blocked: string | null }>(`/api/signups/${id}/provision`, { method: "POST", body: "{}" }),
   confirmSignup: (id: number) => request<{ ok: true }>(`/api/signups/${id}/confirm`, { method: "POST", body: "{}" }),
+  audiences: () => request<AudiencesPayload>("/api/audiences"),
+  saveAudience: (id: number | null, body: Record<string, unknown>) =>
+    request<{ ok: true; id?: number }>(id ? `/api/audiences/${id}` : "/api/audiences", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
+  deleteAudience: (id: number) => request<{ ok: true }>(`/api/audiences/${id}`, { method: "DELETE" }),
+  runAudience: (id: number) =>
+    request<{ ok: true; result: { inserted: number; estimatedCostUsd: number; profiles: Array<Record<string, unknown>> } }>(`/api/audiences/${id}/run`, {
+      method: "POST",
+      body: "{}",
+    }),
+  saveCompetitor: (id: number | null, body: Record<string, unknown>) =>
+    request<{ ok: true; id?: number }>(id ? `/api/competitors/${id}` : "/api/competitors", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
+  deleteCompetitor: (id: number) => request<{ ok: true }>(`/api/competitors/${id}`, { method: "DELETE" }),
+  reviewLead: (id: number, body: Record<string, unknown>) => request<{ ok: true }>(`/api/leads/${id}/review`, { method: "POST", body: JSON.stringify(body) }),
   settings: () => request<{ sections: SettingsSection[] }>("/api/settings"),
   saveSettings: (section: string, values: Record<string, string>) =>
     request<{ ok: true }>(`/api/settings/${section}`, { method: "PUT", body: JSON.stringify(values) }),
@@ -182,6 +258,7 @@ export interface LeadsPage {
     verifiedReach: number;
     personalized: number;
     dead: number;
+    sourcedPending: number;
   };
   page: number;
   pageSize: number;

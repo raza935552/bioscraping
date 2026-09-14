@@ -271,3 +271,8 @@ button.go:hover { filter: brightness(1.05); }
 
 /* One-line result notice after an action (e.g. ranking summary). */
 .notice { background: var(--good-soft); color: var(--good); border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 12px; }
+
+/* Sourced-lead review */
+.review-form { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: 16px 0; }
+.sample { font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+.sample:last-child { border-bottom: 0; }

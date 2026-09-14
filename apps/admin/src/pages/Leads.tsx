@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type LeadDetail, type LeadsPage, type Me } from "../api.js";
+import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type SamplePost } from "../api.js";
 import { PageInfo, Pagination } from "../components.js";
-import { BAND_HELP, BAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, describeRun, subProfileLabel } from "../labels.js";
+import { BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
 
 const VIEWS: Array<[string, string]> = [
   ["queue", "Queue"],
+  ["sourced", "Sourced"],
   ["all", "All"],
   ["triage", "Needs triage"],
 ];
@@ -18,6 +19,9 @@ const SORTS: Array<[string, string]> = [
   ["sp", "Sub-profile"],
   ["lastTouch", "Last touch"],
 ];
+
+const NICHES = Object.keys(NICHE_BRAND);
+const isHttp = (u: string | null | undefined): u is string => !!u && /^https?:\/\//i.test(u);
 
 export function Leads({ me }: { me: Me }) {
   const [view, setView] = useState("queue");
@@ -35,6 +39,8 @@ export function Leads({ me }: { me: Me }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [rankMsg, setRankMsg] = useState("");
+  const [reviewing, setReviewing] = useState<LeadRow | null>(null);
+  const [confirmReject, setConfirmReject] = useState<number | null>(null);
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ view, page: String(page), pageSize: "50", sort });
@@ -79,6 +85,20 @@ export function Leads({ me }: { me: Me }) {
 
   const canRun = me.role === "admin" || me.role === "ops";
   const a = data?.analytics;
+
+  const reject = async (l: LeadRow, reason = "") => {
+    if (confirmReject !== l.id && !reason) {
+      setConfirmReject(l.id);
+      return;
+    }
+    setConfirmReject(null);
+    try {
+      await api.reviewLead(l.id, { decision: "reject", reason });
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   return (
     <>
@@ -135,8 +155,35 @@ export function Leads({ me }: { me: Me }) {
             {busy ? "Working…" : "Research next batch"}
           </button>
         )}
+        {me.role === "admin" && (
+          <button
+            disabled={busy}
+            title="Mirror every lead that has an email into Customer.io"
+            onClick={() => {
+              setBusy(true);
+              setRankMsg("");
+              void api
+                .runJob("customerio-sync")
+                .then((r) => setRankMsg(describeRun("customerio-sync", r.result)))
+                .catch((e) => setError((e as Error).message))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Sync Customer.io
+          </button>
+        )}
       </div>
       {rankMsg && <div className="notice">Done: {rankMsg}</div>}
+      {reviewing && (
+        <ReviewForm
+          lead={reviewing}
+          onClose={() => setReviewing(null)}
+          onDone={async () => {
+            setReviewing(null);
+            await load();
+          }}
+        />
+      )}
 
       {a && (
         <div className="analytics">
@@ -148,6 +195,7 @@ export function Leads({ me }: { me: Me }) {
           <div className="stat"><div className="n">{a.personalized.toLocaleString()}</div><div className="l">Has talking points</div></div>
           <div className="stat"><div className="n">{a.verifiedReach.toLocaleString()}</div><div className="l">Verified reach</div></div>
           <div className="stat"><div className="n">{a.dead.toLocaleString()}</div><div className="l">Unreachable</div></div>
+          <div className="stat"><div className="n">{a.sourcedPending.toLocaleString()}</div><div className="l">Waiting for review</div></div>
         </div>
       )}
 
@@ -174,6 +222,17 @@ export function Leads({ me }: { me: Me }) {
 
       {error && <div className="error">{error}</div>}
 
+      {view === "sourced" ? (
+        <SourcedTable
+          rows={data?.rows ?? []}
+          canRun={canRun}
+          open={open}
+          onOpen={(id) => setOpen(open === id ? null : id)}
+          onAccept={setReviewing}
+          onReject={(l, reason) => void reject(l, reason)}
+          confirmReject={confirmReject}
+        />
+      ) : (
       <div className="tablewrap">
         <table>
           <thead>
@@ -252,6 +311,7 @@ export function Leads({ me }: { me: Me }) {
           </tbody>
         </table>
       </div>
+      )}
 
       <Pagination page={data?.page ?? 1} totalPages={data?.totalPages ?? 1} onPage={setPage} />
 
@@ -266,9 +326,34 @@ export function Leads({ me }: { me: Me }) {
               <div style={{ whiteSpace: "pre-wrap" }}>{detail.lead.personalizationNotes ?? "(none yet — this lead has not been researched)"}</div>
             </div>
             <div className="card" style={{ gridColumn: "1 / -1" }}>
-              <div className="k">Notes</div>
+              <div className="k">{detail.lead.sourcingReview ? "Why this score" : "Notes"}</div>
               <div style={{ whiteSpace: "pre-wrap" }}>{detail.lead.notes ?? "—"}</div>
             </div>
+            {Array.isArray(detail.lead.sourcingSample) && (detail.lead.sourcingSample as SamplePost[]).length > 0 && (
+              <div className="card" style={{ gridColumn: "1 / -1" }}>
+                <div className="k">Recent posts</div>
+                {(detail.lead.sourcingSample as SamplePost[]).map((p, i) => (
+                  <div key={i} className="sample">
+                    <span className="muted">{p.postedAt?.slice(0, 10) ?? "—"}</span>{" "}
+                    {isHttp(p.url) ? (
+                      <a href={p.url} target="_blank" rel="noreferrer">
+                        {p.text || "(no text)"}
+                      </a>
+                    ) : (
+                      p.text || "(no text)"
+                    )}
+                    {(p.likes != null || p.views != null || p.comments != null) && (
+                      <span className="muted">
+                        {" · "}
+                        {[p.likes != null ? `${p.likes.toLocaleString()} likes` : null, p.views != null ? `${p.views.toLocaleString()} views` : null, p.comments != null ? `${p.comments.toLocaleString()} comments` : null]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             {detail.enrichments.length > 0 && (
               <div className="card" style={{ gridColumn: "1 / -1" }}>
                 <div className="k">Research history</div>
@@ -315,5 +400,211 @@ export function Leads({ me }: { me: Me }) {
         </>
       )}
     </>
+  );
+}
+
+
+interface SourcedTableProps {
+  rows: LeadRow[];
+  canRun: boolean;
+  open: number | null;
+  onOpen: (id: number) => void;
+  onAccept: (l: LeadRow) => void;
+  onReject: (l: LeadRow, reason?: string) => void;
+  confirmReject: number | null;
+}
+
+function SourcedTable({ rows, canRun, open, onOpen, onAccept, onReject, confirmReject }: SourcedTableProps) {
+  return (
+    <div className="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Score</th>
+            <th>Who</th>
+            <th>Platform</th>
+            <th>Verified reach</th>
+            <th>Last post</th>
+            <th>Links</th>
+            <th>Decision</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={7} className="muted">
+                Nothing waiting for review. Run an audience from the Audiences page to find new people.
+              </td>
+            </tr>
+          )}
+          {rows.map((l) => (
+            <tr key={l.id} className={open === l.id ? "selected" : ""} style={{ cursor: "pointer" }} onClick={() => onOpen(l.id)}>
+              <td>
+                <strong>{l.sourcingScore ?? 0}</strong>
+                <div className="muted" style={{ fontSize: 11 }}>{l.scoreReasons.length} reasons</div>
+              </td>
+              <td>
+                {l.name}
+                {l.competitor && (
+                  <>
+                    {" "}
+                    <span className="chip suggest" title={l.affiliateCode ? `code ${l.affiliateCode}` : "competitor link seen"}>
+                      promotes {l.competitor}
+                    </span>
+                  </>
+                )}
+                <div className="muted" style={{ fontSize: 11 }}>
+                  {l.sourcingReason} · {BRAND_LABEL[l.brandFit ?? ""] ?? l.brandFit ?? ""}
+                </div>
+              </td>
+              <td className="muted">{l.platform ?? "—"}</td>
+              <td>{l.reach != null ? l.reach.toLocaleString() : <span className="muted">unverified</span>}</td>
+              <td className="muted">{l.lastPostAt?.slice(0, 10) ?? "—"}</td>
+              <td onClick={(e) => e.stopPropagation()}>
+                {isHttp(l.sample[0]?.url) && (
+                  <a href={l.sample[0]!.url} target="_blank" rel="noreferrer">
+                    post ↗
+                  </a>
+                )}{" "}
+                {isHttp(l.profileUrl) && (
+                  <a href={l.profileUrl} target="_blank" rel="noreferrer">
+                    profile ↗
+                  </a>
+                )}
+              </td>
+              <td onClick={(e) => e.stopPropagation()}>
+                {canRun && (
+                  <>
+                    <button className="primary" onClick={() => onAccept(l)}>
+                      Accept…
+                    </button>{" "}
+                    <button onClick={() => onReject(l)}>{confirmReject === l.id ? "Click again to reject" : "Reject"}</button>{" "}
+                    <button onClick={() => onReject(l, "goodwill advocate")} title="SP5: never contacted, by rule">
+                      Goodwill advocate
+                    </button>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ReviewForm({ lead, onClose, onDone }: { lead: LeadRow; onClose: () => void; onDone: () => Promise<void> }) {
+  const [affiliation, setAffiliation] = useState(lead.competitor ? "Signed elsewhere" : "Unsigned");
+  const [sp, setSp] = useState("SP2");
+  const [niche, setNiche] = useState(lead.niche && NICHES.includes(lead.niche) ? lead.niche : NICHES[0] ?? "");
+  const [brandFit, setBrandFit] = useState(lead.brandFit ?? NICHE_BRAND[niche] ?? "biolinx");
+  const [doesLive, setDoesLive] = useState(false);
+  const [promo, setPromo] = useState(false);
+  const [original, setOriginal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr("");
+    try {
+      await api.reviewLead(lead.id, {
+        decision: "accept",
+        affiliationStatus: affiliation,
+        subProfile: sp,
+        niche,
+        brandFit,
+        ...(doesLive ? { doesLive: true } : {}),
+        ...(promo ? { promoTrackRecord: true } : {}),
+        ...(original ? { contentOriginal: true } : {}),
+      });
+      await onDone();
+    } catch (ex) {
+      setErr((ex as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="settings-card" onSubmit={submit}>
+      <div className="settings-head">
+        <h2>Accept {lead.name}</h2>
+        <p className="muted">
+          Once accepted the lead is ranked and researched like any other. Boxes you leave unchecked stay “unknown”, not “no”.
+        </p>
+      </div>
+      <div className="review-form">
+        <label className="settings-field">
+          <span className="fl">Affiliation</span>
+          <select value={affiliation} onChange={(e) => setAffiliation(e.target.value)}>
+            <option>Unsigned</option>
+            <option>Signed elsewhere</option>
+          </select>
+          {lead.competitor && <span className="fh">Seen promoting {lead.competitor}.</span>}
+        </label>
+        <label className="settings-field">
+          <span className="fl">Sub-profile</span>
+          <select value={sp} onChange={(e) => setSp(e.target.value)}>
+            {["SP1", "SP2", "SP3", "SP4"].map((code) => (
+              <option key={code} value={code}>
+                {code} · {subProfileLabel(code).text}
+              </option>
+            ))}
+          </select>
+          <span className="fh">Goodwill advocates are rejected, not accepted as SP5.</span>
+        </label>
+        <label className="settings-field">
+          <span className="fl">Niche</span>
+          <select
+            value={niche}
+            onChange={(e) => {
+              setNiche(e.target.value);
+              setBrandFit(NICHE_BRAND[e.target.value] ?? "biolinx");
+            }}
+          >
+            {NICHES.map((n) => (
+              <option key={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <label className="settings-field">
+          <span className="fl">Brand</span>
+          <select value={brandFit} onChange={(e) => setBrandFit(e.target.value)}>
+            {Object.entries(BRAND_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="settings-field bool">
+          <span className="fl">Runs LIVE</span>
+          <input type="checkbox" checked={doesLive} onChange={(e) => setDoesLive(e.target.checked)} />
+        </label>
+        <label className="settings-field bool">
+          <span className="fl">Has run promos</span>
+          <input type="checkbox" checked={promo} onChange={(e) => setPromo(e.target.checked)} />
+        </label>
+        <label className="settings-field bool">
+          <span className="fl">Original content</span>
+          <input type="checkbox" checked={original} onChange={(e) => setOriginal(e.target.checked)} />
+        </label>
+      </div>
+      <div className="settings-foot">
+        {err && (
+          <span className="error" style={{ marginRight: "auto" }}>
+            {err}
+          </span>
+        )}
+        <button type="button" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <button className="primary" disabled={busy}>
+          {busy ? "Saving…" : "Accept lead"}
+        </button>
+      </div>
+    </form>
   );
 }

@@ -68,6 +68,33 @@ export const ENRICH_LABEL: Record<string, { text: string; tone: "ok" | "warn" | 
   failed: { text: "failed", tone: "bad", help: "The scraper or the model errored. Retried up to 3 times." },
 };
 
+export const PLATFORM_LABEL: Record<string, string> = { tiktok: "TikTok", instagram: "Instagram", youtube: "YouTube", reddit: "Reddit", skool: "Skool" };
+
+export const TERM_HELP: Record<string, string> = {
+  tiktok: "One per line. #hashtag searches that tag; a plain phrase is treated as a hashtag too.",
+  instagram: "One per line. #hashtag for a tag; a plain phrase runs a keyword search.",
+  youtube: "One per line. Plain search phrases, e.g. peptides for recovery.",
+  reddit: "One per line. Subreddits as r/Peptides (top posts of the month).",
+  skool: "One per line. Community search terms; the community owner becomes the lead.",
+};
+
+export const BRAND_LABEL: Record<string, string> = { biolinx: "BiolinX", aro: "Aro", both: "BiolinX + Aro" };
+
+/** Default brand per niche tier (mirrors brandFitForNiche in core). */
+export const NICHE_BRAND: Record<string, string> = {
+  "Weight-loss seeker": "both",
+  Biohacker: "biolinx",
+  "Gym / PED-curious": "biolinx",
+  "Anti-aging": "biolinx",
+  "Sexual wellness": "biolinx",
+};
+
+export const REVIEW_LABEL: Record<string, { text: string; tone: "ok" | "warn" | "bad" }> = {
+  pending: { text: "Waiting for review", tone: "warn" },
+  accepted: { text: "Accepted", tone: "ok" },
+  rejected: { text: "Rejected", tone: "bad" },
+};
+
 export const ROLE_HELP: Record<string, string> = {
   admin: "Full control, including keys and team",
   ops: "Runs jobs, decides affiliates, prepares signups",
@@ -83,6 +110,8 @@ const JOB_LABEL: Record<string, string> = {
   "outreach-dispatch:dm": "DM drafting",
   "outreach-dispatch:email": "Email drafting",
   "enrich-personalize": "Lead research",
+  "lead-ingest": "Find new leads",
+  "customerio-sync": "Customer.io mirror",
 };
 
 export function jobLabel(job: string): string {
@@ -113,6 +142,10 @@ export function describeRun(job: string, detail: unknown): string {
     case "outreach-dispatch:dm":
     case "outreach-dispatch:email":
       return `${n("considered") ?? 0} considered · ${n("drafted") ?? 0} drafted · ${n("queued") ?? 0} to review · ${n("sent") ?? 0} sent · ${n("blocked") ?? 0} blocked${(n("skippedUnenriched") ?? 0) > 0 ? ` · ${n("skippedUnenriched")} waiting for research` : ""}`;
+    case "lead-ingest":
+      return `${n("inserted") ?? 0} new leads waiting for review · about $${n("estimatedCostUsd") ?? 0}`;
+    case "customerio-sync":
+      return d.skippedNotConfigured ? "Customer.io is not configured" : `${n("synced") ?? 0} synced · ${n("suppressed") ?? 0} unsubscribed · ${n("failed") ?? 0} failed`;
     case "enrich-personalize":
       return `${n("attempted") ?? 0} researched · ${n("enriched") ?? 0} ready · ${n("no_match") ?? 0} no match · ${n("unresolvable") ?? 0} unreachable · ${n("no_source") ?? 0} no source · ${n("failed") ?? 0} failed`;
     default:
