@@ -112,7 +112,7 @@ implemented and where the engine differs.
     this run is skipped, searches that stop finding new people rest (term
     memory in config `sourcing_term_stats:<id>`).
   - Quality gates (`quality.ts`, `country.ts`), free checks before the paid
-    read and full checks after: non-English, dead (180 days), off-niche,
+    read and full checks after: non-English, off-niche,
     follower range (re-checked after the read), country outside the US,
     failed read, dead (no post in 60 days; was 180), and **weak reach**:
     median views of the recent posts under 0.5% of followers on TikTok or
