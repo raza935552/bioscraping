@@ -21,11 +21,15 @@ Biolinx side. Written 2026-09-15 against the "Biolinx Post Intake API" doc.
    call is made in our admin (Swipe file page) before anything is sent. Biolinx
    then saves each accepted post as a draft, and it reaches affiliates only when
    someone presses Publish on Biolinx's Assets tab:
-   - **Approve** — queued for sending. Needs an image and a clean check.
+   - **Approve** — queued for sending. Needs a clean check and either an
+     image link or, when Biolinx makes the images, the image words and brief.
    - **Decline** — the reviewer is asked "What more do you need?", and a new
      version is written from those notes (same source post, version + 1). The
      declined version is kept with the feedback.
-   - **Edit** — hook, caption, hashtags, image words, image link; rechecked.
+   - **Edit** — hook, caption, hashtags, image words, image brief, image link;
+     rechecked.
+   - **Redo image** (after sending, Biolinx-made images) — the reviewer says
+     what should change; Biolinx makes a new image for the same post.
 4. **Sends** approved posts with `POST /api/content/assets`, max 25 per
    request, stopping when `remaining_today` hits 0. Automatic every 10 minutes
    when enabled in Settings, or with "Send approved now". Every external_id is
@@ -46,19 +50,105 @@ Niche mapping we send: Weight-loss seeker → `metabolic`, Biohacker →
 wellness → `wellness`. Formats: TikTok → `portrait`, YouTube → `thumbnail`,
 Instagram → `square`.
 
-**The image step is not decided yet.** Drafts carry the image words and an
-image brief; until an image generator is chosen, a person can paste an https
-image link. Images will follow the visual rules below either way.
+**Images are made by Biolinx** (decided 2026-09-15). With Settings → "Biolinx
+makes the images" on, approved posts are sent without `image_url` and with
+`image_text` and `image_brief` instead; Biolinx's Gemini creator makes the image
+and calls back with the link, which appears on the post in our admin. A
+reviewer who doesn't like it presses "Redo image" with a note. A person can
+still paste their own https image link on a post; then `image_url` is sent as
+before. The switch stays off until Biolinx confirms the changes below.
 
 ## Setup on the Biolinx side
 
 1. Biolinx admin → Affiliate content library → Settings → Bioscraper connection.
-2. Callback URL: `https://gemboxpk.com/webhooks/biolinx/content`
+2. Callback URL: `https://gemboxpk.com/webhooks/biolinx/content` (connection
+   tested 2026-09-15: signed lookup accepted, signed callback accepted)
 3. Copy the secret into the bioscraper admin → Settings → "Biolinx content
    library (swipe file)". Rotate there and paste the new one here.
 4. Turn receiving on. The daily limit (50) can stay while we test.
 
-## Requests for the Biolinx developer
+## Needed now: Biolinx makes the image
+
+Our side is built and waiting behind a switch. Please add:
+
+### 1. Accept posts without `image_url`
+
+`POST /api/content/assets`, per post, exactly one of:
+
+- `image_url` (as today), or
+- `image_text` (string, max 120 characters, the words printed on the image,
+  8 words max) **and** `image_brief` (string, max 1000 characters, what the
+  image shows).
+
+Example post:
+
+```json
+{
+  "external_id": "bs-20260915-048b0c4e",
+  "image_text": "Ask for the COA first",
+  "image_brief": "One Biolinx vial beside a printed certificate of analysis on a clean white lab bench, soft daylight, label facing the camera.",
+  "hook": "Most people never ask for this before they order",
+  "caption": "... {CODE} ...",
+  "hashtags": ["researchpeptides", "coa"],
+  "niche": "research",
+  "platform": "tiktok",
+  "format": "portrait",
+  "hook_type": "curiosity",
+  "meta": { "bioscraper_id": 4, "version": 1, "angle": "..." }
+}
+```
+
+Run the same text checks on `image_text` and `image_brief` that you run on the
+hook and caption. Reply `accepted` with `status: "processing"` right away.
+
+### 2. Generate the image
+
+- Use the Gemini creator with **real Biolinx vial and packaging photos** as the
+  reference, so labels are always real Biolinx labels.
+- Print `image_text` on the image; follow `image_brief` for the scene.
+- Shape from `format`: square 1:1, portrait 9:16, thumbnail 16:9.
+- Visual rules: no needles or syringes, no pills, no people using or holding
+  products to the body, no bodies or before/after, no other brands or logos,
+  no vials that aren't Biolinx, no readable drug or GLP names.
+- Save it to the media library, read the image text as you do today.
+
+### 3. Call us back
+
+`POST https://gemboxpk.com/webhooks/biolinx/content`, signed as today:
+
+- `post.ready` with `post.image_url` = the media library link (https, public,
+  no redirects), `media_id`, `image_check`, `issues`.
+- `post.failed` with `post.error` saying why when the image can't be made.
+
+`GET /api/content/assets/{external_id}` should return the same `image_url`
+once ready (we use it as a backup every 10 minutes).
+
+### 4. New image on request ("Redo image")
+
+`POST /api/content/assets/{external_id}/image`, signed, body:
+
+```json
+{
+  "note": "The words are too small. Show one vial with the label readable next to a COA.",
+  "image_text": "Ask for the COA first",
+  "image_brief": "One Biolinx vial beside a printed COA ..."
+}
+```
+
+- Same `external_id`, same post: replace the image, don't create a new post.
+- Pass `note` to the generator together with the brief.
+- Reply `202` (or `200`) with `{ "ok": true, "post": { ...status "processing" } }`.
+- When done, send `post.ready` again with the new `image_url`.
+- `404` for an unknown id; `409` if the post is already published or retired.
+- Doesn't count toward the 50 posts a day; a limit such as 5 new images per
+  post is fine (reply `429` past it).
+
+### 5. Tell us when it's live
+
+We turn on "Biolinx makes the images" in our Settings, send one test post,
+and check that the image arrives on our side.
+
+## Other requests for the Biolinx developer
 
 Posts now arrive as drafts and need Publish on the Assets tab, which is the
 right safety net. Biolinx's automatic checks still look only at text, so these

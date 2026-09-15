@@ -200,6 +200,9 @@ export const swipePosts = mysqlTable("swipe_posts", {
   imageText: varchar("image_text", { length: 120 }),
   imageBrief: text("image_brief"),
   imageUrl: varchar("image_url", { length: 1000 }),
+  /** The latest "Redo image" note sent to Biolinx, and how many new images were asked for. */
+  imageFeedback: text("image_feedback"),
+  imageRequests: int("image_requests").default(0).notNull(),
   reviewerFeedback: text("reviewer_feedback"),
   preflight: json("preflight"),
   /** Our side: draft | approved | declined | sending | sent | rejected | duplicate | failed.

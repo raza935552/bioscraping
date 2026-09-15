@@ -55,6 +55,8 @@ import {
   contentConfigFromEnv,
   createContentClient,
   declineAndRegenerate,
+  redoSwipeImage,
+  biolinxMakesImages,
   editSwipePost,
   generateSwipeDrafts,
   sendApprovedSwipePosts,
@@ -1232,6 +1234,7 @@ app.get("/api/swipe", { preHandler: requireRole("admin", "ops") }, async (req) =
     connection: {
       configured: !!process.env.BIOLINX_CONTENT_SECRET,
       autoSend: process.env.BIOLINX_CONTENT_ENABLED === "true",
+      biolinxMakesImages: biolinxMakesImages(),
       baseUrl: process.env.BIOLINX_CONTENT_BASE_URL || "https://biolinxlabs.com",
       callbackUrl: `${origin}${CALLBACK_PATH}`,
     },
@@ -1261,7 +1264,7 @@ app.post("/api/swipe/generate", { preHandler: requireRole("admin", "ops") }, asy
 
 app.put("/api/swipe/:id", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
   const id = Number((req.params as { id: string }).id);
-  const b = (req.body ?? {}) as { hook?: string; caption?: string; hashtags?: string[] | string; imageText?: string; imageUrl?: string | null };
+  const b = (req.body ?? {}) as { hook?: string; caption?: string; hashtags?: string[] | string; imageText?: string; imageBrief?: string; imageUrl?: string | null };
   const imageUrl = b.imageUrl === undefined ? undefined : b.imageUrl ? String(b.imageUrl).trim().slice(0, 1000) : null;
   if (imageUrl && !/^https:\/\//i.test(imageUrl)) return reply.code(400).send({ error: "the image link must start with https://" });
   const r = await editSwipePost(db, id, {
@@ -1269,6 +1272,7 @@ app.put("/api/swipe/:id", { preHandler: requireRole("admin", "ops") }, async (re
     ...(b.caption !== undefined ? { caption: String(b.caption).slice(0, 2200) } : {}),
     ...(b.hashtags !== undefined ? { hashtags: cleanHashtags(b.hashtags) } : {}),
     ...(b.imageText !== undefined ? { imageText: String(b.imageText).slice(0, 120) } : {}),
+    ...(b.imageBrief !== undefined ? { imageBrief: String(b.imageBrief).slice(0, 1000) } : {}),
     ...(imageUrl !== undefined ? { imageUrl } : {}),
   });
   if (!r.ok) return reply.code(409).send({ error: r.reason });
@@ -1307,6 +1311,23 @@ app.post("/api/swipe/send", { preHandler: requireRole("admin", "ops") }, async (
   if (r === null) return reply.code(409).send({ error: "a send is already running" });
   await audit(req, "swipe.send", "swipe_posts", null, r);
   return { ok: true, result: r };
+});
+
+app.post("/api/swipe/:id/redo-image", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const b = (req.body ?? {}) as { note?: string; imageText?: string; imageBrief?: string };
+  const note = String(b.note ?? "").trim();
+  if (note.length < 3) return reply.code(400).send({ error: "Say what should change in the image." });
+  const client = contentClient();
+  if (!client) return reply.code(400).send({ error: "Add the Biolinx shared secret in Settings first." });
+  const r = await redoSwipeImage(db, client, id, {
+    note,
+    ...(b.imageText !== undefined ? { imageText: String(b.imageText) } : {}),
+    ...(b.imageBrief !== undefined ? { imageBrief: String(b.imageBrief) } : {}),
+  });
+  await audit(req, "swipe.redo_image", "swipe_posts", id, { note: note.slice(0, 300), ok: r.ok });
+  if (!r.ok) return reply.code(409).send({ error: r.reason });
+  return r;
 });
 
 app.post("/api/swipe/:id/refresh", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {

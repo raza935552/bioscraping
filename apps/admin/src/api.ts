@@ -263,6 +263,7 @@ export const api = {
   swipeApprove: (id: number) => request<{ ok: true }>(`/api/swipe/${id}/approve`, { method: "POST" }),
   swipeDecline: (id: number, feedback: string) => request<{ ok: true; newId: number }>(`/api/swipe/${id}/decline`, { method: "POST", body: JSON.stringify({ feedback }) }),
   swipeSend: () => request<{ ok: true; result: { sent: number; accepted: number; duplicates: number; rejected: number; remainingToday: number | null; error?: string } }>("/api/swipe/send", { method: "POST" }),
+  swipeRedoImage: (id: number, body: { note: string; imageText?: string; imageBrief?: string }) => request<{ ok: true }>(`/api/swipe/${id}/redo-image`, { method: "POST", body: JSON.stringify(body) }),
   swipeRefresh: (id: number) => request<{ ok: true }>(`/api/swipe/${id}/refresh`, { method: "POST" }),
   swipeTestConnection: () => request<{ ok: true; message: string }>("/api/swipe/test-connection", { method: "POST" }),
   settings: () => request<{ sections: SettingsSection[] }>("/api/settings"),
@@ -379,6 +380,8 @@ export interface SwipePost {
   imageText: string | null;
   imageBrief: string | null;
   imageUrl: string | null;
+  imageFeedback: string | null;
+  imageRequests: number;
   reviewerFeedback: string | null;
   preflight: string[] | null;
   status: string;
@@ -398,7 +401,7 @@ export interface SwipePost {
 }
 
 export interface SwipePayload {
-  connection: { configured: boolean; autoSend: boolean; baseUrl: string; callbackUrl: string };
+  connection: { configured: boolean; autoSend: boolean; biolinxMakesImages: boolean; baseUrl: string; callbackUrl: string };
   counts: Record<string, number>;
   posts: SwipePost[];
 }

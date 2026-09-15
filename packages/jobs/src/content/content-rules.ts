@@ -89,7 +89,7 @@ export function withDisclosures(caption: string): string {
 export const EXTERNAL_ID = /^[A-Za-z0-9_.:-]{1,120}$/;
 
 /** Every reason Biolinx (or our linter) would refuse this post. Empty means it can be sent. */
-export function preflight(post: Pick<OutboundPost, "external_id" | "hook" | "caption" | "hashtags"> & { image_url?: string | null; imageText?: string | null }): string[] {
+export function preflight(post: Pick<OutboundPost, "external_id" | "hook" | "caption" | "hashtags"> & { image_url?: string | null; imageText?: string | null; imageBrief?: string | null }): string[] {
   const reasons: string[] = [];
   if (!EXTERNAL_ID.test(post.external_id)) reasons.push("external_id has characters Biolinx refuses or is over 120 characters");
   if (!post.hook.trim()) reasons.push("hook is empty");
@@ -119,6 +119,9 @@ export function preflight(post: Pick<OutboundPost, "external_id" | "hook" | "cap
   const violations = lint(`${post.hook}\n${post.caption}\n${post.imageText ?? ""}`, { channel: "dm", touchNumber: 2, isPublic: true, audience: "affiliate" });
   for (const v of violations) if (v.severity === "block") reasons.push(`compliance ${v.rule}: ${v.detail}`);
   if (/[—–]/.test(`${post.hook}${post.caption}`)) reasons.push("em or en dash (reads as AI-written)");
+  // The brief steers Biolinx's image generator: a GLP name there could put a GLP label on a vial.
+  const briefGlp = (post.imageBrief ?? "").match(BIOLINX_GLP_PATTERN);
+  if (briefGlp) reasons.push(`image brief: GLP product name not allowed: ${briefGlp[0]}`);
 
   if (post.image_url != null) {
     try {

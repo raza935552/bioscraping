@@ -10,7 +10,7 @@ import { normalizeNiche } from "@biolinx/core";
 import { schema, type Db } from "@biolinx/db";
 import type { LlmClient } from "@biolinx/drafting";
 import { findTerm, looksNonEnglish } from "@biolinx/scraping";
-import { MAX_POSTS_PER_REQUEST, type BiolinxPost, type CallbackBody, type OutboundPost, type SendResponse } from "./biolinx-client.js";
+import { MAX_POSTS_PER_REQUEST, type BiolinxPost, type CallbackBody, type ImageRequest, type OutboundPost, type SendResponse } from "./biolinx-client.js";
 import { biolinxNiche, biolinxPlatform, formatFor, preflight } from "./content-rules.js";
 import { writeSwipePost, type SwipeSource } from "./post-writer.js";
 
@@ -19,6 +19,13 @@ type SwipeRow = typeof schema.swipePosts.$inferSelect;
 export interface ContentClient {
   sendPosts(posts: OutboundPost[]): Promise<SendResponse>;
   getPost(externalId: string): Promise<BiolinxPost | null>;
+  requestImage(externalId: string, body: ImageRequest): Promise<BiolinxPost | null>;
+}
+
+/** Settings → "Biolinx makes the images". ON = posts go out with image words and a brief, and
+ *  Biolinx's generator makes the image and calls back with its link. OFF = a person adds a link. */
+export function biolinxMakesImages(env = process.env): boolean {
+  return env.BIOLINX_MAKES_IMAGES === "true";
 }
 
 export function newExternalId(now: Date = new Date()): string {
@@ -150,7 +157,7 @@ export async function generateSwipeDrafts(db: Db, llm: LlmClient, model: string,
       hashtags: p.hashtags,
       imageText: p.imageText,
       imageBrief: p.imageBrief,
-      preflight: preflight({ external_id: externalId, hook: p.hook, caption: p.caption, hashtags: p.hashtags, imageText: p.imageText }),
+      preflight: preflight({ external_id: externalId, hook: p.hook, caption: p.caption, hashtags: p.hashtags, imageText: p.imageText, imageBrief: p.imageBrief }),
       status: "draft",
     });
     summary.created++;
@@ -200,15 +207,15 @@ export async function declineAndRegenerate(db: Db, llm: LlmClient, model: string
       hashtags: p.hashtags,
       imageText: p.imageText,
       imageBrief: p.imageBrief,
-      preflight: preflight({ external_id: externalId, hook: p.hook, caption: p.caption, hashtags: p.hashtags, imageText: p.imageText }),
+      preflight: preflight({ external_id: externalId, hook: p.hook, caption: p.caption, hashtags: p.hashtags, imageText: p.imageText, imageBrief: p.imageBrief }),
       status: "draft",
     })
     .$returningId();
   return { ok: true, newId: ins!.id };
 }
 
-/** Human edits to a draft (copy or image link). Pre-flight is recomputed. */
-export async function editSwipePost(db: Db, id: number, edits: { hook?: string; caption?: string; hashtags?: string[]; imageText?: string; imageUrl?: string | null }) {
+/** Human edits to a draft (copy, image words and brief, or image link). Pre-flight is recomputed. */
+export async function editSwipePost(db: Db, id: number, edits: { hook?: string; caption?: string; hashtags?: string[]; imageText?: string; imageBrief?: string; imageUrl?: string | null }) {
   const [row] = await db.select().from(schema.swipePosts).where(eq(schema.swipePosts.id, id));
   if (!row) return { ok: false as const, reason: "post not found" };
   if (!["draft", "approved", "rejected", "failed"].includes(row.status)) return { ok: false as const, reason: `a ${row.status} post can't be edited` };
@@ -217,20 +224,31 @@ export async function editSwipePost(db: Db, id: number, edits: { hook?: string; 
     caption: edits.caption ?? row.caption,
     hashtags: edits.hashtags ?? ((row.hashtags as string[] | null) ?? []),
     imageText: edits.imageText ?? row.imageText,
+    imageBrief: edits.imageBrief ?? row.imageBrief,
     imageUrl: edits.imageUrl === undefined ? row.imageUrl : edits.imageUrl,
   };
-  const reasons = preflight({ external_id: row.externalId, hook: next.hook, caption: next.caption, hashtags: next.hashtags, imageText: next.imageText, image_url: next.imageUrl });
+  const reasons = preflight({ external_id: row.externalId, hook: next.hook, caption: next.caption, hashtags: next.hashtags, imageText: next.imageText, imageBrief: next.imageBrief, image_url: next.imageUrl });
   await db.update(schema.swipePosts).set({ ...next, preflight: reasons, status: "draft" }).where(eq(schema.swipePosts.id, id));
   return { ok: true as const, preflight: reasons };
 }
 
-/** Approve for sending. Requires an image and a clean pre-flight. */
-export async function approveSwipePost(db: Db, id: number, userId: number | null, now = new Date()) {
+/** Why a post can't be sent yet as far as its image goes, or null when it can. */
+export function imageBlocker(row: Pick<SwipeRow, "imageUrl" | "imageText" | "imageBrief">, makesImages: boolean): string | null {
+  if (row.imageUrl) return null;
+  if (!makesImages) return "add the image link first (or turn on \"Biolinx makes the images\" in Settings)";
+  if (!row.imageText?.trim() || (row.imageBrief ?? "").trim().length < 10) return "Biolinx needs the image words and an image brief to make the image";
+  return null;
+}
+
+/** Approve for sending. Requires a clean pre-flight and either an image link or, when Biolinx
+ *  makes the images, the image words and brief. */
+export async function approveSwipePost(db: Db, id: number, userId: number | null, now = new Date(), makesImages = biolinxMakesImages()) {
   const [row] = await db.select().from(schema.swipePosts).where(eq(schema.swipePosts.id, id));
   if (!row) return { ok: false as const, reason: "post not found" };
   if (row.status !== "draft") return { ok: false as const, reason: `only drafts can be approved (this one is ${row.status})` };
-  if (!row.imageUrl) return { ok: false as const, reason: "add the image first" };
-  const reasons = preflight({ external_id: row.externalId, hook: row.hook, caption: row.caption, hashtags: (row.hashtags as string[] | null) ?? [], imageText: row.imageText, image_url: row.imageUrl });
+  const blocker = imageBlocker(row, makesImages);
+  if (blocker) return { ok: false as const, reason: blocker };
+  const reasons = preflight({ external_id: row.externalId, hook: row.hook, caption: row.caption, hashtags: (row.hashtags as string[] | null) ?? [], imageText: row.imageText, imageBrief: row.imageBrief, image_url: row.imageUrl });
   if (reasons.length) {
     await db.update(schema.swipePosts).set({ preflight: reasons }).where(eq(schema.swipePosts.id, id));
     return { ok: false as const, reason: `fix before approving: ${reasons.join("; ")}` };
@@ -242,7 +260,8 @@ export async function approveSwipePost(db: Db, id: number, userId: number | null
 export function toOutbound(row: SwipeRow): OutboundPost {
   return {
     external_id: row.externalId,
-    image_url: row.imageUrl!,
+    // Our own image when a person added one; otherwise Biolinx makes it from the words and brief.
+    ...(row.imageUrl ? { image_url: row.imageUrl } : { image_text: row.imageText ?? "", image_brief: row.imageBrief ?? "" }),
     hook: row.hook,
     caption: row.caption,
     hashtags: (row.hashtags as string[] | null) ?? [],
@@ -308,6 +327,42 @@ export async function sendApprovedSwipePosts(db: Db, client: ContentClient, now 
     if (batch.length < MAX_POSTS_PER_REQUEST) break;
   }
   return summary;
+}
+
+export interface RedoImageInput {
+  note: string;
+  /** Optional new words for the image and a new brief; the current ones are kept otherwise. */
+  imageText?: string;
+  imageBrief?: string;
+}
+
+/** "Redo image": ask Biolinx for a new image with the reviewer's note. The post keeps its
+ *  external_id; the new link comes back as a post.ready callback. Published or retired posts
+ *  are left alone (retire and write a new version instead). */
+export async function redoSwipeImage(db: Db, client: ContentClient, id: number, input: RedoImageInput, now = new Date()): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const [row] = await db.select().from(schema.swipePosts).where(eq(schema.swipePosts.id, id));
+  if (!row) return { ok: false, reason: "post not found" };
+  if (row.status !== "sent" && row.status !== "failed") return { ok: false, reason: "only posts already sent to Biolinx get a new image there (for a draft, edit the image words or brief)" };
+  if (row.biolinxStatus === "published" || row.biolinxStatus === "retired") return { ok: false, reason: `this post is ${row.biolinxStatus} on Biolinx; decline it for a new version instead` };
+  if (row.imageUrl) return { ok: false, reason: "this post uses our own image link; edit the link instead" };
+  const note = input.note.trim();
+  if (note.length < 3) return { ok: false, reason: "say what should change in the image" };
+  const imageText = (input.imageText ?? row.imageText ?? "").trim().slice(0, 120);
+  const imageBrief = (input.imageBrief ?? row.imageBrief ?? "").trim().slice(0, 1000);
+  const reasons = preflight({ external_id: row.externalId, hook: row.hook, caption: row.caption, hashtags: (row.hashtags as string[] | null) ?? [], imageText, imageBrief }).filter((r) => r.startsWith("image"));
+  if (reasons.length) return { ok: false, reason: `fix the image words first: ${reasons.join("; ")}` };
+  try {
+    await client.requestImage(row.externalId, { note: note.slice(0, 1000), image_text: imageText, image_brief: imageBrief });
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message };
+  }
+  await db
+    .update(schema.swipePosts)
+    .set({ imageText, imageBrief, imageFeedback: note.slice(0, 2000), imageRequests: row.imageRequests + 1, mediaUrl: null, mediaId: null, imageCheck: null, issues: [], status: "sent", biolinxStatus: "processing", error: null, sentAt: now, lastEvent: "image.requested", lastEventAt: now })
+    .where(eq(schema.swipePosts.id, id));
+  // The new image link arrives by callback (or the 10-minute status lookup), never from this reply,
+  // so an old link in the reply can't be mistaken for the new image.
+  return { ok: true };
 }
 
 /** A Biolinx post object (from a callback or a status lookup) onto our row. */

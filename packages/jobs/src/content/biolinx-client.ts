@@ -13,7 +13,12 @@ export type BiolinxFormat = "square" | "portrait" | "thumbnail";
 
 export interface OutboundPost {
   external_id: string;
-  image_url: string;
+  /** Our own image. Omitted when Biolinx makes the image from image_text and image_brief. */
+  image_url?: string;
+  /** Words printed on the image (8 words max). Sent when Biolinx makes the image. */
+  image_text?: string;
+  /** What the image shows, for Biolinx's image generator. Sent when Biolinx makes the image. */
+  image_brief?: string;
   hook: string;
   caption: string;
   hashtags?: string[];
@@ -57,6 +62,13 @@ export interface BiolinxPost {
   downloads?: number;
   received_at?: string;
   updated_at?: string;
+}
+
+export interface ImageRequest {
+  /** What the reviewer wants changed in the image. */
+  note: string;
+  image_text: string;
+  image_brief: string;
 }
 
 export interface CallbackBody {
@@ -155,6 +167,14 @@ export function createContentClient(cfg: ContentClientConfig) {
       if (r.status === 404) return null;
       if (r.status !== 200) throw new BiolinxApiError(r.status, explain(r.status, r.json, r.text));
       return (r.json as { post: BiolinxPost }).post;
+    },
+    /** POST /api/content/assets/{external_id}/image: ask Biolinx for a new image with a reviewer's
+     *  note. The new link arrives later as a post.ready callback. */
+    async requestImage(externalId: string, body: ImageRequest): Promise<BiolinxPost | null> {
+      const r = await call("POST", `/api/content/assets/${encodeURIComponent(externalId)}/image`, body);
+      if (r.status === 404) throw new BiolinxApiError(404, "Biolinx doesn't know this post, or hasn't added the new-image endpoint yet");
+      if (r.status !== 200 && r.status !== 202) throw new BiolinxApiError(r.status, explain(r.status, r.json, r.text));
+      return (r.json as { post?: BiolinxPost } | null)?.post ?? null;
     },
   };
 }

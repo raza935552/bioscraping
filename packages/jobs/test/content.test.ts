@@ -4,7 +4,7 @@ import { RUO_LINE } from "@biolinx/compliance";
 import { createContentClient, signBody, signedHeaders, verifySignature } from "../src/content/biolinx-client.js";
 import { biolinxNiche, cleanHashtags, formatFor, preflight, withDisclosures } from "../src/content/content-rules.js";
 import { parseVariants, writeSwipePost, writerPrompt, type WriteRequest } from "../src/content/post-writer.js";
-import { pickCandidates, toOutbound } from "../src/content/swipe.js";
+import { imageBlocker, pickCandidates, toOutbound } from "../src/content/swipe.js";
 
 const SECRET = "test-secret";
 const now = new Date("2026-09-15T03:00:00Z");
@@ -186,5 +186,49 @@ describe("swipe sources must say something", () => {
     const mk = (text: string) => new Map([[1, { items: [10_000, 12_000, 9_000, 150_000].map((v, i) => ({ url: `https://www.tiktok.com/@a/video/${i}`, text, postedAt: "2026-09-01T00:00:00Z", views: v })) }]]);
     expect(pickCandidates({ leads, bundles: mk("#weightloss #bodyrecomposition #personaltrainer"), matchTermsByNiche: new Map(), usedUrls: new Set(), now })).toEqual([]);
     expect(pickCandidates({ leads, bundles: mk("The one question I ask every supplier before I order anything #weightloss"), matchTermsByNiche: new Map(), usedUrls: new Set(), now })).toHaveLength(1);
+  });
+});
+
+describe("images made by Biolinx", () => {
+  const base = { id: 9, externalId: "bs-1", hook: "h", caption: "c {CODE}", hashtags: ["coa"], biolinxNiche: "research", platform: "tiktok", format: "portrait", hookType: null, sourcePostUrl: null, version: 1, angle: null };
+
+  it("sends image words and brief instead of a link when there is no image link", () => {
+    const out = toOutbound({ ...base, imageUrl: null, imageText: "Ask for the COA", imageBrief: "One Biolinx vial beside a printed COA on a clean lab bench" } as never);
+    expect(out).toMatchObject({ image_text: "Ask for the COA", image_brief: "One Biolinx vial beside a printed COA on a clean lab bench" });
+    expect(out).not.toHaveProperty("image_url");
+    const own = toOutbound({ ...base, imageUrl: "https://gemboxpk.com/m.png", imageText: "x", imageBrief: "y" } as never);
+    expect(own.image_url).toBe("https://gemboxpk.com/m.png");
+    expect(own).not.toHaveProperty("image_brief");
+  });
+
+  it("approve needs a link, or words and a brief when Biolinx makes the images", () => {
+    const words = { imageUrl: null, imageText: "Ask for the COA", imageBrief: "One Biolinx vial beside a printed COA" };
+    expect(imageBlocker(words, false)).toMatch(/image link/);
+    expect(imageBlocker(words, true)).toBeNull();
+    expect(imageBlocker({ ...words, imageBrief: "" }, true)).toMatch(/brief/);
+    expect(imageBlocker({ ...words, imageText: null }, true)).toMatch(/words/);
+    expect(imageBlocker({ imageUrl: "https://gemboxpk.com/m.png", imageText: null, imageBrief: null }, false)).toBeNull();
+  });
+
+  it("a GLP name in the image brief is blocked so no GLP label reaches the generator", () => {
+    const ok = { external_id: "bs-1", hook: "Check the supplier first", caption: withDisclosures("Ask for the COA. Code {CODE} at biolinxlabs.com."), hashtags: ["coa"] };
+    expect(preflight({ ...ok, imageBrief: "A Biolinx vial on a lab bench" })).toEqual([]);
+    expect(preflight({ ...ok, imageBrief: "A semaglutide vial on a lab bench" }).join()).toMatch(/image brief: GLP/);
+  });
+
+  it("asks Biolinx for a new image with a signed POST and explains a missing endpoint", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    let status = 202;
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ ok: true }), { status });
+    }) as unknown as typeof fetch;
+    const client = createContentClient({ baseUrl: "https://biolinxlabs.com", secret: SECRET, fetchImpl, now: () => now });
+    await client.requestImage("bs-1", { note: "Bigger words", image_text: "Ask for the COA", image_brief: "vial and COA" });
+    expect(calls[0]!.url).toBe("https://biolinxlabs.com/api/content/assets/bs-1/image");
+    expect((calls[0]!.init.headers as Record<string, string>)["X-Biolinx-Signature"]).toBe(signBody(SECRET, ts, String(calls[0]!.init.body)));
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ note: "Bigger words", image_text: "Ask for the COA", image_brief: "vial and COA" });
+    status = 404;
+    await expect(client.requestImage("bs-1", { note: "n", image_text: "t", image_brief: "b" })).rejects.toThrow(/new-image endpoint/);
   });
 });

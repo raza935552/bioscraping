@@ -20,6 +20,14 @@ const DECLINE_CHIPS = [
   "The image idea doesn't fit. Use a clean Biolinx vial with a COA, no people.",
 ];
 
+const IMAGE_CHIPS = [
+  "Show a clean Biolinx vial with its label facing the camera.",
+  "Make the words on the image bigger and easier to read on a phone.",
+  "Simpler background: plain lab bench or clean studio, nothing busy.",
+  "Put a certificate of analysis (COA) next to the vial.",
+  "Wrong shape or crop. Keep everything inside the frame.",
+];
+
 const isHttps = (u: string | null | undefined): u is string => !!u && /^https:\/\//i.test(u);
 const fmt = (n: number | null | undefined) => (n == null ? "—" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}K` : String(n));
 
@@ -43,6 +51,7 @@ export function Swipe({ me }: { me: Me }) {
   const [count, setCount] = useState(3);
   const [editing, setEditing] = useState<SwipePost | null>(null);
   const [declining, setDeclining] = useState<SwipePost | null>(null);
+  const [redoing, setRedoing] = useState<SwipePost | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +98,9 @@ export function Swipe({ me }: { me: Me }) {
           <strong>Biolinx connection:</strong>
           {c?.configured ? <span className="chip ok">secret saved</span> : <span className="chip failed">no secret yet</span>}
           <span className={`chip ${c?.autoSend ? "ok" : "unresolved"}`}>{c?.autoSend ? "auto-send every 10 min" : "send manually"}</span>
+          <span className={`chip ${c?.biolinxMakesImages ? "ok" : "unresolved"}`} title="Settings → Biolinx makes the images">
+            {c?.biolinxMakesImages ? "images made by Biolinx" : "images: paste a link"}
+          </span>
           <span className="muted" style={{ fontSize: 12 }}>
             Callback URL for Biolinx: <code className="inline">{c?.callbackUrl ?? "…"}</code>
           </span>
@@ -159,6 +171,8 @@ export function Swipe({ me }: { me: Me }) {
             key={p.id}
             p={p}
             busy={busy}
+            makesImages={!!c?.biolinxMakesImages}
+            onRedoImage={() => setRedoing(p)}
             onApprove={() => void run(`a${p.id}`, async () => (await api.swipeApprove(p.id), "Approved. It will go out on the next send."))}
             onEdit={() => setEditing(p)}
             onDecline={() => setDeclining(p)}
@@ -174,6 +188,17 @@ export function Swipe({ me }: { me: Me }) {
           onSaved={async (m) => {
             setEditing(null);
             setMsg(m);
+            await load();
+          }}
+        />
+      )}
+      {redoing && (
+        <RedoImageDialog
+          post={redoing}
+          onClose={() => setRedoing(null)}
+          onDone={async () => {
+            setRedoing(null);
+            setMsg("Asked Biolinx for a new image. It shows here as soon as Biolinx sends the link back.");
             await load();
           }}
         />
@@ -194,11 +219,29 @@ export function Swipe({ me }: { me: Me }) {
   );
 }
 
-function SwipeCard({ p, busy, onApprove, onEdit, onDecline, onRefresh }: { p: SwipePost; busy: string | null; onApprove: () => void; onEdit: () => void; onDecline: () => void; onRefresh: () => void }) {
+/** Mirrors imageBlocker() in packages/jobs/src/content/swipe.ts. */
+function imageBlocker(p: SwipePost, makesImages: boolean): string | null {
+  if (p.imageUrl) return null;
+  if (!makesImages) return "Add the image link first (or turn on \"Biolinx makes the images\" in Settings)";
+  if (!p.imageText?.trim() || (p.imageBrief ?? "").trim().length < 10) return "Biolinx needs the image words and an image brief";
+  return null;
+}
+
+function SwipeCard({ p, busy, makesImages, onApprove, onEdit, onDecline, onRefresh, onRedoImage }: { p: SwipePost; busy: string | null; makesImages: boolean; onApprove: () => void; onEdit: () => void; onDecline: () => void; onRefresh: () => void; onRedoImage: () => void }) {
   const s = p.sourceStats ?? {};
   const problems = p.preflight ?? [];
   const img = p.mediaUrl ?? p.imageUrl;
   const editable = ["draft", "approved", "rejected", "failed"].includes(p.status);
+  const blocker = imageBlocker(p, makesImages);
+  const sentToBiolinx = p.status === "sent" || p.status === "failed";
+  const canRedoImage = sentToBiolinx && !p.imageUrl && p.biolinxStatus !== "published" && p.biolinxStatus !== "retired";
+  const emptyLabel = sentToBiolinx && !p.imageUrl
+    ? p.status === "failed" || p.biolinxStatus === "failed"
+      ? "Biolinx couldn't make the image"
+      : "Biolinx is making the image…"
+    : p.status === "draft" && !p.imageUrl && makesImages
+      ? "Biolinx makes this image after Approve"
+      : "Image needed";
   return (
     <div className="swipe-card">
       <div className={`swipe-img ${p.format}`}>
@@ -206,7 +249,7 @@ function SwipeCard({ p, busy, onApprove, onEdit, onDecline, onRefresh }: { p: Sw
           <img src={img} alt="" loading="lazy" />
         ) : (
           <div className="swipe-img-empty">
-            <div className="k">Image needed</div>
+            <div className="k">{emptyLabel}</div>
             {p.imageText && <div className="v">“{p.imageText}”</div>}
             {p.imageBrief && <div className="s">{p.imageBrief}</div>}
           </div>
@@ -245,6 +288,11 @@ function SwipeCard({ p, busy, onApprove, onEdit, onDecline, onRefresh }: { p: Sw
           )}{" "}
           · {fmt(s.views)} views · {s.outlierRatio ?? "?"}× the creator's average
         </div>
+        {p.imageFeedback && (
+          <div className="muted" style={{ fontSize: 12 }}>
+            New image asked{p.imageRequests > 1 ? ` (${p.imageRequests}×)` : ""}: “{p.imageFeedback}”
+          </div>
+        )}
         {p.reviewerFeedback && <div className="muted" style={{ fontSize: 12 }}>Declined with: “{p.reviewerFeedback}”</div>}
         {problems.length > 0 && (
           <ul className="swipe-problems">
@@ -270,12 +318,13 @@ function SwipeCard({ p, busy, onApprove, onEdit, onDecline, onRefresh }: { p: Sw
         {p.error && <div className="error" style={{ fontSize: 12 }}>{p.error}</div>}
         <div className="modal-actions">
           {p.status === "draft" && (
-            <button className="primary" disabled={busy === `a${p.id}` || !p.imageUrl || problems.length > 0} title={!p.imageUrl ? "Add the image first" : problems.length ? "Fix the problems first" : "Send on the next run"} onClick={onApprove}>
+            <button className="primary" disabled={busy === `a${p.id}` || !!blocker || problems.length > 0} title={blocker ?? (problems.length ? "Fix the problems first" : "Send on the next run")} onClick={onApprove}>
               Approve
             </button>
           )}
           {editable && <button onClick={onEdit}>Edit</button>}
           {editable && <button onClick={onDecline}>Decline…</button>}
+          {canRedoImage && <button onClick={onRedoImage}>Redo image…</button>}
           {p.status === "sent" && (
             <button disabled={busy === `r${p.id}`} onClick={onRefresh}>
               Refresh status
@@ -297,6 +346,7 @@ function EditDialog({ post, onClose, onSaved }: { post: SwipePost; onClose: () =
   const [caption, setCaption] = useState(post.caption);
   const [hashtags, setHashtags] = useState((post.hashtags ?? []).join(" "));
   const [imageText, setImageText] = useState(post.imageText ?? "");
+  const [imageBrief, setImageBrief] = useState(post.imageBrief ?? "");
   const [imageUrl, setImageUrl] = useState(post.imageUrl ?? "");
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -304,7 +354,7 @@ function EditDialog({ post, onClose, onSaved }: { post: SwipePost; onClose: () =
     setSaving(true);
     setErr("");
     try {
-      const r = await api.swipeEdit(post.id, { hook, caption, hashtags, imageText, imageUrl: imageUrl.trim() || null });
+      const r = await api.swipeEdit(post.id, { hook, caption, hashtags, imageText, imageBrief, imageUrl: imageUrl.trim() || null });
       await onSaved(r.preflight.length ? `Saved, but it still breaks ${r.preflight.length} rule${r.preflight.length === 1 ? "" : "s"}.` : "Saved. It passes every rule.");
     } catch (e) {
       setErr((e as Error).message);
@@ -331,9 +381,13 @@ function EditDialog({ post, onClose, onSaved }: { post: SwipePost; onClose: () =
         <input value={imageText} maxLength={120} onChange={(e) => setImageText(e.target.value)} />
       </label>
       <label className="settings-field">
-        <span className="fl">Image link (https, JPG/PNG/WebP, at least 300×300)</span>
+        <span className="fl">Image brief (what the image shows)</span>
+        <textarea rows={3} value={imageBrief} maxLength={1000} onChange={(e) => setImageBrief(e.target.value)} />
+        <span className="fh">Biolinx vials and packaging, lab or studio, COA documents, typography. No needles, pills, bodies or other brands.</span>
+      </label>
+      <label className="settings-field">
+        <span className="fl">Image link (optional when Biolinx makes the images; https, JPG/PNG/WebP, at least 300×300)</span>
         <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" />
-        {post.imageBrief && <span className="fh">Brief: {post.imageBrief}</span>}
       </label>
       {err && <div className="error">{err}</div>}
       <div className="modal-actions">
@@ -382,6 +436,55 @@ function DeclineDialog({ post, onClose, onDone }: { post: SwipePost; onClose: ()
         <button onClick={onClose}>Cancel</button>
         <button className="primary" disabled={working || feedback.trim().length < 3} onClick={() => void submit()}>
           {working ? "Writing a new version…" : "Decline and write a new version"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function RedoImageDialog({ post, onClose, onDone }: { post: SwipePost; onClose: () => void; onDone: () => Promise<void> }) {
+  const [note, setNote] = useState("");
+  const [imageText, setImageText] = useState(post.imageText ?? "");
+  const [imageBrief, setImageBrief] = useState(post.imageBrief ?? "");
+  const [err, setErr] = useState("");
+  const [working, setWorking] = useState(false);
+  const submit = async () => {
+    setWorking(true);
+    setErr("");
+    try {
+      await api.swipeRedoImage(post.id, { note, imageText, imageBrief });
+      await onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  };
+  return (
+    <Modal title="What should change in the image?" subtitle="Biolinx makes a new image from your notes and sends the link back." onClose={onClose} wide={false}>
+      {isHttps(post.mediaUrl) && <img src={post.mediaUrl} alt="" style={{ maxHeight: 180, borderRadius: 8, marginBottom: 8 }} />}
+      <div className="chips" style={{ marginBottom: 8 }}>
+        {IMAGE_CHIPS.map((c) => (
+          <button key={c} type="button" className="chip-button" onClick={() => setNote((f) => (f ? `${f} ${c}` : c))}>
+            {c.split(/[.:]/)[0]}
+          </button>
+        ))}
+      </div>
+      <textarea rows={4} value={note} autoFocus onChange={(e) => setNote(e.target.value)} placeholder="e.g. The vial label is blurry. Show one Biolinx vial, label readable, next to a printed COA." style={{ width: "100%" }} />
+      <label className="settings-field">
+        <span className="fl">Words on the image</span>
+        <input value={imageText} maxLength={120} onChange={(e) => setImageText(e.target.value)} />
+      </label>
+      <label className="settings-field">
+        <span className="fl">Image brief</span>
+        <textarea rows={3} value={imageBrief} maxLength={1000} onChange={(e) => setImageBrief(e.target.value)} />
+      </label>
+      {err && <div className="error">{err}</div>}
+      <div className="modal-actions">
+        <div className="grow" />
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={working || note.trim().length < 3} onClick={() => void submit()}>
+          {working ? "Asking Biolinx…" : "Ask for a new image"}
         </button>
       </div>
     </Modal>

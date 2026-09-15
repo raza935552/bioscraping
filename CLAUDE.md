@@ -83,7 +83,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 273 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 277 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -151,8 +151,13 @@ implemented and where the engine differs.
   you need?" and writes a new version. Signed HMAC both ways; callbacks at
   `/webhooks/biolinx/content` are verified on the raw bytes; `swipe-sync`
   worker job every 10 minutes. The writer may state only facts listed in
-  `BIOLINX_BRAND_FACTS` (Settings). The image step is not decided: drafts
-  carry image words and a brief, and a person can paste an https image link.
+  `BIOLINX_BRAND_FACTS` (Settings). Images are made by Biolinx's Gemini
+  creator: with `BIOLINX_MAKES_IMAGES` on, approved posts go out with
+  `image_text` + `image_brief` (no `image_url`), the image link comes back on
+  `post.ready`, and "Redo image" asks for a new one with a note
+  (`POST /api/content/assets/{id}/image`). The switch stays off until the
+  Biolinx dev ships those changes (spec in the integration doc). A pasted
+  https image link still works and is sent as `image_url`.
 - **Customer.io:** every lead with an email is mirrored as a person hourly and
   on accept. Suppressed addresses go as unsubscribed only. No campaigns are
   triggered by us.
@@ -192,7 +197,8 @@ implemented and where the engine differs.
   (yes / tell me more / no → referral ask), check-ins, all through the
   approval queue. Blocked on competitor rates and a template for unsigned
   creators (most leads).
-- Swipe file image step (generator not chosen), dedicated swipe searches for
+- Biolinx side of Biolinx-made images (accept posts without `image_url`,
+  generate, call back, `/image` redo endpoint), dedicated swipe searches for
   more source posts, and the Biolinx-side requests in
   `docs/integrations/biolinx-content-api.md` (visual policy check, shape check,
   Telegram note, retire endpoint, brand images, validate, rules, stats, test
@@ -288,9 +294,9 @@ database dump only decrypts where `.env` has the same key.
    accepted ones and that the rejected one never returns.
 5. Approve the 9 queued DM drafts; the first live check that
    `next_follow_up_date` is written on send.
-6. Swipe file: enter `BIOLINX_BRAND_FACTS` on Settings; decide the image
-   generator; approve and send a first small batch, then Publish it on
-   Biolinx's Assets tab.
+6. Swipe file: Biolinx dev ships Biolinx-made images (integration doc,
+   "Needed now"); turn on `BIOLINX_MAKES_IMAGES`; enter `BIOLINX_BRAND_FACTS`;
+   approve one post, check the image arrives, then Publish it on Biolinx.
 7. Competitor commission rates (Matt or research) and an unsigned-creator
    template, then wire the outreach templates.
 8. LIVE status checks; "not recurring" in scoring.
