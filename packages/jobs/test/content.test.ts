@@ -152,3 +152,30 @@ describe("swipe candidates", () => {
     expect(toOutbound(row)).toMatchObject({ external_id: "bs-1", image_url: "https://gemboxpk.com/m.png", niche: "research", platform: "tiktok", format: "portrait", hook_type: "curiosity", source_post_url: "https://www.tiktok.com/@a/video/1", meta: { bioscraper_id: 9, version: 2 } });
   });
 });
+
+describe("writer grounding and variety (live test 2026-09-15)", () => {
+  const base: WriteRequest = {
+    source: { platform: "tiktok", url: "https://www.tiktok.com/@a/video/1", text: "3 red flags your peptide supplier hides", views: 480000, likes: null, comments: null, outlierRatio: 6.2, niche: "Biohacker" },
+    biolinxNiche: "research",
+    platform: "tiktok",
+    format: "portrait",
+  };
+  it("without verified facts the prompt forbids claims about Biolinx; with facts it lists only those", () => {
+    expect(writerPrompt(base)).toMatch(/VERIFIED FACTS about Biolinx: none provided\. Make no claims/);
+    const p = writerPrompt({ ...base, facts: ["Third-party COA for every batch"] });
+    expect(p).toMatch(/- Third-party COA for every batch/);
+  });
+  it("recent hooks and angles are listed to avoid, and the platform caption limit is stated", () => {
+    const p = writerPrompt({ ...base, avoid: { hooks: ["Most peptide suppliers hope you never ask for this one document."], angles: ["COA transparency"] } });
+    expect(p).toMatch(/ALREADY USED/);
+    expect(p).toMatch(/angle: COA transparency/);
+    expect(p).toMatch(/Caption limit: 450 characters/);
+  });
+  it("a variant far over the platform limit is thrown away", async () => {
+    const long = "A real certificate shows the lab, the date and a batch number. ".repeat(12) + "Use {CODE}.";
+    const llm = { complete: async () => JSON.stringify({ variants: [{ hook: "Read this before you order", caption: long, hashtags: ["coa"], hook_type: "curiosity", angle: "a", image_text: "Read the COA", image_brief: "vial", score: 9 }] }) };
+    const r = await writeSwipePost(llm, "m", base);
+    expect(r.status).toBe("failed");
+    expect(r.rejectedVariants[0]!.reasons.join(" ")).toMatch(/keep it under 450 for tiktok/);
+  });
+});

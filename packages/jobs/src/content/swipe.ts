@@ -100,16 +100,31 @@ export interface GenerateSummary {
   failed: Array<{ source: string; reason: string }>;
 }
 
+/** Verified Biolinx facts from Settings (one per line). Empty until someone confirms them. */
+export function brandFacts(env = process.env): string[] {
+  return (env.BIOLINX_BRAND_FACTS ?? "")
+    .split(/\r?\n|;/)
+    .map((f) => f.trim())
+    .filter((f) => f.length > 3)
+    .slice(0, 30);
+}
+
+async function recentCraft(db: Db): Promise<{ hooks: string[]; angles: string[] }> {
+  const rows = await db.select({ hook: schema.swipePosts.hook, angle: schema.swipePosts.angle }).from(schema.swipePosts).orderBy(desc(schema.swipePosts.id)).limit(20);
+  return { hooks: rows.map((r) => r.hook), angles: [...new Set(rows.map((r) => r.angle).filter((a): a is string => !!a))] };
+}
+
 /** Writes up to `count` new drafts from the best unused outlier posts. Spends Anthropic credit. */
 export async function generateSwipeDrafts(db: Db, llm: LlmClient, model: string, count: number, now = new Date()): Promise<GenerateSummary> {
   const candidates = await loadCandidates(db, now);
+  const facts = brandFacts();
   const summary: GenerateSummary = { considered: candidates.length, created: 0, failed: [] };
   for (const c of candidates) {
     if (summary.created >= count) break;
     const niche = biolinxNiche(c.niche);
     const platform = biolinxPlatform(c.platform);
     const format = formatFor(platform);
-    const result = await writeSwipePost(llm, model, { source: c, biolinxNiche: niche, platform, format });
+    const result = await writeSwipePost(llm, model, { source: c, biolinxNiche: niche, platform, format, facts, avoid: await recentCraft(db) });
     if (result.status !== "ok") {
       summary.failed.push({ source: c.url, reason: result.reason });
       continue;
@@ -156,6 +171,8 @@ export async function declineAndRegenerate(db: Db, llm: LlmClient, model: string
     format: row.format as never,
     feedback,
     previous: { hook: row.hook, caption: row.caption, imageText: row.imageText, imageBrief: row.imageBrief },
+    facts: brandFacts(),
+    avoid: await recentCraft(db),
   });
   if (result.status !== "ok") return { ok: false, reason: result.reason };
   const externalId = newExternalId(now);

@@ -112,6 +112,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
       { key: "BIOLINX_CONTENT_SECRET", label: "Shared secret", kind: "secret", help: "Copy it from the Bioscraper connection settings in Biolinx. Rotating it there means pasting the new one here." },
       { key: "BIOLINX_CONTENT_BASE_URL", label: "Biolinx site URL", kind: "text", placeholder: "https://biolinxlabs.com", help: "Blank = https://biolinxlabs.com." },
       { key: "BIOLINX_CONTENT_ENABLED", label: "Send approved posts automatically", kind: "bool", help: "ON = approved posts go out every 10 minutes. OFF = only the Send now button sends. Nothing is ever sent without Approve." },
+      { key: "BIOLINX_BRAND_FACTS", label: "Verified Biolinx facts for posts", kind: "text", help: "Separate facts with ; — only true, confirmed statements (e.g. third-party COA per batch; ships from the US). The post writer may state only these about Biolinx. Blank = it makes no claims about Biolinx." },
     ],
   },
   {

@@ -27,7 +27,14 @@ export interface WriteRequest {
   /** What the reviewer asked for after declining the previous version. */
   feedback?: string | null;
   previous?: { hook: string; caption: string; imageText: string | null; imageBrief: string | null } | null;
+  /** Verified facts about Biolinx (Settings → BIOLINX_BRAND_FACTS). The writer may state only these. */
+  facts?: string[];
+  /** Recent hooks and angles, so the swipe file doesn't repeat itself. */
+  avoid?: { hooks: string[]; angles: string[] };
 }
+
+/** Caption length before disclosures, by platform: short-form reads short. */
+export const CAPTION_LIMIT: Record<BiolinxPlatform, number> = { tiktok: 450, instagram: 600, facebook: 600, x: 240, youtube: 700 };
 
 export interface WrittenPost {
   hook: string;
@@ -56,7 +63,9 @@ export const WRITER_SYSTEM = `You are the best short-form social copywriter in t
 What makes your posts win:
 - The first line stops the scroll. Use one of three hook types: pleasure (something they gain or get), pain (a mistake, a rip-off, a thing that goes wrong), curiosity (an open loop they need closed). Specific beats vague. Short beats long.
 - It sounds like a real person talking to a friend, native to the platform. Short lines. No hype words, no ALL CAPS, no emoji walls (0 to 2 emoji total).
-- One idea per post. Concrete details: third-party COA on every batch, purity numbers you can check, batch numbers, lab-sealed vials, cold-chain packing, US shipping, how to spot a bad supplier, what a real COA shows, questions to ask any supplier.
+- One idea per post, told with concrete, checkable detail. Strong idea families: what a real certificate of analysis (COA) shows and how to read one, red flags in a supplier, questions to ask before ordering from anyone, how research compounds should arrive and be stored, what "research use only" means, myths people repeat, a quick checklist, a "save this" explainer.
+- Truth first. State something about Biolinx itself ONLY if it appears under VERIFIED FACTS in the request. If it isn't listed, don't claim it: talk about what to look for in any supplier and invite people to check biolinxlabs.com themselves. Never invent testing, shipping, sourcing, awards, numbers or guarantees.
+- Vary the craft. Don't reuse the hooks or angles listed under ALREADY USED, and avoid stock phrases like "the vial in your hand", "here's the thing" or "nobody tells you".
 - A clear, low-pressure call to action that uses the affiliate's code.
 
 Hard rules. Any violation gets the post thrown away:
@@ -66,7 +75,7 @@ Hard rules. Any violation gets the post thrown away:
 - No @handles. No websites except biolinxlabs.com. No earnings, commission or money-making claims. No before/after, no bodies.
 - Never use an em dash or en dash. Use commas or full stops.
 - The caption must contain the literal placeholder {CODE} exactly once (the affiliate's code is inserted later). You may use {DISCOUNT} once for the discount amount. Do not invent a code or a percentage.
-- Hook: 120 characters max. Caption: 900 characters max before disclosures. Do not add the research-use line or #ad; they are added automatically.
+- Hook: 120 characters max. Caption: stay under the character limit given in the request (before disclosures). Do not add the research-use line or #ad; they are added automatically.
 
 The image (made separately) follows the same rules:
 - image_text: the words printed on the image, 8 words max, same banned words.
@@ -82,13 +91,20 @@ export function writerPrompt(req: WriteRequest, repair?: Array<{ hook: string; r
   const s = req.source;
   const lines = [
     `Audience for this post: ${NICHE_ANGLES[req.biolinxNiche]}.`,
-    `Platform: ${req.platform}. Image format: ${req.format}.`,
+    `Platform: ${req.platform}. Image format: ${req.format}. Caption limit: ${CAPTION_LIMIT[req.platform]} characters before disclosures.`,
+    "",
+    req.facts?.length ? `VERIFIED FACTS about Biolinx (the only Biolinx claims you may make):\n${req.facts.map((f) => `- ${f}`).join("\n")}` : "VERIFIED FACTS about Biolinx: none provided. Make no claims about Biolinx's testing, shipping, sourcing or quality; teach what to look for and point to biolinxlabs.com.",
     "",
     "Post that outperformed (inspiration only, do not copy):",
     `- Platform: ${s.platform}`,
     `- Views: ${s.views.toLocaleString("en-US")} (${s.outlierRatio.toFixed(1)}x the creator's average)${s.likes != null ? `, likes ${s.likes.toLocaleString("en-US")}` : ""}${s.comments != null ? `, comments ${s.comments.toLocaleString("en-US")}` : ""}`,
     `- Text: """${s.text.slice(0, 700)}"""`,
   ];
+  if (req.avoid && (req.avoid.hooks.length || req.avoid.angles.length)) {
+    lines.push("", "ALREADY USED (write something clearly different):");
+    for (const h of req.avoid.hooks.slice(0, 15)) lines.push(`- hook: ${h}`);
+    for (const a of req.avoid.angles.slice(0, 15)) lines.push(`- angle: ${a}`);
+  }
   if (req.previous) {
     lines.push("", "A reviewer declined the previous version:", `- Hook: ${req.previous.hook}`, `- Caption: ${req.previous.caption.slice(0, 700)}`, `- Image text: ${req.previous.imageText ?? ""}`, `- Image brief: ${req.previous.imageBrief ?? ""}`);
   }
@@ -160,8 +176,11 @@ export async function writeSwipePost(llm: LlmClient, model: string, req: WriteRe
       continue;
     }
     const thisRound: Array<{ hook: string; reasons: string[] }> = [];
-    for (const { post } of variants) {
+    const limit = CAPTION_LIMIT[req.platform];
+    for (const { post, v } of variants) {
       const reasons = preflight({ external_id: "draft", hook: post!.hook, caption: post!.caption, hashtags: post!.hashtags, imageText: post!.imageText });
+      const bodyLength = typeof v.caption === "string" ? v.caption.trim().length : 0;
+      if (bodyLength > limit + 60) reasons.push(`caption is ${bodyLength} characters; keep it under ${limit} for ${req.platform}`);
       if (reasons.length === 0) return { status: "ok", post: post!, attempts: attempt, rejectedVariants: [...rejected, ...thisRound] };
       thisRound.push({ hook: post!.hook, reasons });
     }
