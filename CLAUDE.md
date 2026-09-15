@@ -83,7 +83,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 257 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 273 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -141,6 +141,17 @@ implemented and where the engine differs.
   - Audiences, Send messages, Email ops, Replies, Signups, Affiliates,
     Activity, Team (invite links, no email sent; marketing should get the
     `ops` role), Settings (encrypted; Alerts has "Send test alert").
+- **Swipe file → Biolinx content library** (`packages/jobs/src/content/`,
+  admin Swipe file page, `docs/integrations/biolinx-content-api.md`):
+  picks posts with 2×+ their creator's average views, Claude writes three
+  original variants, a pre-flight mirrors Biolinx's rejections plus our
+  linter, and a person must Approve before anything is sent (Biolinx
+  auto-publishes whatever passes its own checks). Decline asks "what more do
+  you need?" and writes a new version. Signed HMAC both ways; callbacks at
+  `/webhooks/biolinx/content` are verified on the raw bytes; `swipe-sync`
+  worker job every 10 minutes. The writer may state only facts listed in
+  `BIOLINX_BRAND_FACTS` (Settings). The image step is not decided: drafts
+  carry image words and a brief, and a person can paste an https image link.
 - **Customer.io:** every lead with an email is mirrored as a person hourly and
   on accept. Suppressed addresses go as unsubscribed only. No campaigns are
   triggered by us.
@@ -164,6 +175,11 @@ implemented and where the engine differs.
 - **Competitors:** 16, seeded from imported leads. Only 1 has a commission
   rate on file, so the under-25% / equal-25% split can't be automated yet.
 - **Outreach:** 9 DM drafts waiting for approval, 1 sent.
+- **Swipe file:** integration deployed; no Biolinx secret saved yet, auto-send
+  off, brand facts empty. 2 drafts from the live test await an image; 2 earlier
+  test drafts were declined for stating unverified facts. Only a handful of
+  source posts qualify today, so swipe needs its own "top posts" searches to
+  scale.
 
 ## Not built yet
 
@@ -174,9 +190,11 @@ implemented and where the engine differs.
   (yes / tell me more / no → referral ask), check-ins, all through the
   approval queue. Blocked on competitor rates and a template for unsigned
   creators (most leads).
-- Swipe file: rank winning posts (views vs the creator's average), send them
-  to the BiolinX creator API (Gemini asset generation) and track returned
-  assets; generated text must pass the compliance rules. Waiting on the API.
+- Swipe file image step (generator not chosen), dedicated swipe searches for
+  more source posts, and the Biolinx-side requests in
+  `docs/integrations/biolinx-content-api.md` (visual policy check, shape check,
+  Telegram note, retire endpoint, brand images, validate, rules, stats, test
+  mode).
 - Bulk accept/reject, post cover thumbnails, tier-specific score weights, an
   organic-mention field, email finding for sourced leads, forum discovery.
 - From MASTER-PLAN v3 (sibling `affiliate-system-spec` folder): Motion B rep
@@ -268,7 +286,9 @@ database dump only decrypts where `.env` has the same key.
    accepted ones and that the rejected one never returns.
 5. Approve the 9 queued DM drafts; the first live check that
    `next_follow_up_date` is written on send.
-6. Swipe file with the BiolinX creator API once Raza shares its details.
+6. Swipe file: Biolinx dev sets the callback URL and shares the secret; enter
+   it and `BIOLINX_BRAND_FACTS` on Settings; press Test connection; decide the
+   image generator; approve and send a first small batch.
 7. Competitor commission rates (Matt or research) and an unsigned-creator
    template, then wire the outreach templates.
 8. LIVE status checks; "not recurring" in scoring.
