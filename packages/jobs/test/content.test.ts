@@ -248,10 +248,11 @@ describe("swipe-search: top TikTok posts (smoke-tested 2026-09-15)", () => {
       row({ webVideoUrl: "https://www.tiktok.com/@e/video/5", text: "#fyp #viral #peptides" }), // no words
       row({ webVideoUrl: "https://www.tiktok.com/@f/video/6", locationMeta: { countryCode: "2635167" } }), // GB
       row({ webVideoUrl: "https://www.tiktok.com/@g/video/7", createTimeISO: "2024-01-01T00:00:00Z" }), // too old
+      row({ webVideoUrl: "https://www.tiktok.com/@h/video/8", text: "Top 3 suplementos que si funcionan según la ciencia (ergogenicos) #gym" }), // Spanish, short
       { error: "This profile/hashtag does not exist." },
     ];
     const { kept, seen } = sourcesFromTikTokRows(rows, tag, now);
-    expect(seen).toBe(7);
+    expect(seen).toBe(8);
     expect(kept.map((k) => k.url)).toEqual(["https://www.tiktok.com/@a/video/1", "https://www.tiktok.com/@c/video/3"]);
     expect(kept[0]).toMatchObject({ platform: "tiktok", niche: "Biohacker", term: "#peptidetok", followers: 50_000, views: 143_100 });
   });

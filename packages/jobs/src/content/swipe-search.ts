@@ -66,6 +66,16 @@ interface TikTokRow {
   locationMeta?: { countryCode?: string | number };
 }
 
+const ENGLISH_WORDS = new Set(["the", "a", "an", "to", "you", "your", "and", "of", "is", "are", "how", "what", "this", "for", "it", "in", "that", "why", "with", "my", "if", "do", "on", "can", "not"]);
+
+/** Short captions slip past looksNonEnglish (it needs 8+ words): "Top 3 suplementos que si
+ *  funcionan según la ciencia" did on 2026-09-15. A source must also use common English words. */
+export function soundsEnglish(text: string): boolean {
+  if (looksNonEnglish(text)) return false;
+  const words = text.replace(/https?:\/\/\S+|[#@][\p{L}\p{N}_.]+/gu, " ").toLowerCase().match(/\p{L}+/gu) ?? [];
+  return words.filter((w) => ENGLISH_WORDS.has(w)).length >= 2;
+}
+
 export type SwipeSourceRow = typeof schema.swipeSources.$inferInsert;
 
 export interface SourceRules {
@@ -94,7 +104,7 @@ export function sourcesFromTikTokRows(rows: TikTokRow[], tag: SwipeTag, now: Dat
     if (!beatReach && views < rules.bigViews) continue;
     const text = (r.text ?? "").trim();
     const words = text.replace(/[#@][\p{L}\p{N}_.]+/gu, " ").replace(/\s+/g, " ").trim();
-    if (words.length < 40 || looksNonEnglish(text)) continue;
+    if (words.length < 40 || !soundsEnglish(text)) continue;
     const postedAt = r.createTimeISO ? new Date(r.createTimeISO) : null;
     if (postedAt && !Number.isNaN(postedAt.getTime()) && (now.getTime() - postedAt.getTime()) / 86_400_000 > rules.maxAgeDays) continue;
     const country = countryCode(r.locationMeta?.countryCode);
