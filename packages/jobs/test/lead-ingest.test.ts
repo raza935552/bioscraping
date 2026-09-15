@@ -292,7 +292,7 @@ describe("quality in planProfile (first live run lessons)", () => {
     const { candidates, summary } = await planProfile(wl, [], hits, emptyKnown(), v, now);
     expect(candidates.map((c) => c.hit.handle)).toEqual(["good"]);
     expect(reads).toBe(1);
-    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0, no_read: 0 });
+    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0, no_read: 0, weak_reach: 0 });
   });
 
   it("a dead account after the read is not saved, does not use a slot, and is remembered", async () => {

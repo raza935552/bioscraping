@@ -9,6 +9,7 @@ export interface ExportLead {
   id: number;
   firstName: string | null;
   lastName: string | null;
+  email?: string | null;
   primaryPlatform: string | null;
   socialProfiles: string | null;
   reachSourceUrl: string | null;
@@ -37,6 +38,7 @@ export const EXPORT_COLUMNS = [
   "Lead ID",
   "Name",
   "Handle",
+  "Email (from bio)",
   "Platform",
   "Profile link",
   "Bio",
@@ -95,6 +97,7 @@ export function exportRow(l: ExportLead, now: Date, activityDays = 30, d: Source
     String(l.id),
     [l.firstName, l.lastName].filter(Boolean).join(" "),
     d?.handle ?? "",
+    l.email ?? "NOT FOUND",
     l.primaryPlatform ?? "",
     l.reachSourceUrl ?? "",
     d?.bio ?? "",

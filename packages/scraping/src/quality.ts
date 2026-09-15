@@ -9,8 +9,9 @@ import type { DiscoveryHit } from "./discovery/types.js";
 /** "followers": outside the audience's follower range once the profile read shows the real count
  *  (Instagram search rows carry no follower count, so the range can only be checked after the read). */
 /** "country": evidence places the creator outside the audience's countries (see country.ts).
- *  "no_read": the profile read failed or found nothing, so reach and activity can't be verified. */
-export type QualityReason = "non_english" | "dead" | "off_niche" | "followers" | "country" | "no_read";
+ *  "no_read": the profile read failed or found nothing, so reach and activity can't be verified.
+ *  "weak_reach": recent posts reach a tiny share of the followers (bought, stale or dying reach). */
+export type QualityReason = "non_english" | "dead" | "off_niche" | "followers" | "country" | "no_read" | "weak_reach";
 
 /** Lowercase letters and digits only: "#WeightLoss" and "weight loss" both → "weightloss". */
 export function compact(s: string): string {
@@ -109,12 +110,38 @@ export function looksLikeStore(handle: string, bio: string | null | undefined, b
   );
 }
 
-export const DEAD_AFTER_DAYS = 180;
+/** No post in this many days = dead. Was 180; the lead score already treats 30 days as active. */
+export const DEAD_AFTER_DAYS = 60;
+
+/** Lowest typical views per follower before reach counts as not real. From the 47-lead review
+ *  (2026-09-15): 12 of 23 rejected leads looked big but reached almost nobody (466K followers,
+ *  526 typical views). Healthy leads in the same batch got 1% to 120% of followers as views.
+ *  Instagram's reader returns no view counts, so it isn't checked here. */
+export const REACH_FLOOR: Partial<Record<string, number>> = { tiktok: 0.005, youtube: 0.01 };
+/** Fewer posts with view counts than this and the check is skipped: too little to judge. */
+export const REACH_MIN_POSTS = 5;
+
+export function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}
+
+/** Typical (median) views of recent posts ÷ followers, and whether that is below the platform's floor. */
+export function reachCheck(platform: string, followers: number | null | undefined, items: Array<{ views?: number | null }>): { medianViews: number | null; viewsPerFollower: number | null; weak: boolean } {
+  // 0 means "not reported" in practice: YouTube's reader returned 0 for a 194K channel whose other posts had ~9.5K views.
+  const views = items.map((i) => i.views).filter((v): v is number => typeof v === "number" && v > 0);
+  const medianViews = views.length >= REACH_MIN_POSTS ? median(views) : null;
+  const viewsPerFollower = medianViews != null && followers && followers > 0 ? medianViews / followers : null;
+  const floor = REACH_FLOOR[platform];
+  return { medianViews, viewsPerFollower, weak: floor != null && viewsPerFollower != null && viewsPerFollower < floor };
+}
 
 export interface GateInput {
   hit: DiscoveryHit;
   /** Present after the profile read; null before it, or when the read failed. */
-  verified: { bio: string | null; lastPostAt: string | null; items: Array<{ text: string }> } | null;
+  verified: { bio: string | null; lastPostAt: string | null; followers?: number | null; items: Array<{ text: string; views?: number | null }> } | null;
   matchTerms: string[];
   language: string;
   /** A competitor was detected in the same text (counts as on-niche). */
@@ -137,6 +164,7 @@ export function qualityGate(input: GateInput): QualityReason | null {
   }
 
   if (matchTerms.length > 0 && !competitorFound && !findTerm(corpus, matchTerms)) return "off_niche";
+  if (verified && reachCheck(hit.platform, verified.followers, verified.items).weak) return "weak_reach";
   return null;
 }
 

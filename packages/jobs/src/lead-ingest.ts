@@ -22,6 +22,7 @@ import {
   urlKey,
   urlsInText,
   qualityGate,
+  emailFromText,
   deadWithoutRead,
   countryFromText,
   resolveCountry,
@@ -293,7 +294,7 @@ export async function planProfile(
   const { kept, rejected } = applyFilters([...merged.values()], audienceRules(profile));
   summary.rejected = rejected;
 
-  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0 };
+  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0, weak_reach: 0 };
   const allowedCountries = (profile.countries ?? []).map((c) => c.toUpperCase());
   const outsideCountries = (c: string | null) => c != null && allowedCountries.length > 0 && !allowedCountries.includes(c);
   const gated: Array<{ key: string; reason: QualityReason }> = [];
@@ -380,6 +381,13 @@ export async function planProfile(
       track(h, false);
       continue;
     }
+    // An email written in the bio. Someone we already have under that email is not a new lead.
+    const email = emailFromText(v?.bio ?? h.bio);
+    if (email && known.emails.has(normalizeEmail(email))) {
+      summary.alreadyKnown++;
+      track(h, false);
+      continue;
+    }
     track(h, true);
     // The surfaced post first, with its engagement from the search row, or from the profile read when it's there too.
     const surfacedRead: SourceItem | undefined = (v?.items as SourceItem[] | undefined)?.find((i) => i.url === h.postUrl);
@@ -399,6 +407,8 @@ export async function planProfile(
       lastName: displayName.split(" ").slice(1).join(" ") || null,
       primaryPlatform: PLATFORM_LABEL[h.platform],
       socialProfiles: `${SOCIAL_PREFIX[h.platform]}${h.handle}`,
+      // "scraped" provenance: the linter blocks automated email to it; a person decides.
+      ...(email ? { email, emailNormalized: normalizeEmail(email), emailProvenance: "scraped" } : {}),
       whereFound: h.postUrl,
       totalReach: v?.followers ?? null,
       reachSourceUrl: v ? v.profileUrl : null,
@@ -441,6 +451,7 @@ export async function planProfile(
     // Anything we just decided to insert is now "known" for the rest of this run.
     known.handles.add(handleKey(h.platform, h.handle));
     known.urls.add(urlKey(h.profileUrl));
+    if (email) known.emails.add(normalizeEmail(email));
     if (s.affiliateCode) known.codes.add(s.affiliateCode.toLowerCase());
     const nk = nameKey(h.displayName, h.platform);
     if (nk) known.names.add(nk);

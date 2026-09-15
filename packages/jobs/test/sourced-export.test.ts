@@ -47,7 +47,7 @@ describe("sourced leads export", () => {
 
   it("file starts with a BOM and the header row", () => {
     const csv = sourcedLeadsCsv([base], now);
-    expect(csv.startsWith("\uFEFFLead ID,Name,Handle,Platform")).toBe(true);
+    expect(csv.startsWith("\uFEFFLead ID,Name,Handle,Email (from bio),Platform")).toBe(true);
     expect(csv.trim().split("\r\n")).toHaveLength(2);
   });
 });

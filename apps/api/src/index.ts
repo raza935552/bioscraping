@@ -619,6 +619,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       country: l.geoCountry,
       currentOffer: l.currentOffer,
       rejectedReason: l.sourcingRejectedReason,
+      email: l.email,
       details: details.get(l.id) ?? null,
     })),
   };

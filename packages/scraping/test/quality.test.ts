@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { compact, findTerm, looksLikeStore, looksNonEnglish, qualityGate, deadWithoutRead } from "../src/quality.js";
+import { compact, findTerm, looksLikeStore, looksNonEnglish, qualityGate, deadWithoutRead, reachCheck } from "../src/quality.js";
+import { emailFromText } from "../src/contact.js";
 import { findAffiliateCode, scoreHit } from "../src/score.js";
 import type { DiscoveryHit } from "../src/discovery/types.js";
 
@@ -54,7 +55,8 @@ describe("qualityGate", () => {
   it("dead is decided from the profile read, not an old surfaced post", () => {
     expect(qualityGate({ ...base, hit: hit({ postedAt: "2025-01-01T00:00:00Z" }), verified: null })).toBeNull();
     expect(qualityGate({ ...base, hit: hit(), verified: read(["weight loss tips"], "2026-01-20T00:00:00Z") })).toBe("dead"); // 237 days
-    expect(qualityGate({ ...base, hit: hit(), verified: read(["weight loss tips"], "2026-06-01T00:00:00Z") })).toBeNull(); // dormant, kept and scored down
+    expect(qualityGate({ ...base, hit: hit(), verified: read(["weight loss tips"], "2026-06-01T00:00:00Z") })).toBe("dead"); // 105 days: dead since the 60-day rule
+    expect(qualityGate({ ...base, hit: hit(), verified: read(["weight loss tips"], "2026-08-01T00:00:00Z") })).toBeNull(); // 44 days: dormant, kept and scored down
     expect(deadWithoutRead(hit({ postedAt: "2021-12-16T00:00:00Z" }), now)).toBe(true);
   });
   it("language gate is skipped for non-English audiences", () => {
@@ -125,5 +127,47 @@ describe("Instagram business categories", () => {
     expect(looksLikeStore("spectrawellnesstampa", "Medicine Redefined", "Medical Center")).toBe(true);
     expect(looksLikeStore("nic.is.fit", "helps women 40-65", "Health/Beauty")).toBe(false);
     expect(looksLikeStore("nic.is.fit", "helps women 40-65", "Digital creator")).toBe(false);
+  });
+});
+
+describe("reach that doesn't match engagement (47-lead review, 2026-09-15)", () => {
+  const posts = (views: number[]) => views.map((v) => ({ views: v }));
+
+  it("flags big accounts whose posts reach almost nobody, per platform", () => {
+    // Lead 440: 466,300 followers, typical views in the hundreds.
+    expect(reachCheck("tiktok", 466_300, posts([526, 480, 610, 900, 300, 12_000]))).toMatchObject({ weak: true, medianViews: 568 });
+    // Healthy: 217,800 followers, ~20K views.
+    expect(reachCheck("tiktok", 217_800, posts([20_650, 18_000, 25_000, 30_000, 9_000])).weak).toBe(false);
+    // YouTube floor is 1%: 168K subscribers at 1,250 views fails, 108K at 4,000 passes.
+    expect(reachCheck("youtube", 168_000, posts([1250, 1200, 1300, 1100, 1400])).weak).toBe(true);
+    expect(reachCheck("youtube", 108_000, posts([4000, 3900, 4100, 4200, 3800])).weak).toBe(false);
+  });
+
+  it("uses the median so one viral post can't hide dead reach, and skips thin or unviewed reads", () => {
+    expect(reachCheck("tiktok", 400_000, posts([100, 120, 90, 110, 3_000_000])).weak).toBe(true);
+    expect(reachCheck("tiktok", 400_000, posts([100, 120, 90])).weak).toBe(false); // under 5 posts with views
+    expect(reachCheck("instagram", 400_000, posts([1, 1, 1, 1, 1])).weak).toBe(false); // no floor for Instagram
+    expect(reachCheck("tiktok", null, posts([1, 1, 1, 1, 1])).weak).toBe(false);
+    // Zeros are unreported views, not zero reach (lead 465, YouTube, 2026-09-15).
+    expect(reachCheck("youtube", 194_000, posts([0, 0, 0, 9500, 14_000, 8000, 12_000, 9000])).weak).toBe(false);
+  });
+
+  it("the gate rejects weak reach after a read, and dead now means 60 days", () => {
+    const read = { bio: "weight loss tips", lastPostAt: "2026-09-10T00:00:00Z", followers: 466_300, items: [526, 480, 610, 900, 300].map((v) => ({ text: "weight loss", views: v })) };
+    const input = { hit: { platform: "tiktok", handle: "a", profileUrl: "https://www.tiktok.com/@a", displayName: null, bio: null, followers: 466_300, postUrl: null, postText: "weight loss", postedAt: null, country: null, isRepost: null, term: "t" } as const, matchTerms: ["weight loss"], language: "en", competitorFound: false, now: new Date("2026-09-15T00:00:00Z") };
+    expect(qualityGate({ ...input, verified: read })).toBe("weak_reach");
+    expect(qualityGate({ ...input, verified: { ...read, followers: 20_000 } })).toBeNull();
+    expect(qualityGate({ ...input, verified: { ...read, followers: 20_000, lastPostAt: "2026-07-10T00:00:00Z" } })).toBe("dead"); // 67 days
+    expect(qualityGate({ ...input, verified: { ...read, followers: 20_000, lastPostAt: "2026-07-25T00:00:00Z" } })).toBeNull(); // 52 days
+  });
+});
+
+describe("email from the bio", () => {
+  it("finds written-out and [at]-style addresses, ignores asset names and placeholders", () => {
+    expect(emailFromText("Collabs 📩 Jane.Doe+work@Gmail.com | coach")).toBe("jane.doe+work@gmail.com");
+    expect(emailFromText("business: hello [at] fitwithmadz [dot] com")).toBe("hello@fitwithmadz.com");
+    expect(emailFromText("logo@2x.png and your@email.com")).toBeNull();
+    expect(emailFromText("no contact here @handle")).toBeNull();
+    expect(emailFromText(null)).toBeNull();
   });
 });

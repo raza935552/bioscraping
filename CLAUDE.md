@@ -83,7 +83,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 281 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 285 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -114,7 +114,11 @@ implemented and where the engine differs.
   - Quality gates (`quality.ts`, `country.ts`), free checks before the paid
     read and full checks after: non-English, dead (180 days), off-niche,
     follower range (re-checked after the read), country outside the US,
-    failed read. Gated people are remembered 90 days in config
+    failed read, dead (no post in 60 days; was 180), and **weak reach**:
+    median views of the recent posts under 0.5% of followers on TikTok or
+    1% on YouTube (zeros ignored as unreported; Instagram has no view
+    counts). The 47-lead review on 2026-09-15 (ours and an independent pass
+    agreed) found this was the main failure: 466K followers, 526 views. Gated people are remembered 90 days in config
     `sourcing_gated_handles` so they aren't paid for again (failed reads are
     not remembered).
   - Country evidence, in order: platform field (YouTube channel location,
@@ -124,6 +128,9 @@ implemented and where the engine differs.
     Instagram business category.
   - Competitor detection: whole-word names and domains, hashtag spellings per
     word, a personal code within 80 characters of the mention.
+  - Email written in the bio is saved (`emailFromText`, provenance
+    `scraped`, so the linter blocks automated email to it) and is a dedupe
+    key; shown in the Sourced table, the lead dialog and the CSV.
   - Dedupe: five keys from every table holding a person, handles parsed from
     every imported `social_profiles` format, plus the unique `lead_handles`
     index inside a per-lead transaction.
@@ -180,12 +187,15 @@ implemented and where the engine differs.
 - **Apify:** legacy Starter plan (Bronze prices) with the monthly usage limit
   raised to $200; the Scale upgrade was deferred. Six ingest runs so far,
   about $5.30 estimated; real bills ran about 10% above estimates.
-- **Sourced leads:** 76 total, 47 waiting for review (18 confirmed US, 29 no
-  location evidence), 29 rejected with reasons (under 5K followers,
+- **Sourced leads:** 76 total. After the weak-reach backfill on 2026-09-15:
+  32 waiting, 44 rejected (15 for weak reach, audit actor
+  `quality-backfill`); 12 emails saved from bios. Earlier rejections (under 5K followers,
   businesses, non-English, UK/Sweden, off-niche, dead, failed reads).
-- **Active audiences (8, US only):** TikTok+Instagram and YouTube for
-  Weight-loss seeker (caps 10/5), Biohacker (10/5), Gym (8/4), Anti-aging
-  (5/3). The 12 Skool, Reddit and Sexual wellness audiences are paused.
+- **Active audiences (8, US only):** TikTok and YouTube for Weight-loss
+  seeker (caps 10/5), Biohacker (10/5), Gym (8/4), Anti-aging (5/3).
+  Instagram was split out and paused on 2026-09-15 (17 of 18 Instagram leads
+  rejected, 0 confirmed US). Skool, Reddit and Sexual wellness are paused;
+  Skool was never run, so its value is unknown until tested.
 - **Competitors:** 16, seeded from imported leads. Only 1 has a commission
   rate on file, so the under-25% / equal-25% split can't be automated yet.
 - **Outreach:** 9 DM drafts waiting for approval, 1 sent.

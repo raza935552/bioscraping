@@ -467,6 +467,7 @@ export function Leads({ me }: { me: Me }) {
                 {row.sourcingScore != null && <span className="chip internal">score {row.sourcingScore}</span>}
                 {row.competitor && <span className="chip suggest">promotes {row.competitor}{row.affiliateCode ? ` · code ${row.affiliateCode}` : ""}</span>}
                 {d?.isStore && <span className="chip failed">store / business</span>}
+                {row.email && <span className="chip ok" title="Written in their bio. Never emailed automatically.">✉ {row.email}</span>}
                 {row.country ? <span className={`chip ${row.country === "US" ? "ok" : "failed"}`}>{row.country === "US" ? "US ✓" : row.country}</span> : <span className="chip unresolved" title="No platform or bio evidence of where they are">location unknown</span>}
                 {row.rejectedReason && <span className="chip failed">rejected: {row.rejectedReason}</span>}
                 <div className="grow" />
@@ -755,6 +756,7 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
                 <td>
                   <div className="flags">
                   {d?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">store</span>}
+                  {l.email && <span className="chip ok" title={`Email in bio: ${l.email}`}>✉ email</span>}
                   {l.promoTrackRecord && <span className="chip ok" title="Has run a code, discount link or #ad before">promo</span>}
                   {l.doesLive && <span className="chip ok">LIVE</span>}
                   {l.country ? (

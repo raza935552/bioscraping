@@ -80,6 +80,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface LeadRow {
   id: number;
+  email?: string | null;
   rank: number | null;
   band: string | null;
   name: string;
