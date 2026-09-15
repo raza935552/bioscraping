@@ -179,3 +179,12 @@ describe("writer grounding and variety (live test 2026-09-15)", () => {
     expect(r.rejectedVariants[0]!.reasons.join(" ")).toMatch(/keep it under 450 for tiktok/);
   });
 });
+
+describe("swipe sources must say something", () => {
+  it("a hashtag-only caption is not a source", () => {
+    const leads = [{ id: 1, niche: "Weight-loss seeker", primaryPlatform: "TikTok", geoCountry: null, source: "sourcing", sourcingReview: "pending" }];
+    const mk = (text: string) => new Map([[1, { items: [10_000, 12_000, 9_000, 150_000].map((v, i) => ({ url: `https://www.tiktok.com/@a/video/${i}`, text, postedAt: "2026-09-01T00:00:00Z", views: v })) }]]);
+    expect(pickCandidates({ leads, bundles: mk("#weightloss #bodyrecomposition #personaltrainer"), matchTermsByNiche: new Map(), usedUrls: new Set(), now })).toEqual([]);
+    expect(pickCandidates({ leads, bundles: mk("The one question I ask every supplier before I order anything #weightloss"), matchTermsByNiche: new Map(), usedUrls: new Set(), now })).toHaveLength(1);
+  });
+});

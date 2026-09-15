@@ -56,7 +56,9 @@ export function pickCandidates(input: {
       const ratio = i.views! / avg;
       const text = (i.text ?? "").trim();
       const age = i.postedAt ? (now.getTime() - new Date(i.postedAt).getTime()) / 86_400_000 : 0;
-      if (i.views! < minViews || ratio < minRatio || age > maxAgeDays || text.length < 15) continue;
+      // A source has to say something: at least 40 characters once hashtags and @mentions are removed.
+      const words = text.replace(/[#@][\p{L}\p{N}_.]+/gu, " ").replace(/\s+/g, " ").trim();
+      if (i.views! < minViews || ratio < minRatio || age > maxAgeDays || words.length < 40) continue;
       if (input.usedUrls.has(i.url) || looksNonEnglish(text)) continue;
       if (terms.length && !findTerm(text, terms)) continue;
       out.push({
