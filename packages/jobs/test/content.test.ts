@@ -127,7 +127,7 @@ describe("post writer", () => {
 });
 
 describe("swipe candidates", () => {
-  const items = (views: number[], text = "red flags your peptide supplier hides") =>
+  const items = (views: number[], text = "three red flags your peptide supplier hopes you miss") =>
     views.map((v, i) => ({ url: `https://www.tiktok.com/@a/video/${i}`, text, postedAt: "2026-09-01T00:00:00Z", views: v, likes: Math.round(v / 20), comments: 10 }));
   it("keeps outliers from US or unknown, non-rejected, on-niche, unused, recent posts", () => {
     const leads = [
