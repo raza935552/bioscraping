@@ -19,3 +19,4 @@ export function discovererFor(platform: DiscoveryPlatform): Discoverer {
 
 export * from "./types.js";
 export { discoverInstagram, discoverReddit, discoverSkool, discoverTikTok, discoverYouTube };
+export { tagOf } from "./tiktok.js";

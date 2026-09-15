@@ -263,6 +263,7 @@ export const api = {
   swipeApprove: (id: number) => request<{ ok: true }>(`/api/swipe/${id}/approve`, { method: "POST" }),
   swipeDecline: (id: number, feedback: string) => request<{ ok: true; newId: number }>(`/api/swipe/${id}/decline`, { method: "POST", body: JSON.stringify({ feedback }) }),
   swipeSend: () => request<{ ok: true; result: { sent: number; accepted: number; duplicates: number; rejected: number; remainingToday: number | null; error?: string } }>("/api/swipe/send", { method: "POST" }),
+  swipeFindSources: () => request<{ ok: true; result: { skipped?: string; added: number; estimatedCostUsd: number; tags: Array<{ tag: string; rows: number; kept: number; error?: string }> } }>("/api/swipe/find-sources", { method: "POST" }),
   swipeRedoImage: (id: number, body: { note: string; imageText?: string; imageBrief?: string }) => request<{ ok: true }>(`/api/swipe/${id}/redo-image`, { method: "POST", body: JSON.stringify(body) }),
   swipeRefresh: (id: number) => request<{ ok: true }>(`/api/swipe/${id}/refresh`, { method: "POST" }),
   swipeTestConnection: () => request<{ ok: true; message: string }>("/api/swipe/test-connection", { method: "POST" }),
@@ -367,7 +368,7 @@ export interface SwipePost {
   version: number;
   sourcePostUrl: string | null;
   sourcePlatform: string | null;
-  sourceStats: { views?: number; likes?: number | null; comments?: number | null; outlierRatio?: number; text?: string } | null;
+  sourceStats: { views?: number; likes?: number | null; comments?: number | null; outlierRatio?: number; basis?: "average" | "followers" | null; text?: string } | null;
   niche: string | null;
   biolinxNiche: string;
   platform: string;
@@ -401,6 +402,7 @@ export interface SwipePost {
 }
 
 export interface SwipePayload {
+  sources: { unused: number; total: number; searchDaily: boolean; lastSearch: { at: string; status: string; detail: { added?: number; estimatedCostUsd?: number; skipped?: string } | null } | null };
   connection: { configured: boolean; autoSend: boolean; biolinxMakesImages: boolean; baseUrl: string; callbackUrl: string };
   counts: Record<string, number>;
   posts: SwipePost[];

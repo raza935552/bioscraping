@@ -113,6 +113,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
       { key: "BIOLINX_CONTENT_BASE_URL", label: "Biolinx site URL", kind: "text", placeholder: "https://biolinxlabs.com", help: "Blank = https://biolinxlabs.com." },
       { key: "BIOLINX_CONTENT_ENABLED", label: "Send approved posts automatically", kind: "bool", help: "ON = approved posts go out every 10 minutes. OFF = only the Send now button sends. Nothing is ever sent without Approve." },
       { key: "BIOLINX_MAKES_IMAGES", label: "Biolinx makes the images", kind: "bool", help: "ON = approved posts are sent with the image words and brief, Biolinx's generator makes the image and sends the link back, and Redo image asks it for a new one. Turn on only after Biolinx confirms it accepts posts without an image link. OFF = paste an image link on each post." },
+      { key: "SWIPE_SEARCH_DAILY", label: "Find top posts automatically", kind: "bool", help: "ON = once a day, when fewer than 10 unused source posts are waiting, search TikTok for top posts on our topics (Apify credit, counts toward the daily sourcing limit). OFF = only the Find top posts button searches." },
+      { key: "SWIPE_SEARCH_MAX_USD", label: "Top posts search budget per run (USD)", kind: "text", placeholder: "1", help: "Blank = $1 (about 12 hashtags, 40 posts each). Never more than what's left of the daily sourcing limit." },
       { key: "BIOLINX_BRAND_FACTS", label: "Verified Biolinx facts for posts", kind: "text", help: "Separate facts with ; — only true, confirmed statements (e.g. third-party COA per batch; ships from the US). The post writer may state only these about Biolinx. Blank = it makes no claims about Biolinx." },
     ],
   },

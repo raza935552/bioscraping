@@ -226,6 +226,24 @@ export const swipePosts = mysqlTable("swipe_posts", {
   updatedAt: updatedAt(),
 }, (t) => [uniqueIndex("swipe_external_id").on(t.externalId), index("swipe_status").on(t.status)]);
 
+/** Top posts found by the swipe file's own search. Inspiration for swipe posts, used once each. */
+export const swipeSources = mysqlTable("swipe_sources", {
+  id: id(),
+  url: varchar("url", { length: 500 }).notNull(),
+  platform: varchar("platform", { length: 16 }).notNull(),
+  niche: varchar("niche", { length: 40 }),
+  term: varchar("term", { length: 120 }).notNull(),
+  authorHandle: varchar("author_handle", { length: 120 }),
+  followers: int("followers"),
+  views: int("views").notNull(),
+  likes: int("likes"),
+  comments: int("comments"),
+  text: text("text").notNull(),
+  postedAt: datetime("posted_at"),
+  country: varchar("country", { length: 8 }),
+  createdAt: createdAt(),
+});
+
 /** Matt's competitor list: their affiliates are the tier-one target. */
 export const competitors = mysqlTable("competitors", {
   id: id(),

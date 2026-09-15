@@ -83,7 +83,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 277 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 281 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -92,7 +92,8 @@ implemented and where the engine differs.
   `rank-recompute` 6h, `referral-expiry` 24h, `enrich-personalize` 24h (cap
   40), `lead-ingest` 24h (both marked `spends`: never on boot, first run
   anchored to the last `sync_runs` row, at least 1h after a restart),
-  `customerio-sync` 1h, `metrics-digest` 24h. `outreach-dispatch` and
+  `customerio-sync` 1h, `metrics-digest` 24h, `swipe-sync` 10m,
+  `swipe-search` 24h (spends; only when switched on). `outreach-dispatch` and
   `reply-ingest` run only from admin buttons or one-shot runners.
 - **Scraping (`packages/scraping`):** per-platform Apify profile readers
   (TikTok, Instagram with "About this account", YouTube, Reddit, X, web, link
@@ -143,7 +144,14 @@ implemented and where the engine differs.
     `ops` role), Settings (encrypted; Alerts has "Send test alert").
 - **Swipe file → Biolinx content library** (`packages/jobs/src/content/`,
   admin Swipe file page, `docs/integrations/biolinx-content-api.md`):
-  picks posts with 2×+ their creator's average views, Claude writes three
+  picks posts with 1.5×+ their creator's average views and 10K+ views
+  (loosened from 2×/20K on 2026-09-15 when every post was used), plus top
+  TikTok posts from its own hashtag search (`swipe-search.ts`, table
+  `swipe_sources`: 50K+ views and views ≥ followers, or 300K+; English, not
+  known non-US, ≤ 1 year; "Find top posts" button, about $1 a run, counts
+  toward the daily sourcing limit; daily when `SWIPE_SEARCH_DAILY` is on and
+  fewer than 10 unused wait). Instagram's hashtag feed returns only brand-new
+  posts, so it isn't searched; TikTok blocks #peptides and #bpc157. Claude writes three
   original variants, a pre-flight mirrors Biolinx's rejections plus our
   linter, and a person must Approve before anything is sent. Biolinx saves
   each post it accepts as a draft; it reaches affiliates only when someone
@@ -198,8 +206,7 @@ implemented and where the engine differs.
   approval queue. Blocked on competitor rates and a template for unsigned
   creators (most leads).
 - Biolinx side of Biolinx-made images (accept posts without `image_url`,
-  generate, call back, `/image` redo endpoint), dedicated swipe searches for
-  more source posts, and the Biolinx-side requests in
+  generate, call back, `/image` redo endpoint), and the Biolinx-side requests in
   `docs/integrations/biolinx-content-api.md` (visual policy check, shape check,
   Telegram note, retire endpoint, brand images, validate, rules, stats, test
   mode).

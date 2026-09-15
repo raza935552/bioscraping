@@ -4,7 +4,8 @@ import { RUO_LINE } from "@biolinx/compliance";
 import { createContentClient, signBody, signedHeaders, verifySignature } from "../src/content/biolinx-client.js";
 import { biolinxNiche, cleanHashtags, formatFor, preflight, withDisclosures } from "../src/content/content-rules.js";
 import { parseVariants, writeSwipePost, writerPrompt, type WriteRequest } from "../src/content/post-writer.js";
-import { imageBlocker, pickCandidates, toOutbound } from "../src/content/swipe.js";
+import { imageBlocker, pickCandidates, pickSearchCandidates, toOutbound } from "../src/content/swipe.js";
+import { allSwipeTags, planSwipeTags, sourcesFromTikTokRows } from "../src/content/swipe-search.js";
 
 const SECRET = "test-secret";
 const now = new Date("2026-09-15T03:00:00Z");
@@ -230,5 +231,48 @@ describe("images made by Biolinx", () => {
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ note: "Bigger words", image_text: "Ask for the COA", image_brief: "vial and COA" });
     status = 404;
     await expect(client.requestImage("bs-1", { note: "n", image_text: "t", image_brief: "b" })).rejects.toThrow(/new-image endpoint/);
+  });
+});
+
+describe("swipe-search: top TikTok posts (smoke-tested 2026-09-15)", () => {
+  const tag = { tag: "peptidetok", niche: "Biohacker" };
+  const words = "What is a peptide? Before you spend a dollar on anything, learn to read the lab report.";
+  const row = (o: Record<string, unknown>) => ({ webVideoUrl: "https://www.tiktok.com/@a/video/1", text: words, createTimeISO: "2026-08-01T00:00:00Z", playCount: 143_100, diggCount: 9000, commentCount: 300, authorMeta: { name: "a", fans: 50_000 }, ...o });
+
+  it("keeps posts that beat the creator's size or are big outright, and drops the rest", () => {
+    const rows = [
+      row({}), // 143K views, 50K followers: kept
+      row({ webVideoUrl: "https://www.tiktok.com/@b/video/2", playCount: 60_000, authorMeta: { name: "b", fans: 500_000 } }), // under followers, under 300K
+      row({ webVideoUrl: "https://www.tiktok.com/@c/video/3", playCount: 3_100_000, authorMeta: { name: "c", fans: 5_000_000 } }), // big outright
+      row({ webVideoUrl: "https://www.tiktok.com/@d/video/4", playCount: 20_000 }), // too few views
+      row({ webVideoUrl: "https://www.tiktok.com/@e/video/5", text: "#fyp #viral #peptides" }), // no words
+      row({ webVideoUrl: "https://www.tiktok.com/@f/video/6", locationMeta: { countryCode: "2635167" } }), // GB
+      row({ webVideoUrl: "https://www.tiktok.com/@g/video/7", createTimeISO: "2024-01-01T00:00:00Z" }), // too old
+      { error: "This profile/hashtag does not exist." },
+    ];
+    const { kept, seen } = sourcesFromTikTokRows(rows, tag, now);
+    expect(seen).toBe(7);
+    expect(kept.map((k) => k.url)).toEqual(["https://www.tiktok.com/@a/video/1", "https://www.tiktok.com/@c/video/3"]);
+    expect(kept[0]).toMatchObject({ platform: "tiktok", niche: "Biohacker", term: "#peptidetok", followers: 50_000, views: 143_100 });
+  });
+
+  it("rotates through tags, then competitor names, without repeats", () => {
+    const tags = allSwipeTags({ Biohacker: ["peptidetok", "#PeptideTok"], "Weight-loss seeker": ["metabolichealth"] }, ["Peptide Sciences"]);
+    expect(tags.map((t) => t.tag)).toEqual(["metabolichealth", "peptidetok", "peptidesciences"]);
+    expect(planSwipeTags(tags, 2, 2)).toEqual({ batch: [tags[2], tags[0]], nextOffset: 1 });
+    expect(planSwipeTags(tags, 0, 10).batch).toHaveLength(3);
+  });
+
+  it("search posts become candidates once, ranked by how far they beat the creator's size", () => {
+    const src = (url: string, views: number, followers: number | null) => ({ url, platform: "tiktok", niche: "Biohacker", text: words, views, likes: 1, comments: 1, followers });
+    const out = pickSearchCandidates([src("https://www.tiktok.com/@a/video/1", 143_100, 50_000), src("https://www.tiktok.com/@b/video/2", 3_100_000, 5_000_000), src("https://www.tiktok.com/@c/video/3", 900_000, 100_000)], new Set(["https://www.tiktok.com/@c/video/3"]));
+    expect(out.map((c) => c.url)).toEqual(["https://www.tiktok.com/@a/video/1", "https://www.tiktok.com/@b/video/2"]);
+    expect(out[0]).toMatchObject({ leadId: null, basis: "followers", outlierRatio: 2.9, niche: "Biohacker" });
+  });
+
+  it("the writer is told what the ratio means", () => {
+    const req = { source: { platform: "tiktok", url: "u", text: words, views: 143_100, likes: null, comments: null, outlierRatio: 2.9, basis: "followers" as const, niche: "Biohacker" }, biolinxNiche: "research" as const, platform: "tiktok" as const, format: "portrait" as const };
+    expect(writerPrompt(req)).toContain("2.9x the creator's follower count");
+    expect(writerPrompt({ ...req, source: { ...req.source, basis: null } })).toContain("a top post for its hashtag");
   });
 });

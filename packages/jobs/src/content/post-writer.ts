@@ -14,8 +14,9 @@ export interface SwipeSource {
   views: number;
   likes: number | null;
   comments: number | null;
-  /** Views ÷ the creator's average views over the posts read. */
+  /** Views ÷ the creator's average views (basis "average"), or ÷ their followers (basis "followers"). */
   outlierRatio: number;
+  basis?: "average" | "followers" | null;
   niche: string | null;
 }
 
@@ -97,7 +98,7 @@ export function writerPrompt(req: WriteRequest, repair?: Array<{ hook: string; r
     "",
     "Post that outperformed (inspiration only, do not copy):",
     `- Platform: ${s.platform}`,
-    `- Views: ${s.views.toLocaleString("en-US")} (${s.outlierRatio.toFixed(1)}x the creator's average)${s.likes != null ? `, likes ${s.likes.toLocaleString("en-US")}` : ""}${s.comments != null ? `, comments ${s.comments.toLocaleString("en-US")}` : ""}`,
+    `- Views: ${s.views.toLocaleString("en-US")}${s.basis === "followers" ? ` (${s.outlierRatio.toFixed(1)}x the creator's follower count)` : s.basis === null ? " (a top post for its hashtag)" : ` (${s.outlierRatio.toFixed(1)}x the creator's average)`}${s.likes != null ? `, likes ${s.likes.toLocaleString("en-US")}` : ""}${s.comments != null ? `, comments ${s.comments.toLocaleString("en-US")}` : ""}`,
     `- Text: """${s.text.slice(0, 700)}"""`,
   ];
   if (req.avoid && (req.avoid.hooks.length || req.avoid.angles.length)) {

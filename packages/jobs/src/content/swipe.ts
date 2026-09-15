@@ -33,7 +33,8 @@ export function newExternalId(now: Date = new Date()): string {
 }
 
 export interface SwipeCandidate extends SwipeSource {
-  leadId: number;
+  /** The lead whose post it is, or null for a post found by swipe-search. */
+  leadId: number | null;
   score: number;
 }
 
@@ -49,7 +50,8 @@ export function pickCandidates(input: {
   minRatio?: number;
   maxAgeDays?: number;
 }): SwipeCandidate[] {
-  const { minViews = 20_000, minRatio = 2, maxAgeDays = 120, now } = input;
+  // Loosened 2026-09-15 (was 20K views, 2x): the stricter rules had used up every post.
+  const { minViews = 10_000, minRatio = 1.5, maxAgeDays = 120, now } = input;
   const out: SwipeCandidate[] = [];
   for (const lead of input.leads) {
     if (lead.sourcingReview === "rejected") continue;
@@ -77,6 +79,7 @@ export function pickCandidates(input: {
         likes: i.likes ?? null,
         comments: i.comments ?? null,
         outlierRatio: Math.round(ratio * 10) / 10,
+        basis: "average",
         niche,
         score: ratio * Math.log10(i.views!),
       });
@@ -100,7 +103,34 @@ async function loadCandidates(db: Db, now: Date): Promise<SwipeCandidate[]> {
     matchTermsByNiche.set(n, [...new Set([...(matchTermsByNiche.get(n) ?? []), ...(((p.matchTerms as string[] | null) ?? []))])]);
   }
   const usedUrls = new Set((await db.select({ u: schema.swipePosts.sourcePostUrl }).from(schema.swipePosts)).map((r) => r.u).filter((u): u is string => !!u));
-  return pickCandidates({ leads, bundles, matchTermsByNiche, usedUrls, now });
+  const fromLeads = pickCandidates({ leads, bundles, matchTermsByNiche, usedUrls, now });
+  const fromSearch = pickSearchCandidates(await db.select().from(schema.swipeSources), usedUrls);
+  return [...fromLeads, ...fromSearch].sort((a, b) => b.score - a.score);
+}
+
+/** Posts found by swipe-search, not yet used. Scored like lead posts: how far the post beat
+ *  the creator's size, times the log of its views. */
+export function pickSearchCandidates(sources: Array<Pick<typeof schema.swipeSources.$inferSelect, "url" | "platform" | "niche" | "text" | "views" | "likes" | "comments" | "followers">>, usedUrls: Set<string>): SwipeCandidate[] {
+  const out: SwipeCandidate[] = [];
+  for (const s of sources) {
+    if (usedUrls.has(s.url) || !/^https:\/\//.test(s.url)) continue;
+    const ratio = s.followers ? s.views / s.followers : null;
+    out.push({
+      leadId: null,
+      platform: s.platform,
+      url: s.url,
+      text: s.text,
+      views: s.views,
+      likes: s.likes,
+      comments: s.comments,
+      outlierRatio: ratio == null ? 1 : Math.round(ratio * 10) / 10,
+      basis: ratio == null ? null : "followers",
+      niche: normalizeNiche(s.niche),
+      // Capped so a tiny account's one viral post doesn't outrank everything.
+      score: Math.min(ratio ?? 1.5, 10) * Math.log10(Math.max(s.views, 10)),
+    });
+  }
+  return out;
 }
 
 export interface GenerateSummary {
@@ -145,7 +175,7 @@ export async function generateSwipeDrafts(db: Db, llm: LlmClient, model: string,
       sourceLeadId: c.leadId,
       sourcePostUrl: c.url,
       sourcePlatform: c.platform,
-      sourceStats: { views: c.views, likes: c.likes, comments: c.comments, outlierRatio: c.outlierRatio, text: c.text.slice(0, 500), rejectedVariants: result.rejectedVariants },
+      sourceStats: { views: c.views, likes: c.likes, comments: c.comments, outlierRatio: c.outlierRatio, basis: c.basis ?? null, text: c.text.slice(0, 500), rejectedVariants: result.rejectedVariants },
       niche: c.niche,
       biolinxNiche: niche,
       platform,
@@ -172,9 +202,9 @@ export async function declineAndRegenerate(db: Db, llm: LlmClient, model: string
   if (!["draft", "approved", "rejected", "failed"].includes(row.status)) return { ok: false, reason: `a ${row.status} post can't be declined` };
   if (!feedback.trim()) return { ok: false, reason: "tell the writer what should change" };
   await db.update(schema.swipePosts).set({ status: "declined", reviewerFeedback: feedback.trim().slice(0, 2000), decidedByUserId: userId, decidedAt: now }).where(eq(schema.swipePosts.id, id));
-  const stats = (row.sourceStats as { views?: number; likes?: number | null; comments?: number | null; outlierRatio?: number; text?: string } | null) ?? {};
+  const stats = (row.sourceStats as { views?: number; likes?: number | null; comments?: number | null; outlierRatio?: number; basis?: "average" | "followers" | null; text?: string } | null) ?? {};
   const result = await writeSwipePost(llm, model, {
-    source: { platform: row.sourcePlatform ?? row.platform, url: row.sourcePostUrl ?? "", text: stats.text ?? "", views: stats.views ?? 0, likes: stats.likes ?? null, comments: stats.comments ?? null, outlierRatio: stats.outlierRatio ?? 1, niche: row.niche },
+    source: { platform: row.sourcePlatform ?? row.platform, url: row.sourcePostUrl ?? "", text: stats.text ?? "", views: stats.views ?? 0, likes: stats.likes ?? null, comments: stats.comments ?? null, outlierRatio: stats.outlierRatio ?? 1, basis: stats.basis === undefined ? "average" : stats.basis, niche: row.niche },
     biolinxNiche: row.biolinxNiche as never,
     platform: row.platform as never,
     format: row.format as never,

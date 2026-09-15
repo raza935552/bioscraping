@@ -135,6 +135,23 @@ export function Swipe({ me }: { me: Me }) {
           </button>
         ))}
         <div className="grow" />
+        <span className="muted" style={{ fontSize: 12 }} title={data?.sources.searchDaily ? "Searched automatically once a day when fewer than 10 are left" : "Turn on 'Find top posts automatically' in Settings to search daily"}>
+          {data ? `${data.sources.unused} unused source post${data.sources.unused === 1 ? "" : "s"} from search` : ""}
+        </span>
+        <button
+          disabled={busy === "find"}
+          title="Searches TikTok for top posts on our topics. Uses Apify credit (about $1) and counts toward the daily sourcing limit."
+          onClick={() =>
+            void run("find", async () => {
+              const r = (await api.swipeFindSources()).result;
+              if (r.skipped) return `Search skipped: ${r.skipped}.`;
+              const blocked = r.tags.filter((t) => t.error).length;
+              return `Found ${r.added} new top post${r.added === 1 ? "" : "s"} from ${r.tags.length} hashtags (about $${r.estimatedCostUsd.toFixed(2)}).${blocked ? ` ${blocked} hashtag${blocked === 1 ? "" : "s"} blocked by TikTok.` : ""} Press Generate posts to write from them.`;
+            })
+          }
+        >
+          {busy === "find" ? "Searching TikTok…" : "Find top posts"}
+        </button>
         <select value={count} onChange={(e) => setCount(Number(e.target.value))} style={{ width: 80 }}>
           {[1, 3, 5, 10].map((n) => (
             <option key={n} value={n}>
@@ -150,6 +167,7 @@ export function Swipe({ me }: { me: Me }) {
             void run("gen", async () => {
               const r = (await api.swipeGenerate(count)).result;
               setTab("draft");
+              if (r.considered === 0) return "No unused outperforming posts left. Press Find top posts to search TikTok for more.";
               return `Wrote ${r.created} new draft${r.created === 1 ? "" : "s"} from ${r.considered} outperforming posts.${r.failed.length ? ` ${r.failed.length} couldn't pass the rules and were skipped.` : ""}`;
             })
           }
@@ -286,7 +304,8 @@ function SwipeCard({ p, busy, makesImages, onApprove, onEdit, onDecline, onRefre
           ) : (
             "a post"
           )}{" "}
-          · {fmt(s.views)} views · {s.outlierRatio ?? "?"}× the creator's average
+          · {fmt(s.views)} views ·{" "}
+          {s.basis === "followers" ? `${s.outlierRatio ?? "?"}× the creator's followers` : s.basis === null ? "a top post for its hashtag" : `${s.outlierRatio ?? "?"}× the creator's average`}
         </div>
         {p.imageFeedback && (
           <div className="muted" style={{ fontSize: 12 }}>

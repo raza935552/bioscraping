@@ -5,7 +5,7 @@ import { loadEnv } from "@biolinx/core";
 loadEnv();
 
 const { connect, hydrateEnvFromSettings } = await import("@biolinx/db");
-const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize, runLeadIngest, runCustomerioSync, runSwipeSync } =
+const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize, runLeadIngest, runCustomerioSync, runSwipeSync, runSwipeSearch } =
   await import("@biolinx/jobs");
 const { startScheduler } = await import("./scheduler.js");
 
@@ -30,7 +30,9 @@ startScheduler(conn, [
   { name: "metrics-digest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runMetricsDigest(conn.db)) },
   // Sends only posts a person approved (and only when auto-send is on); looks up missed callbacks.
   { name: "swipe-sync", everyMs: 10 * 60 * 1000, runOnBoot: false, fn: async () => void (await runSwipeSync(conn.db)) },
+  // Top posts for the swipe file: only when switched on in Settings and the unused pile runs low.
+  { name: "swipe-search", everyMs: 24 * HOUR, spends: true, fn: async () => void (process.env.SWIPE_SEARCH_DAILY === "true" && (await runSwipeSearch(conn.db, { onlyWhenBelow: 10 }))) },
   // Phase 3+: outreach-dispatch, reply-ingest on a schedule.
 ]);
 
-console.log("[worker] up — idev-sync 30m · rank 6h · referral-expiry 24h · enrich 24h · ingest 24h · customerio 1h · digest 24h · swipe-sync 10m");
+console.log("[worker] up — idev-sync 30m · rank 6h · referral-expiry 24h · enrich 24h · ingest 24h · customerio 1h · digest 24h · swipe-sync 10m · swipe-search 24h");

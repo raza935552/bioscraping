@@ -2,7 +2,7 @@
 // dedupe → verify by profile read → score → pending leads for review.
 // planProfile is the testable core; runLeadIngest wraps it with the DB.
 
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { NICHE_PRIORITY, brandFitForNiche, handleKey, normalizeEmail, normalizeNiche, type Niche } from "@biolinx/core";
 import { createDb, schema, type Db } from "@biolinx/db";
 import { alert, telegramFromEnv } from "@biolinx/notify";
@@ -719,13 +719,13 @@ export function parseDailyLimit(raw: string | null | undefined): number {
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DAILY_LIMIT_USD;
 }
 
-/** Estimated spend of every lead-ingest run that started today, finished or not.
+/** Estimated spend of every lead-ingest and swipe-search run that started today, finished or not.
  *  Runs write their running total after each audience, so a crash still counts. */
 export async function spentTodayUsd(db: Db, now: Date, excludeRunId?: number): Promise<number> {
   const rows = await db
     .select({ id: schema.syncRuns.id, detail: schema.syncRuns.detail })
     .from(schema.syncRuns)
-    .where(and(eq(schema.syncRuns.job, "lead-ingest"), gte(schema.syncRuns.startedAt, startOfBusinessDay(now))));
+    .where(and(inArray(schema.syncRuns.job, ["lead-ingest", "swipe-search"]), gte(schema.syncRuns.startedAt, startOfBusinessDay(now))));
   let total = 0;
   for (const r of rows) {
     if (r.id === excludeRunId) continue;

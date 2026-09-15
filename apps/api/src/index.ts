@@ -56,6 +56,9 @@ import {
   createContentClient,
   declineAndRegenerate,
   redoSwipeImage,
+  runSwipeSearch,
+  unusedSwipeSources,
+  recentSwipeSearches,
   biolinxMakesImages,
   editSwipePost,
   generateSwipeDrafts,
@@ -1230,7 +1233,9 @@ app.get("/api/swipe", { preHandler: requireRole("admin", "ops") }, async (req) =
   for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
   const list = q.status && q.status !== "all" ? rows.filter((r) => r.status === q.status) : rows.filter((r) => r.status !== "declined");
   const origin = (process.env.ADMIN_ORIGIN ?? "https://gemboxpk.com").split(",")[0]!.replace(/\/+$/, "");
+  const [lastSearch] = await recentSwipeSearches(db, 1);
   return {
+    sources: { ...(await unusedSwipeSources(db)), searchDaily: process.env.SWIPE_SEARCH_DAILY === "true", lastSearch: lastSearch ? { at: lastSearch.startedAt, status: lastSearch.status, detail: lastSearch.detail } : null },
     connection: {
       configured: !!process.env.BIOLINX_CONTENT_SECRET,
       autoSend: process.env.BIOLINX_CONTENT_ENABLED === "true",
@@ -1259,6 +1264,13 @@ app.post("/api/swipe/generate", { preHandler: requireRole("admin", "ops") }, asy
   const result = await withMysqlLock(conn.pool, "job:swipe-generate", () => generateSwipeDrafts(db, llm, draftModel(), count));
   if (result === null) return reply.code(409).send({ error: "posts are already being generated" });
   await audit(req, "swipe.generate", "swipe_posts", null, { count, created: result.created, failed: result.failed.length });
+  return { ok: true, result };
+});
+
+app.post("/api/swipe/find-sources", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const result = await withMysqlLock(conn.pool, "job:swipe-search", () => runSwipeSearch(db));
+  if (result === null) return reply.code(409).send({ error: "a search is already running" });
+  await audit(req, "swipe.find_sources", "swipe_sources", null, { added: result.added, cost: result.estimatedCostUsd, skipped: result.skipped ?? null });
   return { ok: true, result };
 });
 

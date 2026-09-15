@@ -18,3 +18,4 @@ export * from "./content/content-rules.js";
 export * from "./content/post-writer.js";
 export * from "./content/swipe.js";
 export * from "./content/swipe-sync.js";
+export * from "./content/swipe-search.js";
