@@ -1,5 +1,5 @@
 // Pre-flight checks for posts bound for the Biolinx content library. Biolinx
-// auto-publishes anything that passes its text and image-text checks, so it is a
+// accepts anything that passes its text and image-text checks as a draft, so it is a
 // compliance filter, not a quality judge: these rules mirror its rejections (so a
 // post is fixed here instead of rejected there) and add our own compliance linter.
 

@@ -145,8 +145,9 @@ implemented and where the engine differs.
   admin Swipe file page, `docs/integrations/biolinx-content-api.md`):
   picks posts with 2×+ their creator's average views, Claude writes three
   original variants, a pre-flight mirrors Biolinx's rejections plus our
-  linter, and a person must Approve before anything is sent (Biolinx
-  auto-publishes whatever passes its own checks). Decline asks "what more do
+  linter, and a person must Approve before anything is sent. Biolinx saves
+  each post it accepts as a draft; it reaches affiliates only when someone
+  presses Publish on Biolinx's Assets tab. Decline asks "what more do
   you need?" and writes a new version. Signed HMAC both ways; callbacks at
   `/webhooks/biolinx/content` are verified on the raw bytes; `swipe-sync`
   worker job every 10 minutes. The writer may state only facts listed in
@@ -175,8 +176,9 @@ implemented and where the engine differs.
 - **Competitors:** 16, seeded from imported leads. Only 1 has a commission
   rate on file, so the under-25% / equal-25% split can't be automated yet.
 - **Outreach:** 9 DM drafts waiting for approval, 1 sent.
-- **Swipe file:** integration deployed; no Biolinx secret saved yet, auto-send
-  off, brand facts empty. 2 drafts from the live test await an image; 2 earlier
+- **Swipe file:** connected 2026-09-15. Secret saved (encrypted); signed test
+  both ways passed (Biolinx answers a signed lookup, our callback URL accepts
+  a signed callback). Auto-send off, brand facts empty, nothing sent yet. 2 drafts from the live test await an image; 2 earlier
   test drafts were declined for stating unverified facts. Only a handful of
   source posts qualify today, so swipe needs its own "top posts" searches to
   scale.
@@ -286,9 +288,9 @@ database dump only decrypts where `.env` has the same key.
    accepted ones and that the rejected one never returns.
 5. Approve the 9 queued DM drafts; the first live check that
    `next_follow_up_date` is written on send.
-6. Swipe file: Biolinx dev sets the callback URL and shares the secret; enter
-   it and `BIOLINX_BRAND_FACTS` on Settings; press Test connection; decide the
-   image generator; approve and send a first small batch.
+6. Swipe file: enter `BIOLINX_BRAND_FACTS` on Settings; decide the image
+   generator; approve and send a first small batch, then Publish it on
+   Biolinx's Assets tab.
 7. Competitor commission rates (Matt or research) and an unsigned-creator
    template, then wire the outreach templates.
 8. LIVE status checks; "not recurring" in scoring.

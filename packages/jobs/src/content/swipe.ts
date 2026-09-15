@@ -1,5 +1,5 @@
 // Swipe file → Biolinx content library. The bioscraper is the quality judge
-// (Biolinx auto-publishes anything that passes its compliance checks), so every
+// (Biolinx checks compliance only, then holds posts as drafts until Publish), so every
 // post is picked from real outperforming posts, written to pass the rules, and
 // approved by a person before it is sent. A declined post is regenerated from the
 // reviewer's feedback as a new version.

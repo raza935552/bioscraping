@@ -1211,8 +1211,8 @@ app.get("/api/activity", { preHandler: requireAuth }, async () => {
 });
 
 // ── Swipe file → Biolinx content library ───────────────────────────────
-// Biolinx auto-publishes posts that pass its compliance checks, so nothing is sent
-// without a person's Approve here. Decline asks what should change and regenerates.
+// Biolinx checks compliance, not quality, so nothing is sent without a person's
+// Approve here (Biolinx then holds each post as a draft until Publish). Decline asks what should change and regenerates.
 
 const CALLBACK_PATH = "/webhooks/biolinx/content";
 const contentClient = () => {

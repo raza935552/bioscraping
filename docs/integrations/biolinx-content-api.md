@@ -17,8 +17,10 @@ Biolinx side. Written 2026-09-15 against the "Biolinx Post Intake API" doc.
    websites, `{CODE}` count, lengths) and our own compliance linter. The best
    passing variant becomes a draft; if none pass, the writer repairs once with
    the exact reasons.
-3. **A person decides.** Biolinx auto-publishes whatever passes its checks, so
-   the quality call is made in our admin (Swipe file page):
+3. **A person decides.** Biolinx checks compliance, not quality, so the quality
+   call is made in our admin (Swipe file page) before anything is sent. Biolinx
+   then saves each accepted post as a draft, and it reaches affiliates only when
+   someone presses Publish on Biolinx's Assets tab:
    - **Approve** — queued for sending. Needs an image and a clean check.
    - **Decline** — the reviewer is asked "What more do you need?", and a new
      version is written from those notes (same source post, version + 1). The
@@ -58,8 +60,9 @@ image link. Images will follow the visual rules below either way.
 
 ## Requests for the Biolinx developer
 
-Because auto-publish is on and nothing on the Biolinx side judges quality,
-these matter most. In priority order:
+Posts now arrive as drafts and need Publish on the Assets tab, which is the
+right safety net. Biolinx's automatic checks still look only at text, so these
+help whoever presses Publish. In priority order:
 
 1. **Visual policy check (safety).** Have Gemini look at the image itself, not
    only its text, and hold or reject: needles or syringes, pills, people using
@@ -68,8 +71,8 @@ these matter most. In priority order:
    no readable words.
 2. **Shape check.** Reject or hold when the real image proportions don't match
    `format` (square 1:1, portrait 9:16, thumbnail 16:9).
-3. **Telegram note for every auto-published post**, with a one-tap retire, so a
-   bad post can be pulled within minutes.
+3. **Telegram note for every new draft**, with a link to publish or discard it,
+   so posts don't sit unreviewed.
 4. **Retire endpoint for us:** `POST /api/content/assets/{external_id}/retire`
    (signed). Our reviewers need to pull a published post from our admin
    without logging into Biolinx. Send `post.retired` as usual.

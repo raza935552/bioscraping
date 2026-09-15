@@ -78,9 +78,10 @@ export function Swipe({ me }: { me: Me }) {
     <>
       <PageInfo title="Swipe file — posts for the affiliate content library">
         The engine studies posts that beat their creator's usual views, writes original Biolinx posts from them, and checks
-        every word against Biolinx's rules. <strong>Biolinx publishes whatever passes its compliance checks</strong>, so the
-        quality call happens here: approve the posts worth sending, or decline and say what should change to get a new
-        version. Nothing is sent without Approve.
+        every word against Biolinx's rules. <strong>Biolinx checks compliance, not quality</strong>, so the quality call
+        happens here: approve the posts worth sending, or decline and say what should change to get a new version.
+        Nothing is sent without Approve. Sent posts arrive at Biolinx as drafts and reach affiliates only after Publish on
+        its Assets tab.
       </PageInfo>
 
       <div className="settings-card" style={{ marginBottom: 16 }}>
