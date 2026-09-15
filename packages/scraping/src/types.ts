@@ -37,6 +37,8 @@ export interface SourceBundle {
   country?: string | null;
   /** Country each post was created in, when the platform stamps it (TikTok locationCreated), raw. */
   postCountries?: Array<string | null>;
+  /** Instagram business account category ("Gym/Physical Fitness Center"), or null for personal/creator accounts. */
+  businessCategory?: string | null;
 }
 
 export interface FetchDeps {

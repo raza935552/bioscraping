@@ -388,6 +388,28 @@ app.put("/api/settings/:section", { preHandler: requireRole("admin") }, async (r
   return { ok: true };
 });
 
+/** Sends one test message with the saved Telegram settings and reports Telegram's answer, so an
+ *  admin can confirm alerts work right after entering the bot token and chat ID. */
+app.post("/api/settings/alerts/test", { preHandler: requireRole("admin"), config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return reply.code(400).send({ error: "Save a bot token and a chat ID first." });
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: `✅ BiolinX Engine test alert from ${req.user!.name}. Failed jobs and the daily digest will arrive here.`, disable_web_page_preview: true }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    await audit(req, "settings.alerts_test", "app_settings", null, { ok: !!body.ok });
+    if (!res.ok || !body.ok) return reply.code(400).send({ error: `Telegram said: ${body.description ?? `HTTP ${res.status}`}` });
+    return { ok: true };
+  } catch (e) {
+    return reply.code(502).send({ error: `Could not reach Telegram: ${(e as Error).message}` });
+  }
+});
+
 // ── Leads ───────────────────────────────────────────────────────────────
 
 app.get("/api/leads", { preHandler: requireAuth }, async (req) => {

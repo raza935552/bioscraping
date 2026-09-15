@@ -112,7 +112,7 @@ describe("fetchInstagram", () => {
       (b) => (sent = b),
     );
     const b = await fetchInstagram({ platform: "instagram", handle: "annie", url: "https://www.instagram.com/annie/" }, d);
-    expect(sent).toEqual({ usernames: ["annie"] });
+    expect(sent).toEqual({ usernames: ["annie"], includeAboutSection: true });
     expect(b.displayName).toBe("Annie August");
     expect(b.bio).toBe("NP · hormones");
     expect(b.followers).toBe(42000);
@@ -239,5 +239,20 @@ describe("live output formats (2026-09-14)", () => {
     expect(b.bio).toBe("I have tattoos and I like cheese.");
     expect(b.followers).toBeNull(); // invariant: Reddit reach stays null
     expect(b.items).toEqual([{ url: "https://www.reddit.com/r/Peptides/comments/1w470yj/x/", text: "Been over 2 years for me", postedAt: "2026-09-01T16:26:08.000Z", likes: 3 }]);
+  });
+});
+
+describe("Instagram About this account (live output 2026-09-15)", () => {
+  it("reads the account country and business category", async () => {
+    const rows = [
+      { username: "lucycongreave", followersCount: 20658, isBusinessAccount: false, businessCategoryName: null, about: { country: "United Kingdom", date_joined: "April 2013" }, latestPosts: [] },
+    ];
+    const fetchImpl = (async () => new Response(JSON.stringify(rows))) as unknown as typeof fetch;
+    const b = await fetchInstagram({ platform: "instagram", handle: "lucycongreave", url: "https://www.instagram.com/lucycongreave/" }, { fetchImpl, apify: { token: "t", actors: {} }, maxItems: 12 });
+    expect(b.country).toBe("United Kingdom");
+    expect(b.businessCategory).toBeNull();
+    const gym = [{ username: "topcorefitnessgym", isBusinessAccount: true, businessCategoryName: "Gym/Physical Fitness Center", about: { country: "United States" }, latestPosts: [] }];
+    const g = await fetchInstagram({ platform: "instagram", handle: "topcorefitnessgym", url: "https://www.instagram.com/topcorefitnessgym/" }, { fetchImpl: (async () => new Response(JSON.stringify(gym))) as unknown as typeof fetch, apify: { token: "t", actors: {} }, maxItems: 12 });
+    expect(g.businessCategory).toBe("Gym/Physical Fitness Center");
   });
 });

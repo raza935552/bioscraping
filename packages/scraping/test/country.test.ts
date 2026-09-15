@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countryFromPosts, countryFromText, resolveCountry } from "../src/country.js";
+import { countryFromCaptions, countryFromPosts, countryFromText, resolveCountry } from "../src/country.js";
 
 describe("countryFromText (bios from the live runs)", () => {
   it.each([
@@ -31,5 +31,17 @@ describe("resolveCountry", () => {
     expect(countryFromPosts(["US", "GB"])).toBeNull();
     expect(countryFromPosts(["US", "US", "US", "GB"])).toBe("US");
     expect(countryFromPosts([null, "", undefined])).toBeNull();
+  });
+});
+
+describe("countryFromCaptions", () => {
+  it("needs two captions naming the same place and none naming another", () => {
+    expect(countryFromCaptions(["Just landed in Sweden for a conference!", "morning routine"])).toBeNull(); // one mention (the US pharmacist case)
+    expect(countryFromCaptions(["back home in Texas", "Houston heat is unreal today"])).toBe("US");
+    expect(countryFromCaptions(["back home in Texas", "Houston heat", "loving London this week"])).toBeNull();
+  });
+  it("captions are the last resort after platform, posts and bio", () => {
+    expect(resolveCountry({ captions: ["Dallas gym day", "Austin, TX meetup"] })).toEqual({ country: "US", source: "captions" });
+    expect(resolveCountry({ bio: "London based", captions: ["Dallas gym day", "Austin, TX meetup"] })).toEqual({ country: "GB", source: "bio" });
   });
 });

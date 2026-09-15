@@ -258,6 +258,7 @@ export const api = {
   deleteCompetitor: (id: number) => request<{ ok: true }>(`/api/competitors/${id}`, { method: "DELETE" }),
   reviewLead: (id: number, body: Record<string, unknown>) => request<{ ok: true }>(`/api/leads/${id}/review`, { method: "POST", body: JSON.stringify(body) }),
   settings: () => request<{ sections: SettingsSection[] }>("/api/settings"),
+  testAlerts: () => request<{ ok: true }>("/api/settings/alerts/test", { method: "POST" }),
   saveSettings: (section: string, values: Record<string, string>) =>
     request<{ ok: true }>(`/api/settings/${section}`, { method: "PUT", body: JSON.stringify(values) }),
 };

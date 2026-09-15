@@ -118,3 +118,12 @@ describe("50-lead run: languages and businesses", () => {
     expect(looksLikeStore("nic.is.fit", "Team BecomingHER helps women 40–65 lose menopause weight")).toBe(false);
   });
 });
+
+describe("Instagram business categories", () => {
+  it("places and sellers are businesses; creator categories are not", () => {
+    expect(looksLikeStore("topcorefitness", "Your goals.", "Gym/Physical Fitness Center")).toBe(true);
+    expect(looksLikeStore("spectrawellnesstampa", "Medicine Redefined", "Medical Center")).toBe(true);
+    expect(looksLikeStore("nic.is.fit", "helps women 40-65", "Health/Beauty")).toBe(false);
+    expect(looksLikeStore("nic.is.fit", "helps women 40-65", "Digital creator")).toBe(false);
+  });
+});

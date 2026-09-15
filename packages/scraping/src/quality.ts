@@ -8,8 +8,9 @@ import type { DiscoveryHit } from "./discovery/types.js";
 
 /** "followers": outside the audience's follower range once the profile read shows the real count
  *  (Instagram search rows carry no follower count, so the range can only be checked after the read). */
-/** "country": evidence places the creator outside the audience's countries (see country.ts). */
-export type QualityReason = "non_english" | "dead" | "off_niche" | "followers" | "country";
+/** "country": evidence places the creator outside the audience's countries (see country.ts).
+ *  "no_read": the profile read failed or found nothing, so reach and activity can't be verified. */
+export type QualityReason = "non_english" | "dead" | "off_niche" | "followers" | "country" | "no_read";
 
 /** Lowercase letters and digits only: "#WeightLoss" and "weight loss" both → "weightloss". */
 export function compact(s: string): string {
@@ -91,11 +92,21 @@ const STORE_BIO = /\b(shop now|order now|our products|free shipping|wholesale|we
 const BUSINESS_HANDLE = /(gym|clinic|studio|medspa|spa$|pharmacy|dental|physio|chiropractic)/;
 // Deliberately narrow: doctors who mention "my clinic" are good creators, so a bare "clinic" doesn't count.
 const BUSINESS_BIO = /\b(med ?spa|fitness studio|ems studio|boutique studio|our (team|clinic|studio|gym|services|patients|members|location)|book (a|your) (consult|consultation|appointment|session)|book now|appointments? available|now open|call (us|now)|franchise|care for (men|women) in|human operating system)\b/i;
-/** A seller or business account rather than a creator: store-like or business-like handle, or storefront or clinic language in the bio. */
-export function looksLikeStore(handle: string, bio: string | null | undefined): boolean {
+// Instagram business categories that are places or sellers, not people who make content.
+const BUSINESS_CATEGORY = /(gym|fitness center|clinic|medical center|hospital|dentist|pharmacy|spa|salon|shopping|retail|store|brand|product|company|restaurant|supplement|med ?spa|wellness center|doctor's office)/i;
+/** A seller or business account rather than a creator: store-like or business-like handle, storefront or clinic
+ *  language in the bio, or an Instagram business category that is a place or seller. */
+export function looksLikeStore(handle: string, bio: string | null | undefined, businessCategory?: string | null): boolean {
   const h = handle.toLowerCase();
   const b = bio ?? "";
-  return /\.(com|co|shop|store|net)$/.test(h) || /(shop|store)/.test(h) || BUSINESS_HANDLE.test(h) || STORE_BIO.test(b) || BUSINESS_BIO.test(b);
+  return (
+    /\.(com|co|shop|store|net)$/.test(h) ||
+    /(shop|store)/.test(h) ||
+    BUSINESS_HANDLE.test(h) ||
+    STORE_BIO.test(b) ||
+    BUSINESS_BIO.test(b) ||
+    (!!businessCategory && BUSINESS_CATEGORY.test(businessCategory))
+  );
 }
 
 export const DEAD_AFTER_DAYS = 180;

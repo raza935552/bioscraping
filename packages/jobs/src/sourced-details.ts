@@ -17,6 +17,7 @@ export interface DetailPost {
 export interface DetailBundle {
   bio?: string | null;
   followers?: number | null;
+  businessCategory?: string | null;
   items?: DetailPost[];
 }
 
@@ -105,7 +106,7 @@ export function sourcedDetails(lead: DetailLead, bundle: DetailBundle | null, no
     postsLast30,
     postsRead: dated.length,
     surfaced,
-    isStore: handle ? looksLikeStore(handle, bio) : false,
+    isStore: handle ? looksLikeStore(handle, bio, bundle?.businessCategory) : false,
     audience: found?.[1] ?? null,
     term: found?.[2] ?? null,
     daysSinceLastPost: last && !Number.isNaN(last.getTime()) ? Math.floor((now.getTime() - last.getTime()) / 86_400_000) : null,

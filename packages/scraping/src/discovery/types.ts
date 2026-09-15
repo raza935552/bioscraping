@@ -69,11 +69,11 @@ export const VERIFY_ITEMS = 12;
 /** USD for one profile verification read of VERIFY_ITEMS posts, per platform,
  *  from each reader's pay-per-event prices (2026-09-14):
  *  TikTok profile scraper $0.002/video + $0.001 sort filter; Instagram profile
- *  scraper $0.0023/profile; YouTube channel scraper $0.001/video; Reddit user
+ *  scraper $0.0023/profile + $0.006 about add-on; YouTube channel scraper $0.001/video; Reddit user
  *  scraper $0.02 start + $0.0015/item for posts and comments. Skool has no read. */
 export const VERIFY_PRICE: Record<DiscoveryPlatform, number> = {
   tiktok: 0.002 * VERIFY_ITEMS + 0.001,
-  instagram: 0.0025,
+  instagram: 0.0023 + 0.006, // profile + "About this account" add-on (country)
   youtube: 0.001 * VERIFY_ITEMS,
   reddit: 0.02 + 0.0015 * VERIFY_ITEMS * 2,
   skool: 0,

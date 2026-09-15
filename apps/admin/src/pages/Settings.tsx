@@ -39,6 +39,16 @@ function SectionForm({ section, onSaved }: { section: SettingsSection; onSaved: 
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState("");
+  const [testMsg, setTestMsg] = useState("");
+  const sendTest = async () => {
+    setTestMsg("Sending…");
+    try {
+      await api.testAlerts();
+      setTestMsg("✓ Test alert sent. Check the Telegram chat.");
+    } catch (e) {
+      setTestMsg((e as Error).message);
+    }
+  };
 
   const set = (k: string, v: string) => {
     setVals((p) => ({ ...p, [k]: v }));
@@ -76,6 +86,14 @@ function SectionForm({ section, onSaved }: { section: SettingsSection; onSaved: 
       <div className="settings-foot">
         {err && <span className="error" style={{ marginRight: "auto" }}>{err}</span>}
         {saved && <span className="ok-text">✓ Saved</span>}
+        {section.id === "alerts" && (
+          <>
+            {testMsg && <span className={testMsg.startsWith("✓") ? "ok-text" : "muted"}>{testMsg}</span>}
+            <button type="button" onClick={() => void sendTest()} title="Save first, then send one message to the chat">
+              Send test alert
+            </button>
+          </>
+        )}
         <button className="primary" disabled={busy}>
           {busy ? "Saving…" : `Save ${section.title.split(" (")[0]}`}
         </button>

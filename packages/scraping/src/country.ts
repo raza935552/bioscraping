@@ -79,13 +79,33 @@ export function countryFromPosts(values: Array<string | null | undefined>): stri
   return ranked[0]![0];
 }
 
-/** Best evidence for a creator's country: platform field, then posts, then bio. */
-export function resolveCountry(sources: { platform?: string | null | undefined; posts?: Array<string | null | undefined> | undefined; bio?: string | null | undefined }): { country: string | null; source: "platform" | "posts" | "bio" | null } {
+/** A country named in at least two captions, with no caption naming another. One mention is not
+ *  evidence: a US pharmacist's single caption about Sweden read as "SE" on 2026-09-15. */
+export function countryFromCaptions(captions: Array<string | null | undefined>): string | null {
+  const counts = new Map<string, number>();
+  for (const c of captions) {
+    const found = countryFromText(c);
+    if (found) counts.set(found, (counts.get(found) ?? 0) + 1);
+  }
+  if (counts.size !== 1) return null;
+  const [country, n] = [...counts.entries()][0]!;
+  return n >= 2 ? country : null;
+}
+
+/** Best evidence for a creator's country: platform field, then posts, then bio, then captions. */
+export function resolveCountry(sources: {
+  platform?: string | null | undefined;
+  posts?: Array<string | null | undefined> | undefined;
+  bio?: string | null | undefined;
+  captions?: Array<string | null | undefined> | undefined;
+}): { country: string | null; source: "platform" | "posts" | "bio" | "captions" | null } {
   const p = countryCode(sources.platform);
   if (p) return { country: p, source: "platform" };
   const fromPosts = countryFromPosts(sources.posts ?? []);
   if (fromPosts) return { country: fromPosts, source: "posts" };
   const fromBio = countryFromText(sources.bio);
   if (fromBio) return { country: fromBio, source: "bio" };
+  const fromCaptions = countryFromCaptions(sources.captions ?? []);
+  if (fromCaptions) return { country: fromCaptions, source: "captions" };
   return { country: null, source: null };
 }

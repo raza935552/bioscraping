@@ -111,15 +111,17 @@ describe("planProfile", () => {
     expect(again.summary.alreadyKnown).toBe(1);
   });
 
-  it("a verify failure is counted and the lead still lands with search-row data only", async () => {
-    const hits = new Map([["#perimenopause", [hit("v")]]]);
-    const boom: VerifyFn = async () => {
-      throw new Error("actor timeout");
+  it("a failed profile read is counted and the person is not saved, nor remembered (it may be a timeout)", async () => {
+    const hits = new Map([["#perimenopause", [hit("v"), hit("private")]]]);
+    const flaky: VerifyFn = async (h) => {
+      if (h.handle === "v") throw new Error("actor timeout");
+      return null; // private or gone
     };
-    const { candidates, summary } = await planProfile(profile, [], hits, emptyKnown(), boom, now);
+    const { candidates, summary } = await planProfile(profile, [], hits, emptyKnown(), flaky, now);
     expect(summary.verifyFailed).toBe(1);
-    expect(candidates[0]?.lead.totalReach).toBeNull(); // never the search-row number
-    expect(candidates[0]?.enrichment).toBeNull();
+    expect(candidates).toEqual([]);
+    expect(summary.quality?.no_read).toBe(2);
+    expect(summary.gated).toEqual([]);
   });
 });
 
@@ -179,7 +181,7 @@ describe("planSearches", () => {
 
   it("the reserve is priced at the audience's priciest profile read and never takes more than half the budget", () => {
     expect(verifyReserveUsd({ dailyCap: 10, spendCapUsd: "2.00", platforms: ["tiktok"] })).toBe(0.25);
-    expect(verifyReserveUsd({ dailyCap: 10, spendCapUsd: "2.00", platforms: ["instagram"] })).toBe(0.025);
+    expect(verifyReserveUsd({ dailyCap: 10, spendCapUsd: "2.00", platforms: ["instagram"] })).toBe(0.083); // profile + About this account
     expect(verifyReserveUsd({ dailyCap: 10, spendCapUsd: "2.00", platforms: ["instagram", "youtube"] })).toBe(0.12);
     expect(verifyReserveUsd({ dailyCap: 500, spendCapUsd: "1.00" })).toBe(0.5);
   });
@@ -290,7 +292,7 @@ describe("quality in planProfile (first live run lessons)", () => {
     const { candidates, summary } = await planProfile(wl, [], hits, emptyKnown(), v, now);
     expect(candidates.map((c) => c.hit.handle)).toEqual(["good"]);
     expect(reads).toBe(1);
-    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0 });
+    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0, no_read: 0 });
   });
 
   it("a dead account after the read is not saved, does not use a slot, and is remembered", async () => {

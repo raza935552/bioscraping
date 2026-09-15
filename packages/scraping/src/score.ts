@@ -175,7 +175,7 @@ export function scoreHit(input: ScoreInput): ScoreResult {
     reasons.push(`GLP-1-only content: "${glp1}" (−30)`);
   }
 
-  if (looksLikeStore(hit.handle, verified?.bio ?? hit.bio)) {
+  if (looksLikeStore(hit.handle, verified?.bio ?? hit.bio, (verified as { businessCategory?: string | null } | null)?.businessCategory)) {
     score -= 25;
     reasons.push("looks like a store, clinic or business, not a creator (−25)");
   }
