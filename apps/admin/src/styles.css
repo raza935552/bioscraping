@@ -313,3 +313,22 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
 .stat-grid .cell .v { font-size: 16px; font-weight: 600; margin-top: 2px; }
 .stat-grid .cell .s { font-size: 11px; color: var(--muted); }
 .modal-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 6px; }
+
+/* Swipe file */
+.swipe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+.swipe-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; }
+.swipe-img { background: var(--surface-2); display: flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; max-width: 100%; }
+.swipe-img.portrait { aspect-ratio: 9 / 12; }
+.swipe-img.thumbnail { aspect-ratio: 16 / 9; }
+.swipe-img img { width: 100%; height: 100%; object-fit: cover; }
+.swipe-img-empty { padding: 18px; text-align: center; }
+.swipe-img-empty .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.swipe-img-empty .v { font-size: 18px; font-weight: 700; margin: 8px 0; }
+.swipe-img-empty .s { font-size: 12px; color: var(--muted); }
+.swipe-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.swipe-hook { font-size: 16px; font-weight: 700; line-height: 1.3; }
+.swipe-caption { white-space: pre-wrap; font-size: 13px; line-height: 1.5; max-height: 220px; overflow: auto; }
+.swipe-caption mark { background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 0 3px; }
+.swipe-problems { margin: 0; padding-left: 18px; color: var(--bad); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip-button { font-size: 12px; padding: 4px 10px; border-radius: 999px; }

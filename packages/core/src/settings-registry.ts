@@ -105,6 +105,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     ],
   },
   {
+    id: "content",
+    title: "Biolinx content library (swipe file)",
+    blurb: "Sends approved swipe posts to the affiliate content library and receives its callbacks. In Biolinx admin: Affiliate content library > Settings > Bioscraper connection.",
+    fields: [
+      { key: "BIOLINX_CONTENT_SECRET", label: "Shared secret", kind: "secret", help: "Copy it from the Bioscraper connection settings in Biolinx. Rotating it there means pasting the new one here." },
+      { key: "BIOLINX_CONTENT_BASE_URL", label: "Biolinx site URL", kind: "text", placeholder: "https://biolinxlabs.com", help: "Blank = https://biolinxlabs.com." },
+      { key: "BIOLINX_CONTENT_ENABLED", label: "Send approved posts automatically", kind: "bool", help: "ON = approved posts go out every 10 minutes. OFF = only the Send now button sends. Nothing is ever sent without Approve." },
+    ],
+  },
+  {
     id: "store",
     title: "Store webhook (biolinxlabs.com)",
     blurb: "Signature secret for order events from the Laravel store.",

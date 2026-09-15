@@ -12,9 +12,10 @@ import { Login } from "./pages/Login.js";
 import { Replies } from "./pages/Replies.js";
 import { Settings } from "./pages/Settings.js";
 import { Signups } from "./pages/Signups.js";
+import { Swipe } from "./pages/Swipe.js";
 import { Team } from "./pages/Team.js";
 
-const WIDE_ROUTES = new Set(["/leads"]);
+const WIDE_ROUTES = new Set(["/leads", "/swipe"]);
 
 function useHashRoute(): string {
   const [route, setRoute] = useState(window.location.hash.slice(1) || "/dashboard");
@@ -54,7 +55,7 @@ export function App() {
   const nav = [
     ["/dashboard", "Dashboard", "📊"],
     ["/leads", "Leads", "🎯"],
-    ...(me.role === "admin" || me.role === "ops" ? ([["/audiences", "Audiences", "🔎"]] as const) : []),
+    ...(me.role === "admin" || me.role === "ops" ? ([["/audiences", "Audiences", "🔎"], ["/swipe", "Swipe file", "🖼️"]] as const) : []),
     ["/approvals", "Send messages", "✉️"],
     ["/email", "Email ops", "📮"],
     ["/replies", "Replies", "💬"],
@@ -70,6 +71,8 @@ export function App() {
         return <Leads me={me} />;
       case "/audiences":
         return <Audiences />;
+      case "/swipe":
+        return <Swipe me={me} />;
       case "/approvals":
         return <Approvals me={me} />;
       case "/email":

@@ -5,7 +5,7 @@ import { loadEnv } from "@biolinx/core";
 loadEnv();
 
 const { connect, hydrateEnvFromSettings } = await import("@biolinx/db");
-const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize, runLeadIngest, runCustomerioSync } =
+const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize, runLeadIngest, runCustomerioSync, runSwipeSync } =
   await import("@biolinx/jobs");
 const { startScheduler } = await import("./scheduler.js");
 
@@ -28,7 +28,9 @@ startScheduler(conn, [
   { name: "lead-ingest", everyMs: 24 * HOUR, spends: true, fn: async () => void (await runLeadIngest(conn.db)) },
   { name: "customerio-sync", everyMs: HOUR, runOnBoot: true, fn: async () => void (await runCustomerioSync(conn.db)) },
   { name: "metrics-digest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runMetricsDigest(conn.db)) },
+  // Sends only posts a person approved (and only when auto-send is on); looks up missed callbacks.
+  { name: "swipe-sync", everyMs: 10 * 60 * 1000, runOnBoot: false, fn: async () => void (await runSwipeSync(conn.db)) },
   // Phase 3+: outreach-dispatch, reply-ingest on a schedule.
 ]);
 
-console.log("[worker] up — idev-sync 30m · rank 6h · referral-expiry 24h · enrich 24h · ingest 24h · customerio 1h · digest 24h");
+console.log("[worker] up — idev-sync 30m · rank 6h · referral-expiry 24h · enrich 24h · ingest 24h · customerio 1h · digest 24h · swipe-sync 10m");

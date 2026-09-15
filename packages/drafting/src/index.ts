@@ -27,7 +27,7 @@ export interface DraftResult {
 }
 
 export interface LlmClient {
-  complete(system: string, user: string, model: string): Promise<string>;
+  complete(system: string, user: string, model: string, opts?: { maxTokens?: number }): Promise<string>;
 }
 
 /** Minimal Anthropic Messages API client (fetch-based; mocked in tests). */
@@ -35,7 +35,7 @@ export function anthropicFromEnv(env = process.env, fetchImpl: typeof fetch = fe
   const apiKey = env.ANTHROPIC_API_KEY ?? "";
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY missing");
   return {
-    async complete(system, user, model) {
+    async complete(system, user, model, opts) {
       const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -45,7 +45,7 @@ export function anthropicFromEnv(env = process.env, fetchImpl: typeof fetch = fe
         },
         body: JSON.stringify({
           model,
-          max_tokens: 1024,
+          max_tokens: opts?.maxTokens ?? 1024,
           system,
           messages: [{ role: "user", content: user }],
         }),

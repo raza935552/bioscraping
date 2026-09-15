@@ -177,6 +177,52 @@ export const sourcingProfiles = mysqlTable("sourcing_profiles", {
   updatedAt: updatedAt(),
 });
 
+/** Swipe file posts for the Biolinx affiliate content library, one row per version
+ *  (sql/2026-09-15-swipe-posts.sql, docs/integrations/biolinx-content-api.md). */
+export const swipePosts = mysqlTable("swipe_posts", {
+  id: id(),
+  externalId: varchar("external_id", { length: 120 }).notNull(),
+  parentId: int("parent_id"),
+  version: int("version").default(1).notNull(),
+  sourceLeadId: int("source_lead_id"),
+  sourcePostUrl: varchar("source_post_url", { length: 500 }),
+  sourcePlatform: varchar("source_platform", { length: 16 }),
+  sourceStats: json("source_stats"),
+  niche: varchar("niche", { length: 40 }),
+  biolinxNiche: varchar("biolinx_niche", { length: 16 }).notNull(),
+  platform: varchar("platform", { length: 16 }).notNull(),
+  format: varchar("format", { length: 12 }).notNull(),
+  hookType: varchar("hook_type", { length: 16 }),
+  angle: varchar("angle", { length: 255 }),
+  hook: varchar("hook", { length: 120 }).notNull(),
+  caption: text("caption").notNull(),
+  hashtags: json("hashtags"),
+  imageText: varchar("image_text", { length: 120 }),
+  imageBrief: text("image_brief"),
+  imageUrl: varchar("image_url", { length: 1000 }),
+  reviewerFeedback: text("reviewer_feedback"),
+  preflight: json("preflight"),
+  /** Our side: draft | approved | declined | sending | sent | rejected | duplicate | failed.
+   *  Biolinx's own status is biolinx_status. */
+  status: varchar("status", { length: 16 }).default("draft").notNull(),
+  decidedByUserId: int("decided_by_user_id"),
+  decidedAt: datetime("decided_at"),
+  sentAt: datetime("sent_at"),
+  biolinxId: int("biolinx_id"),
+  biolinxStatus: varchar("biolinx_status", { length: 16 }),
+  mediaUrl: varchar("media_url", { length: 1000 }),
+  mediaId: int("media_id"),
+  imageCheck: varchar("image_check", { length: 12 }),
+  issues: json("issues"),
+  reasons: json("reasons"),
+  added: json("added"),
+  error: text("error"),
+  lastEvent: varchar("last_event", { length: 24 }),
+  lastEventAt: datetime("last_event_at"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [uniqueIndex("swipe_external_id").on(t.externalId), index("swipe_status").on(t.status)]);
+
 /** Matt's competitor list: their affiliates are the tier-one target. */
 export const competitors = mysqlTable("competitors", {
   id: id(),

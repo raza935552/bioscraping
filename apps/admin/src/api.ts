@@ -257,6 +257,14 @@ export const api = {
     request<{ ok: true; id?: number }>(id ? `/api/competitors/${id}` : "/api/competitors", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
   deleteCompetitor: (id: number) => request<{ ok: true }>(`/api/competitors/${id}`, { method: "DELETE" }),
   reviewLead: (id: number, body: Record<string, unknown>) => request<{ ok: true }>(`/api/leads/${id}/review`, { method: "POST", body: JSON.stringify(body) }),
+  swipe: (status: string) => request<SwipePayload>(`/api/swipe?status=${encodeURIComponent(status)}`),
+  swipeGenerate: (count: number) => request<{ ok: true; result: { considered: number; created: number; failed: Array<{ source: string; reason: string }> } }>("/api/swipe/generate", { method: "POST", body: JSON.stringify({ count }) }),
+  swipeEdit: (id: number, body: Record<string, unknown>) => request<{ ok: true; preflight: string[] }>(`/api/swipe/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  swipeApprove: (id: number) => request<{ ok: true }>(`/api/swipe/${id}/approve`, { method: "POST" }),
+  swipeDecline: (id: number, feedback: string) => request<{ ok: true; newId: number }>(`/api/swipe/${id}/decline`, { method: "POST", body: JSON.stringify({ feedback }) }),
+  swipeSend: () => request<{ ok: true; result: { sent: number; accepted: number; duplicates: number; rejected: number; remainingToday: number | null; error?: string } }>("/api/swipe/send", { method: "POST" }),
+  swipeRefresh: (id: number) => request<{ ok: true }>(`/api/swipe/${id}/refresh`, { method: "POST" }),
+  swipeTestConnection: () => request<{ ok: true; message: string }>("/api/swipe/test-connection", { method: "POST" }),
   settings: () => request<{ sections: SettingsSection[] }>("/api/settings"),
   testAlerts: () => request<{ ok: true }>("/api/settings/alerts/test", { method: "POST" }),
   saveSettings: (section: string, values: Record<string, string>) =>
@@ -350,3 +358,47 @@ export interface SignupRow {
 }
 
 export { ApiError };
+
+export interface SwipePost {
+  id: number;
+  externalId: string;
+  parentId: number | null;
+  version: number;
+  sourcePostUrl: string | null;
+  sourcePlatform: string | null;
+  sourceStats: { views?: number; likes?: number | null; comments?: number | null; outlierRatio?: number; text?: string } | null;
+  niche: string | null;
+  biolinxNiche: string;
+  platform: string;
+  format: string;
+  hookType: string | null;
+  angle: string | null;
+  hook: string;
+  caption: string;
+  hashtags: string[] | null;
+  imageText: string | null;
+  imageBrief: string | null;
+  imageUrl: string | null;
+  reviewerFeedback: string | null;
+  preflight: string[] | null;
+  status: string;
+  decidedAt: string | null;
+  sentAt: string | null;
+  biolinxId: number | null;
+  biolinxStatus: string | null;
+  mediaUrl: string | null;
+  imageCheck: string | null;
+  issues: string[] | null;
+  reasons: string[] | null;
+  added: string[] | null;
+  error: string | null;
+  lastEvent: string | null;
+  lastEventAt: string | null;
+  createdAt: string;
+}
+
+export interface SwipePayload {
+  connection: { configured: boolean; autoSend: boolean; baseUrl: string; callbackUrl: string };
+  counts: Record<string, number>;
+  posts: SwipePost[];
+}

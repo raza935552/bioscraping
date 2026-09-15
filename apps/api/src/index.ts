@@ -48,6 +48,18 @@ import {
   runEnrichPersonalize,
   runIdevSync,
   runLeadIngest,
+  applyBiolinxPost,
+  applyCallback,
+  approveSwipePost,
+  cleanHashtags,
+  contentConfigFromEnv,
+  createContentClient,
+  declineAndRegenerate,
+  editSwipePost,
+  generateSwipeDrafts,
+  sendApprovedSwipePosts,
+  verifySignature,
+  type CallbackBody,
   sourcedDetails,
   sourcedLeadsCsv,
   type DetailBundle,
@@ -1196,6 +1208,168 @@ app.get("/api/activity", { preHandler: requireAuth }, async () => {
     })),
     runs: runs.map((r) => ({ id: r.id, job: r.job, status: r.status, detail: r.detail, startedAt: r.startedAt, finishedAt: r.finishedAt })),
   };
+});
+
+// ── Swipe file → Biolinx content library ───────────────────────────────
+// Biolinx auto-publishes posts that pass its compliance checks, so nothing is sent
+// without a person's Approve here. Decline asks what should change and regenerates.
+
+const CALLBACK_PATH = "/webhooks/biolinx/content";
+const contentClient = () => {
+  const cfg = contentConfigFromEnv();
+  return cfg ? createContentClient(cfg) : null;
+};
+const draftModel = () => process.env.DRAFT_MODEL ?? "claude-sonnet-5";
+
+app.get("/api/swipe", { preHandler: requireRole("admin", "ops") }, async (req) => {
+  const q = (req.query ?? {}) as { status?: string };
+  const rows = await db.select().from(schema.swipePosts).orderBy(desc(schema.swipePosts.id)).limit(500);
+  const counts: Record<string, number> = {};
+  for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  const list = q.status && q.status !== "all" ? rows.filter((r) => r.status === q.status) : rows.filter((r) => r.status !== "declined");
+  const origin = (process.env.ADMIN_ORIGIN ?? "https://gemboxpk.com").split(",")[0]!.replace(/\/+$/, "");
+  return {
+    connection: {
+      configured: !!process.env.BIOLINX_CONTENT_SECRET,
+      autoSend: process.env.BIOLINX_CONTENT_ENABLED === "true",
+      baseUrl: process.env.BIOLINX_CONTENT_BASE_URL || "https://biolinxlabs.com",
+      callbackUrl: `${origin}${CALLBACK_PATH}`,
+    },
+    counts,
+    posts: list.map((r) => ({
+      ...r,
+      sourcePostUrl: r.sourcePostUrl && /^https?:\/\//.test(r.sourcePostUrl) ? r.sourcePostUrl : null,
+      imageUrl: r.imageUrl && /^https:\/\//.test(r.imageUrl) ? r.imageUrl : null,
+      mediaUrl: r.mediaUrl && /^https:\/\//.test(r.mediaUrl) ? r.mediaUrl : null,
+    })),
+  };
+});
+
+app.post("/api/swipe/generate", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const count = Math.max(1, Math.min(10, Number((req.body as { count?: number } | undefined)?.count) || 3));
+  let llm;
+  try {
+    llm = anthropicFromEnv();
+  } catch (e) {
+    return reply.code(400).send({ error: (e as Error).message });
+  }
+  const result = await withMysqlLock(conn.pool, "job:swipe-generate", () => generateSwipeDrafts(db, llm, draftModel(), count));
+  if (result === null) return reply.code(409).send({ error: "posts are already being generated" });
+  await audit(req, "swipe.generate", "swipe_posts", null, { count, created: result.created, failed: result.failed.length });
+  return { ok: true, result };
+});
+
+app.put("/api/swipe/:id", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const b = (req.body ?? {}) as { hook?: string; caption?: string; hashtags?: string[] | string; imageText?: string; imageUrl?: string | null };
+  const imageUrl = b.imageUrl === undefined ? undefined : b.imageUrl ? String(b.imageUrl).trim().slice(0, 1000) : null;
+  if (imageUrl && !/^https:\/\//i.test(imageUrl)) return reply.code(400).send({ error: "the image link must start with https://" });
+  const r = await editSwipePost(db, id, {
+    ...(b.hook !== undefined ? { hook: String(b.hook).slice(0, 120) } : {}),
+    ...(b.caption !== undefined ? { caption: String(b.caption).slice(0, 2200) } : {}),
+    ...(b.hashtags !== undefined ? { hashtags: cleanHashtags(b.hashtags) } : {}),
+    ...(b.imageText !== undefined ? { imageText: String(b.imageText).slice(0, 120) } : {}),
+    ...(imageUrl !== undefined ? { imageUrl } : {}),
+  });
+  if (!r.ok) return reply.code(409).send({ error: r.reason });
+  await audit(req, "swipe.edit", "swipe_posts", id, { fields: Object.keys(b) });
+  return r;
+});
+
+app.post("/api/swipe/:id/approve", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const r = await approveSwipePost(db, id, req.user!.id);
+  if (!r.ok) return reply.code(409).send({ error: r.reason });
+  await audit(req, "swipe.approve", "swipe_posts", id, {});
+  return r;
+});
+
+app.post("/api/swipe/:id/decline", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const feedback = String((req.body as { feedback?: string } | undefined)?.feedback ?? "").trim();
+  if (feedback.length < 3) return reply.code(400).send({ error: "Tell the writer what should change (what's wrong, what you want instead)." });
+  let llm;
+  try {
+    llm = anthropicFromEnv();
+  } catch (e) {
+    return reply.code(400).send({ error: (e as Error).message });
+  }
+  const r = await declineAndRegenerate(db, llm, draftModel(), id, feedback, req.user!.id);
+  await audit(req, "swipe.decline", "swipe_posts", id, { feedback: feedback.slice(0, 300), regenerated: r.ok ? r.newId : null });
+  if (!r.ok) return reply.code(409).send({ error: r.reason });
+  return r;
+});
+
+app.post("/api/swipe/send", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const client = contentClient();
+  if (!client) return reply.code(400).send({ error: "Add the Biolinx shared secret in Settings first." });
+  const r = await withMysqlLock(conn.pool, "job:swipe-sync", () => sendApprovedSwipePosts(db, client));
+  if (r === null) return reply.code(409).send({ error: "a send is already running" });
+  await audit(req, "swipe.send", "swipe_posts", null, r);
+  return { ok: true, result: r };
+});
+
+app.post("/api/swipe/:id/refresh", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const client = contentClient();
+  if (!client) return reply.code(400).send({ error: "Add the Biolinx shared secret in Settings first." });
+  const [row] = await db.select().from(schema.swipePosts).where(eq(schema.swipePosts.id, id));
+  if (!row) return reply.code(404).send({ error: "post not found" });
+  try {
+    const post = await client.getPost(row.externalId);
+    if (!post) return reply.code(404).send({ error: "Biolinx doesn't know this post (it may not have been sent)." });
+    await applyBiolinxPost(db, post, null);
+    return { ok: true, post };
+  } catch (e) {
+    return reply.code(502).send({ error: (e as Error).message });
+  }
+});
+
+/** Proves the secret and URL work without creating anything: a signed lookup of an id that
+ *  can't exist should come back 404. 401 means a wrong secret, 503 means receiving is off. */
+app.post("/api/swipe/test-connection", { preHandler: requireRole("admin"), config: { rateLimit: { max: 6, timeWindow: "1 minute" } } }, async (req, reply) => {
+  const client = contentClient();
+  if (!client) return reply.code(400).send({ error: "Add the Biolinx shared secret in Settings first." });
+  try {
+    const post = await client.getPost(`bs-connection-test-${Date.now()}`);
+    await audit(req, "swipe.test_connection", "swipe_posts", null, { ok: true });
+    return { ok: true, message: post ? "Connected (unexpected: a test id exists)." : "Connected: Biolinx accepted our signature." };
+  } catch (e) {
+    await audit(req, "swipe.test_connection", "swipe_posts", null, { ok: false, error: (e as Error).message.slice(0, 200) });
+    return reply.code(502).send({ error: (e as Error).message });
+  }
+});
+
+// Callbacks from Biolinx. The signature covers the exact bytes, so this route parses
+// JSON itself from the raw body instead of using Fastify's re-serializable parse.
+await app.register(async (scope) => {
+  scope.removeContentTypeParser("application/json");
+  scope.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: 1_000_000 }, (_req, body, done) => done(null, body));
+  scope.post(CALLBACK_PATH, async (req, reply) => {
+    const secret = process.env.BIOLINX_CONTENT_SECRET;
+    if (!secret) return reply.code(503).send({ error: "content secret not configured" });
+    const raw = typeof req.body === "string" ? req.body : "";
+    const check = verifySignature({
+      timestamp: req.headers["x-biolinx-timestamp"] as string | undefined,
+      signature: req.headers["x-biolinx-signature"] as string | undefined,
+      rawBody: raw,
+      secret,
+    });
+    if (!check.ok) {
+      req.log.warn({ reason: check.reason }, "biolinx callback refused");
+      return reply.code(401).send({ error: "bad signature" });
+    }
+    let body: CallbackBody;
+    try {
+      body = JSON.parse(raw) as CallbackBody;
+    } catch {
+      return reply.code(400).send({ error: "invalid JSON" });
+    }
+    const known = await applyCallback(db, body);
+    await db.insert(schema.auditLog).values({ actorUserId: null, actorJob: "biolinx-callback", action: `swipe.${body.event ?? "unknown"}`, subjectTable: "swipe_posts", subjectId: null, detail: { external_id: body.post?.external_id, status: body.post?.status, image_check: body.post?.image_check, known } });
+    // Unknown ids still get a 2xx so Biolinx doesn't retry something we can never match.
+    return { received: true, known };
+  });
 });
 
 // ── Store webhooks (Laravel PR, Phase 5) ────────────────────────────────
