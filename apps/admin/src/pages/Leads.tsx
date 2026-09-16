@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type SamplePost, type SourcedFacets } from "../api.js";
 import { Modal, PageInfo, Pagination } from "../components.js";
+import { LeadBubbleCell } from "../leadBubble.js";
 import { PATH_LABEL, BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
 
 const VIEWS: Array<[string, string]> = [
@@ -334,7 +335,7 @@ export function Leads({ me }: { me: Me }) {
         <table className="sourced">
           <thead>
             <tr>
-              {SORTS.map(([col, label, help]) => (
+              {SORTS.map(([col, label, help]) => [
                 <th
                   key={col}
                   className={`sortable ${sort === col ? "active" : ""}`}
@@ -343,8 +344,9 @@ export function Leads({ me }: { me: Me }) {
                 >
                   {label}
                   {sort === col ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
-                </th>
-              ))}
+                </th>,
+                col === "name" ? <th key="found" title="How we found them and what to do next. Hover for details.">Found · next step</th> : null,
+              ])}
               <th>Notes</th>
               <th>Profile</th>
             </tr>
@@ -375,6 +377,9 @@ export function Leads({ me }: { me: Me }) {
                     {l.details?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">store</span>}
                   </div>
                   {l.details?.bio && <div className="bio" title={l.details.bio}>{l.details.bio}</div>}
+                </td>
+                <td>
+                  <LeadBubbleCell l={l} />
                 </td>
                 <td>
                   {l.details?.niche ?? l.niche ?? "—"}
@@ -757,6 +762,7 @@ interface SourcedTableProps {
 const SOURCED_COLUMNS: Array<[string | null, string, string?]> = [
   ["score", "Score"],
   ["name", "Creator"],
+  [null, "Found · next step", "How we found them and what to do next. Hover for details."],
   ["niche", "Niche"],
   ["platform", "Platform"],
   ["reach", "Reach", "Followers from a real profile read"],
@@ -814,6 +820,9 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
                     {d?.term ? <>via <strong>{d.term}</strong>{d.audience ? ` · ${d.audience}` : ""}</> : l.sourcingReason}
                   </div>
                   {l.rejectedReason && <div className="chip failed" style={{ marginTop: 4 }}>rejected: {l.rejectedReason}</div>}
+                </td>
+                <td>
+                  <LeadBubbleCell l={l} />
                 </td>
                 <td>
                   {d?.niche ?? l.niche ?? "—"}

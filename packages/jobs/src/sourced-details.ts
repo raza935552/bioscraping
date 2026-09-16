@@ -27,6 +27,9 @@ export interface DetailLead {
   email?: string | null;
   otherCreatorCompany?: string | null;
   affiliateCode?: string | null;
+  /** Research-board provenance for imported leads ("Social discovery", "Brand roster"...). */
+  source?: string | null;
+  notes?: string | null;
   niche: string | null;
   totalReach: number | null;
   whereFound: string | null;
@@ -54,7 +57,7 @@ export interface SourcedDetails {
   /** Whole days since the last post, or null. */
   daysSinceLastPost: number | null;
   /** How the engine found them, in words: "TikTok keyword search for "Amino Club code"". */
-  channel: { kind: "competitor" | "hashtag" | "keyword" | "community" | null; label: string } | null;
+  channel: { kind: "competitor" | "hashtag" | "keyword" | "community" | "research" | null; label: string } | null;
   /** Where the saved email was written: their bio or one of their posts (with its link). */
   emailSource: { where: "bio" | "post"; url: string | null } | null;
   /** The exact words that show the competitor deal, and the post they're in. */
@@ -62,6 +65,23 @@ export interface SourcedDetails {
 }
 
 const PLATFORM_NAME: Record<string, string> = { tiktok: "TikTok", youtube: "YouTube", instagram: "Instagram", reddit: "Reddit", skool: "Skool" };
+
+const HOSTS: Record<string, string> = { "tiktok.com": "TikTok", "instagram.com": "Instagram", "youtube.com": "YouTube", "reddit.com": "Reddit", "t.me": "Telegram", "x.com": "X", "twitter.com": "X", "skool.com": "Skool" };
+
+/** How an imported research-board lead was found: its source bucket and where the post lives. */
+export function researchChannel(source: string | null | undefined, whereFound: string | null | undefined): SourcedDetails["channel"] {
+  if (!source || source === "sourcing") return null;
+  let where = "";
+  try {
+    if (whereFound) {
+      const host = new URL(whereFound).hostname.replace(/^www\./, "");
+      where = ` (${HOSTS[host] ?? host} post)`;
+    }
+  } catch {
+    /* not a URL */
+  }
+  return { kind: "research", label: `Research board · ${source}${where}` };
+}
 
 /** "found by Biohacker · TikTok via Amino Club code" → how they were found, in words. */
 export function acquisitionChannel(sourcingReason: string | null, platform: string | null | undefined, competitor: string | null | undefined): SourcedDetails["channel"] {
@@ -137,8 +157,11 @@ export function sourcedDetails(lead: DetailLead, bundle: DetailBundle | null, no
   const email = lead.email?.toLowerCase() ?? null;
   const emailHit = email ? texts.find((t) => t.text.toLowerCase().includes(email) || t.text.toLowerCase().replace(/\s*[\[(]\s*at\s*[\])]\s*/g, "@").replace(/\s*[\[(]\s*dot\s*[\])]\s*/g, ".").includes(email)) : null;
   let evidence: SourcedDetails["evidence"] = null;
+  // Research-board leads carry the proof in their notes: Evidence, verbatim: "use code CLAY".
+  const verbatim = (lead.notes ?? "").match(/Evidence, verbatim:\s*["“]([\s\S]{3,400}?)["”](?:\s*\n|\s*$)/);
+  if (verbatim) evidence = { quote: verbatim[1]!.trim(), url: lead.whereFound && /^https?:\/\//.test(lead.whereFound) ? lead.whereFound : null };
   const needles = [lead.affiliateCode, lead.otherCreatorCompany, lead.otherCreatorCompany?.replace(/\s+/g, "")].filter((n): n is string => !!n && n.length >= 3);
-  for (const n of needles) {
+  for (const n of evidence ? [] : needles) {
     const hit = texts.find((t) => t.text.toLowerCase().includes(n.toLowerCase()));
     if (hit) {
       evidence = { quote: quoteAround(hit.text, n)!, url: hit.url };
@@ -147,7 +170,7 @@ export function sourcedDetails(lead: DetailLead, bundle: DetailBundle | null, no
   }
 
   return {
-    channel: acquisitionChannel(lead.sourcingReason, lead.primaryPlatform, lead.otherCreatorCompany),
+    channel: acquisitionChannel(lead.sourcingReason, lead.primaryPlatform, lead.otherCreatorCompany) ?? researchChannel(lead.source, lead.whereFound),
     emailSource: email ? (emailHit ? { where: emailHit.where, url: emailHit.url } : { where: "bio", url: null }) : null,
     evidence,
     handle,

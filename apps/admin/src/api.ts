@@ -133,7 +133,7 @@ export interface SourcedDetails {
   audience: string | null;
   term: string | null;
   daysSinceLastPost: number | null;
-  channel: { kind: "competitor" | "hashtag" | "keyword" | "community" | null; label: string } | null;
+  channel: { kind: "competitor" | "hashtag" | "keyword" | "community" | "research" | null; label: string } | null;
   emailSource: { where: "bio" | "post"; url: string | null } | null;
   evidence: { quote: string; url: string | null } | null;
 }

@@ -332,3 +332,17 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
 .swipe-problems { margin: 0; padding-left: 18px; color: var(--bad); font-size: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .chip-button { font-size: 12px; padding: 4px 10px; border-radius: 999px; }
+
+/* Leads: "Found · next step" cell and its hover bubble (leadBubble.tsx). */
+.bubble-anchor { min-width: 170px; max-width: 230px; cursor: help; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.bubble-channel { font-size: 11.5px; color: var(--muted); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.bubble-anchor .chip { white-space: normal; text-align: left; }
+.bubble { position: fixed; z-index: 1000; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-lift); padding: 10px 14px; font-size: 12.5px; line-height: 1.45; cursor: default; max-height: 70vh; overflow-y: auto; }
+.bubble-section { padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.bubble-section:last-child { border-bottom: 0; }
+.bubble-section .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 700; margin-bottom: 2px; }
+.bubble-step { font-weight: 700; }
+.bubble-step.go { color: var(--good); }
+.bubble-step.wait { color: var(--warn); }
+.bubble-step.stop { color: var(--bad); }
+.bubble-quote { font-style: italic; margin-top: 2px; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acquisitionChannel, quoteAround, sourcedDetails } from "../src/sourced-details.js";
+import { acquisitionChannel, quoteAround, researchChannel, sourcedDetails } from "../src/sourced-details.js";
 
 const now = new Date("2026-09-16T00:00:00Z");
 
@@ -36,5 +36,18 @@ describe("lead dialog: how we found them, contact, competitor evidence", () => {
     expect(d.emailSource).toEqual({ where: "post", url: "https://www.tiktok.com/@pepsquad3/video/2" });
     expect(d.channel?.kind).toBe("competitor");
     expect(quoteAround("nothing", "Amino Club")).toBeNull();
+  });
+
+  it("imported research-board leads show their source and the verbatim evidence from their notes", () => {
+    expect(researchChannel("Social discovery", "https://www.tiktok.com/@717cayden/photo/1")).toEqual({ kind: "research", label: "Research board · Social discovery (TikTok post)" });
+    expect(researchChannel("Deep research", null)?.label).toBe("Research board · Deep research");
+    expect(researchChannel("sourcing", null)).toBeNull();
+    const d = sourcedDetails(
+      { socialProfiles: "TikTok @717cayden", source: "Social discovery", notes: 'Added by LEAD-RUN-2026-08-10. VERIFY REACH.\nEvidence, verbatim: "Get 30% off Amino Club peptides with code DISCOUNT30."', otherCreatorCompany: "Amino Club", niche: null, totalReach: null, whereFound: "https://www.tiktok.com/@717cayden/photo/1", sourcingReason: null, sourcingSample: null, lastPostAt: null },
+      null,
+      now,
+    );
+    expect(d.evidence).toEqual({ quote: "Get 30% off Amino Club peptides with code DISCOUNT30.", url: "https://www.tiktok.com/@717cayden/photo/1" });
+    expect(d.channel?.kind).toBe("research");
   });
 });
