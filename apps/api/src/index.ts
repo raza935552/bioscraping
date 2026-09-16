@@ -13,7 +13,7 @@ import fastifyCors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
 import fastifyStatic from "@fastify/static";
 import fastifyRateLimit from "@fastify/rate-limit";
-import Fastify from "fastify";
+import Fastify, { type FastifyReply } from "fastify";
 import { desc, eq, inArray } from "drizzle-orm";
 import {
   connect,
@@ -27,6 +27,7 @@ import {
 import {
   hasUsableNotes,
   isConverted,
+  DEFAULT_TEMPLATES,
   OUTREACH_PATH_LABEL,
   isQualifiedPath,
   isSp5,
@@ -59,6 +60,17 @@ import {
   declineAndRegenerate,
   redoSwipeImage,
   runSwipeSearch,
+  conversationView,
+  recordFlowSent,
+  recordFlowReply,
+  recordFlowSignup,
+  FlowError,
+  loadOutreachSettings,
+  saveOutreachSettings,
+  flowEventsByLead,
+  flowStepFor,
+  stepSummary,
+  renderFor,
   pathOf,
   ratesById,
   blockUnqualifiedDrafts,
@@ -607,7 +619,14 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     page,
     pageSize,
     totalPages: Math.ceil(filtered.length / pageSize),
-    rows: pageRows.map((l) => ({
+    rows: await (async () => {
+      // The outreach flow's next step for each lead on this page (the table bubble shows it).
+      const settings = await loadOutreachSettings(db);
+      const flows = await flowEventsByLead(db, pageRows.map((l) => l.id));
+      const now = new Date();
+      return pageRows.map((l) => ({ l, flowStep: stepSummary(flowStepFor(paths.get(l.id)!, flows.get(l.id)?.events ?? [], l.id, settings, now)) }));
+    })().then((list) => list.map(({ l, flowStep }) => ({
+      flowStep,
       id: l.id,
       rank: l.conversionRank,
       band: l.rankBand,
@@ -645,7 +664,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       competitorLinked: l.competitorId != null ? competitorById.get(l.competitorId)?.name ?? null : null,
       competitorRatePct: l.competitorId != null ? competitorById.get(l.competitorId)?.commissionPct ?? null : null,
       details: details.get(l.id) ?? null,
-    })),
+    }))),
   };
 });
 
@@ -720,6 +739,78 @@ app.get("/api/leads/filters", { preHandler: requireAuth }, async () => {
     platforms: uniq(rows.map((l) => l.primaryPlatform)),
     subProfiles: uniq(rows.map((l) => l.subProfile)),
   };
+});
+
+// ── Outreach flow (lead dialog): next message, sent, replies, sign-up ────────────
+
+const flowFail = (reply: FastifyReply, e: unknown) => {
+  if (e instanceof FlowError) return reply.code(409).send({ error: e.message });
+  throw e;
+};
+
+app.get("/api/outreach/settings", { preHandler: requireRole("admin", "ops", "operator") }, async () => ({ settings: await loadOutreachSettings(db), defaults: DEFAULT_TEMPLATES }));
+
+app.put("/api/outreach/settings", { preHandler: requireRole("admin", "ops") }, async (req) => {
+  const saved = await saveOutreachSettings(db, req.body, req.user!.id);
+  await audit(req, "outreach.settings.save", "config", null, { templatesEdited: Object.keys(saved.templates), gaps: saved.gaps.length, checkinDays: saved.checkinDays });
+  return { ok: true, settings: saved };
+});
+
+/** Renders every template for a sample lead with the settings being edited, with compliance results. */
+app.post("/api/outreach/preview", { preHandler: requireRole("admin", "ops") }, async (req) => {
+  const { settings: raw } = (req.body ?? {}) as { settings?: unknown };
+  const { outreachSettings } = await import("@biolinx/core");
+  const settings = outreachSettings(raw);
+  const sample = { id: 2, firstName: "Jamie", geoCountry: "US", emailProvenance: null, followUpsSent: 0 };
+  const out: Record<string, ReturnType<typeof renderFor>> = {};
+  for (const id of Object.keys(DEFAULT_TEMPLATES) as Array<keyof typeof DEFAULT_TEMPLATES>) {
+    out[id] = renderFor(id, { ...sample, followUpsSent: id.startsWith("offer") ? 0 : 1 }, "Amino Club", req.user!.name, settings, 0);
+  }
+  return { previews: out };
+});
+
+app.get("/api/leads/:id/outreach", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const gap = (req.query as { gap?: string } | undefined)?.gap;
+  const view = await conversationView(db, id, req.user!.name, { gapIndex: gap != null && gap !== "" ? Number(gap) : null });
+  if (!view) return reply.code(404).send({ error: "not found" });
+  return view;
+});
+
+app.post("/api/leads/:id/outreach/sent", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const b = (req.body ?? {}) as { templateId?: string; body?: string; channel?: string; gapIndex?: number | null };
+  try {
+    const r = await recordFlowSent(db, { leadId: id, templateId: String(b.templateId ?? "") as never, body: String(b.body ?? ""), channel: String(b.channel ?? "") as never, gapIndex: typeof b.gapIndex === "number" ? b.gapIndex : null, userId: req.user!.id });
+    await audit(req, "outreach.sent", "leads", id, { templateId: b.templateId, channel: b.channel, messageId: r.messageId });
+    return { ok: true, ...r };
+  } catch (e) {
+    return flowFail(reply, e);
+  }
+});
+
+app.post("/api/leads/:id/outreach/reply", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const b = (req.body ?? {}) as { kind?: string; body?: string; channel?: string };
+  try {
+    const r = await recordFlowReply(db, { leadId: id, kind: String(b.kind ?? "") as never, body: String(b.body ?? "").slice(0, 5000), channel: String(b.channel ?? "dm"), userId: req.user!.id });
+    await audit(req, "outreach.reply", "leads", id, { kind: b.kind, replyId: r.replyId });
+    return { ok: true, ...r };
+  } catch (e) {
+    return flowFail(reply, e);
+  }
+});
+
+app.post("/api/leads/:id/outreach/signup", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const b = (req.body ?? {}) as { firstName?: string; lastName?: string; email?: string; code?: string };
+  try {
+    const r = await recordFlowSignup(db, { leadId: id, firstName: String(b.firstName ?? ""), lastName: String(b.lastName ?? ""), email: String(b.email ?? ""), code: String(b.code ?? ""), userId: req.user!.id, userName: req.user!.name });
+    await audit(req, "outreach.signup", "signups", r.signupId, { leadId: id });
+    return { ok: true, ...r };
+  } catch (e) {
+    return flowFail(reply, e);
+  }
 });
 
 app.get("/api/leads/:id", { preHandler: requireAuth }, async (req, reply) => {

@@ -13,6 +13,7 @@ import { Replies } from "./pages/Replies.js";
 import { Settings } from "./pages/Settings.js";
 import { Signups } from "./pages/Signups.js";
 import { Swipe } from "./pages/Swipe.js";
+import { Templates } from "./pages/Templates.js";
 import { Team } from "./pages/Team.js";
 
 const WIDE_ROUTES = new Set(["/leads", "/swipe"]);
@@ -55,7 +56,7 @@ export function App() {
   const nav = [
     ["/dashboard", "Dashboard", "📊"],
     ["/leads", "Leads", "🎯"],
-    ...(me.role === "admin" || me.role === "ops" ? ([["/audiences", "Audiences", "🔎"], ["/swipe", "Swipe file", "🖼️"]] as const) : []),
+    ...(me.role === "admin" || me.role === "ops" ? ([["/audiences", "Audiences", "🔎"], ["/templates", "Message templates", "📝"], ["/swipe", "Swipe file", "🖼️"]] as const) : []),
     ["/approvals", "Send messages", "✉️"],
     ["/email", "Email ops", "📮"],
     ["/replies", "Replies", "💬"],
@@ -71,6 +72,8 @@ export function App() {
         return <Leads me={me} />;
       case "/audiences":
         return <Audiences />;
+      case "/templates":
+        return <Templates />;
       case "/swipe":
         return <Swipe me={me} />;
       case "/approvals":

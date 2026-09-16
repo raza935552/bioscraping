@@ -78,8 +78,55 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+export interface TemplateDef {
+  label: string;
+  when: string;
+  source: "marketing" | "drafted";
+  body: string;
+}
+
+export interface OutreachSettings {
+  templates: Record<string, string>;
+  gaps: Array<{ kind: "pleasure" | "pain" | "curiosity"; text: string }>;
+  detailsLink: string;
+  aroDetailsLink: string;
+  aroCommission: string;
+  aroCookie: string;
+  checkinDays: number;
+}
+
+export interface RenderedMessage {
+  templateId: string;
+  label: string;
+  when: string;
+  source: "marketing" | "drafted";
+  text: string;
+  missing: string[];
+  violations: Array<{ rule: string; severity: "block" | "warn"; detail: string }>;
+  blocked: boolean;
+}
+
+export type FlowStep =
+  | { kind: "send"; templateId: string; alternatives: string[]; why: string }
+  | { kind: "wait"; since: string; dueAt: string; lastTemplateId: string; why: string }
+  | { kind: "signup"; why: string }
+  | { kind: "done"; outcome: "not_qualified" | "declined" | "no_reply" | "signed_up"; why: string };
+
+export interface Conversation {
+  path: OutreachPath;
+  qualified: boolean;
+  brand: string | null;
+  step: FlowStep;
+  history: Array<{ type: "sent" | "reply"; at: string; templateId?: string; label: string; body: string | null; channel: string }>;
+  messages: RenderedMessage[];
+  gapIndex: number;
+  gaps: OutreachSettings["gaps"];
+  channels: string[];
+}
+
 export interface LeadRow {
   id: number;
+  flowStep?: { kind: "send" | "wait" | "signup" | "done"; templateId: string | null; label: string; dueAt: string | null; outcome: string | null };
   outreachPath?: OutreachPath;
   competitorLinked?: string | null;
   competitorRatePct?: number | null;
@@ -229,6 +276,16 @@ export const api = {
   runJob: (job: string) => request<{ ok: true; result: unknown }>(`/api/jobs/${job}`, { method: "POST", body: "{}" }),
   leads: (view: string) => request<LeadRow[]>(`/api/leads?view=${encodeURIComponent(view)}`),
   lead: (id: number) => request<LeadDetail>(`/api/leads/${id}`),
+  outreach: (id: number, gap?: number | null) => request<Conversation>(`/api/leads/${id}/outreach${gap != null ? `?gap=${gap}` : ""}`),
+  outreachSent: (id: number, body: { templateId: string; body: string; channel: string; gapIndex: number | null }) =>
+    request<{ ok: true }>(`/api/leads/${id}/outreach/sent`, { method: "POST", body: JSON.stringify(body) }),
+  outreachReply: (id: number, body: { kind: string; body: string; channel: string }) =>
+    request<{ ok: true }>(`/api/leads/${id}/outreach/reply`, { method: "POST", body: JSON.stringify(body) }),
+  outreachSignup: (id: number, body: { firstName: string; lastName: string; email: string; code: string }) =>
+    request<{ ok: true; signupId: number }>(`/api/leads/${id}/outreach/signup`, { method: "POST", body: JSON.stringify(body) }),
+  outreachSettings: () => request<{ settings: OutreachSettings; defaults: Record<string, TemplateDef> }>("/api/outreach/settings"),
+  saveOutreachSettings: (settings: OutreachSettings) => request<{ ok: true; settings: OutreachSettings }>("/api/outreach/settings", { method: "PUT", body: JSON.stringify(settings) }),
+  previewOutreach: (settings: OutreachSettings) => request<{ previews: Record<string, RenderedMessage> }>("/api/outreach/preview", { method: "POST", body: JSON.stringify({ settings }) }),
   leadsPage: (params: URLSearchParams) => request<LeadsPage>(`/api/leads?${params.toString()}`),
   leadFilters: () => request<{ statuses: string[]; platforms: string[]; subProfiles: string[] }>("/api/leads/filters"),
   emailCampaigns: () => request<EmailCampaigns>("/api/email/campaigns"),

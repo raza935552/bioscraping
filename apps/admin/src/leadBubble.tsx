@@ -33,6 +33,11 @@ export function nextStep(l: LeadRow): NextStep {
       return { tone: "stop", title: "Don't message", detail: `${brand} pays ${l.competitorRatePct}%, more than our 25%. The flow has no offer for them.` };
     case "offer1":
     case "offer2": {
+      const f = l.flowStep;
+      if (f?.kind === "wait") return { tone: "wait", title: "Waiting for their reply", detail: `Check-in due ${f.dueAt ? new Date(f.dueAt).toLocaleDateString() : "soon"}. When they answer, open the lead and log the reply; the next message appears.` };
+      if (f?.kind === "signup") return { tone: "go", title: "Record their sign-up", detail: "They sent their details. Open the lead and record the sign-up." };
+      if (f?.kind === "done") return { tone: "stop", title: f.outcome === "no_reply" ? "Closed: no reply" : "Closed", detail: f.label };
+      if (f?.kind === "send" && f.templateId && !f.templateId.startsWith("offer")) return { tone: "go", title: f.label, detail: "Open the lead: the message is ready to copy." };
       const offer = l.outreachPath === "offer1" ? "Offer 1" : "Offer 2";
       const why =
         l.outreachPath === "offer2"
@@ -40,7 +45,7 @@ export function nextStep(l: LeadRow): NextStep {
           : l.competitorRatePct != null
             ? `${brand} pays ${l.competitorRatePct}%, under our 25% for life.`
             : `They promote ${brand}. Pitch our 25% for life.`;
-      if (status === "Not contacted") return { tone: "go", title: `Send ${offer} · ${channel}`, detail: `${why} Use the ${offer} message (soft or direct).${l.affiliateCode ? ` Their code with ${brand} is ${l.affiliateCode}.` : ""}` };
+      if (status === "Not contacted" || f?.kind === "send") return { tone: "go", title: `Send ${offer} · ${channel}`, detail: `${why} Open the lead: the ${offer} message is filled in and ready to copy.${l.affiliateCode ? ` Their code with ${brand} is ${l.affiliateCode}.` : ""}` };
       if (status === "Contacted") return { tone: "wait", title: "Waiting for their reply", detail: `Messaged ${l.lastReachedOut?.slice(0, 10) ?? ""} (touch ${l.followUpsSent}). When they answer, log it: yes → sign-up details, tell me more → program details, no → the next offer.` };
       return { tone: "go", title: "Continue the conversation", detail: `Status: ${status}. Follow the reply flow for ${offer}.` };
     }

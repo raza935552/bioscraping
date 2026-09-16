@@ -105,3 +105,15 @@ describe("L7 — earnings claims", () => {
     expect(ok.some((x) => x.rule === "L7-earnings")).toBe(false);
   });
 });
+
+describe("approved outreach copy (marketing's flow templates, 2026-09-16)", () => {
+  const offer = "want to make more money?\nI'm Raza, a Biolinx partner recruiter, and we can offer you 25% commission on every order (4 life btw).\nThe catch? You'll have to deal with the problems of having more money...\nlmk if you're interested or if we should give your spot to another affiliate!\nhave an amazing day ✌️. Really.";
+  it("allows a commission in the opener and longer copy, and nothing else", () => {
+    const ctx = { channel: "dm" as const, touchNumber: 1, isPublic: false, audience: "prospect" as const };
+    expect(lint(offer, ctx).map((v) => v.rule).sort()).toEqual(["L2-length", "L2-opener-commission"]);
+    expect(lint(offer, { ...ctx, approvedCopy: true })).toEqual([]);
+    expect(lint(`${offer} Check out semaglutide.`, { ...ctx, approvedCopy: true }).map((v) => v.rule)).toContain("L1-drug-name");
+    expect(lint("we can offer you 25% commission — deal?", { ...ctx, approvedCopy: true }).map((v) => v.rule)).toContain("L2-em-dash");
+    expect(lint("we can offer you 25% commission, see biolinxlabs.com", { ...ctx, approvedCopy: true }).map((v) => v.rule)).toContain("L2-opener-link");
+  });
+});

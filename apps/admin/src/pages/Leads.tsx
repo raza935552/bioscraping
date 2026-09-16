@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type SamplePost, type SourcedFacets } from "../api.js";
 import { Modal, PageInfo, Pagination } from "../components.js";
 import { LeadBubbleCell } from "../leadBubble.js";
+import { OutreachPanel } from "../outreachPanel.js";
 import { PATH_LABEL, BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
 
 const VIEWS: Array<[string, string]> = [
@@ -533,6 +534,9 @@ export function Leads({ me }: { me: Me }) {
                 {cell("Status", row.status ?? "—", row.subProfile ? subProfileLabel(row.subProfile).text : undefined)}
               </div>
             </>
+          )}
+          {row && !row.sourcingReview?.match(/pending|rejected/) && (
+            <OutreachPanel row={row} canSend={me.role === "admin" || me.role === "ops" || me.role === "operator"} onChanged={() => void load()} />
           )}
           {row && (d?.channel || row.email || row.competitor || d?.surfaced) && (
             <div className="cards">

@@ -30,6 +30,11 @@ export interface LintContext {
   recipientCountry?: string | null;
   emailProvenance?: "published_business" | "scraped" | "client_provided" | null;
   isSuppressed?: boolean;
+  /** Wording the marketing team wrote for the outreach flow (outreach-templates.ts). Their
+   *  offers name the commission and run past 5 sentences on purpose, so the two L2 rules made
+   *  for AI-written cold messages (no commission in an opener, 5 sentences max) don't apply.
+   *  Every other rule does: drugs, claims, personal use, dashes, links, SKUs, CAN-SPAM, earnings. */
+  approvedCopy?: boolean;
 }
 
 export interface LintViolation {
@@ -67,9 +72,9 @@ export function lint(text: string, ctx: LintContext): LintViolation[] {
     if (/[—–]/.test(text)) push("L2-em-dash", "block", "em/en dash in outbound copy (use a comma or full stop)");
     // Count sentence terminators (whitespace optional — defeats "One.Two.Three").
     const sentences = folded.split(/[.!?]+/).filter((s) => s.trim().length > 0);
-    if (sentences.length > 5) push("L2-length", "block", `${sentences.length} sentences (max 5)`);
+    if (sentences.length > 5 && !ctx.approvedCopy) push("L2-length", "block", `${sentences.length} sentences (max 5)`);
     if (ctx.touchNumber === 1) {
-      if (OPENER_COMMISSION.test(folded)) push("L2-opener-commission", "block", "commission figure in an opener");
+      if (OPENER_COMMISSION.test(folded) && !ctx.approvedCopy) push("L2-opener-commission", "block", "commission figure in an opener");
       // Links in a first message. Email openers may carry ONLY the unsubscribe
       // link; any other domain (scheme-less or 'dot com') is a violation.
       // Strip whole unsubscribe URLs first so their domain token isn't flagged.

@@ -342,6 +342,7 @@ export const signups = mysqlTable("signups", {
   website: varchar("website", { length: 500 }),
   couponWordSuggestion: varchar("coupon_word_suggestion", { length: 64 }),
   recruitedByUserId: int("recruited_by_user_id"), // FK — blank credit is impossible
+  leadId: int("lead_id"), // the lead this sign-up came from (outreach flow)
   recruitedByAffiliateId: int("recruited_by_affiliate_id"), // partner-recruited path
   status: varchar("status", { length: 24 }).default("pending_diana").notNull(),
   restrictedSkuAcknowledged: boolean("restricted_sku_acknowledged").default(false).notNull(), // D11

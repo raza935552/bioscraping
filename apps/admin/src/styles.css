@@ -346,3 +346,16 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
 .bubble-step.wait { color: var(--warn); }
 .bubble-step.stop { color: var(--bad); }
 .bubble-quote { font-style: italic; margin-top: 2px; }
+
+/* Lead dialog: outreach conversation (outreachPanel.tsx). */
+.outreach-panel { margin: 10px 0 14px; display: flex; flex-direction: column; gap: 10px; }
+.outreach-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.outreach-head .k, .outreach-next .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 700; }
+.outreach-history { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.outreach-item { border-left: 3px solid var(--line); padding: 4px 10px; }
+.outreach-item.sent { border-left-color: var(--accent); }
+.outreach-item.reply { border-left-color: var(--good); background: var(--surface-2); }
+.outreach-body { white-space: pre-wrap; font-size: 13px; }
+.outreach-next { border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.chip-button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
