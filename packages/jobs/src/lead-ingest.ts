@@ -948,7 +948,15 @@ export async function runLeadIngest(
   db: Db = createDb(),
   deps?: IngestDeps,
   /** profileId: run just that audience. allActive: run every active audience even if it already ran today (manual test runs). */
-  opts: { profileId?: number; allActive?: boolean } = {},
+  opts: {
+    profileId?: number;
+    allActive?: boolean;
+    /** A requested batch ("get me 20 new leads"): stop after this many new leads across all audiences,
+     *  instead of each audience's daily cap and the review-queue limit. The daily spend limit still applies. */
+    maxNew?: number;
+    /** Spend cap per audience for this run only (still within the daily limit). */
+    spendCapUsd?: number;
+  } = {},
 ): Promise<IngestSummary> {
   const telegram = telegramFromEnv();
   const startedAt = new Date();
@@ -994,13 +1002,13 @@ export async function runLeadIngest(
     // Highest-tier niches spend first, so a tight daily limit cuts the lowest tiers.
     profiles.sort(byNichePriority);
     for (const configured of profiles) {
-      const room = reviewRoom(maxPending, pendingNow, configured.dailyCap);
+      const room = opts.maxNew != null ? { cap: Math.max(0, opts.maxNew - summary.inserted), limited: false } : reviewRoom(maxPending, pendingNow, configured.dailyCap);
       if (room.cap === 0) {
         // Review queue is full: search nothing, spend nothing, leave lastRunAt so tomorrow tries again.
         summary.profiles.push({ ...emptyRunSummary(configured), stoppedBy: "review_full" });
         continue;
       }
-      const { capUsd, limitedByDaily } = effectiveSpendCap(Number(configured.spendCapUsd), limit, round4(spentEarlier + summary.estimatedCostUsd));
+      const { capUsd, limitedByDaily } = effectiveSpendCap(opts.spendCapUsd ?? Number(configured.spendCapUsd), limit, round4(spentEarlier + summary.estimatedCostUsd));
       const profile: ProfileRow = { ...configured, spendCapUsd: capUsd, dailyCap: room.cap };
       const hitsByTerm = new Map<string, DiscoveryHit[]>();
       const termErrors: string[] = [];

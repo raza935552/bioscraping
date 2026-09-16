@@ -2,6 +2,8 @@
 //   (no argument) = the daily set: active audiences that haven't run today
 //   <profileId>   = just that audience
 //   all           = every active audience, even ones that already ran today
+//   --max N       = stop after N new leads (ignores audience caps and the review-queue limit)
+//   --cap USD     = spend cap per audience for this run (the daily limit still applies)
 // Spends real Apify credit. Do not run until the team has approved a live run.
 import { loadEnv } from "@biolinx/core";
 loadEnv();
@@ -9,8 +11,18 @@ const { connect, hydrateEnvFromSettings, withMysqlLock } = await import("@biolin
 const { runLeadIngest } = await import("@biolinx/jobs");
 const conn = connect();
 await hydrateEnvFromSettings(conn.db);
-const arg = process.argv[2];
-const opts = arg === "all" ? { allActive: true } : arg ? { profileId: Number(arg) } : {};
+const argv = process.argv.slice(2);
+const flag = (name: string) => {
+  const i = argv.indexOf(name);
+  if (i < 0) return undefined;
+  const v = Number(argv[i + 1]);
+  argv.splice(i, 2);
+  return Number.isFinite(v) && v > 0 ? v : undefined;
+};
+const maxNew = flag("--max");
+const spendCapUsd = flag("--cap");
+const arg = argv[0];
+const opts = { ...(arg === "all" ? { allActive: true } : arg ? { profileId: Number(arg) } : {}), ...(maxNew ? { maxNew } : {}), ...(spendCapUsd ? { spendCapUsd } : {}) };
 if ("profileId" in opts && !Number.isInteger(opts.profileId)) {
   console.error(`usage: run:ingest [profileId | all] (got "${arg}")`);
   process.exit(1);
