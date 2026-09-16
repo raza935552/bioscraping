@@ -5,6 +5,7 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { NICHE_PRIORITY, brandFitForNiche, handleKey, normalizeEmail, normalizeNiche, type Niche } from "@biolinx/core";
 import { createDb, schema, type Db } from "@biolinx/db";
+import { runRankRecompute } from "./rank-recompute.js";
 import { alert, telegramFromEnv } from "@biolinx/notify";
 import {
   searchUnitPrice,
@@ -24,6 +25,7 @@ import {
   qualityGate,
   emailFromText,
   suggestCompetitors,
+  looksLikeStore,
   findAffiliateCode,
   deadWithoutRead,
   countryFromText,
@@ -126,6 +128,8 @@ export interface ProfileRunSummary {
   quality?: Record<QualityReason, number>;
   /** Handles dropped after a paid profile read (remembered so they aren't read again). */
   gated?: Array<{ key: string; reason: QualityReason }>;
+  /** Competitor affiliates saved straight into the outreach queue. */
+  autoAccepted?: number;
   /** Per search: candidates that reached a quality decision, and how many became leads. */
   termOutcome?: Record<string, { checked: number; kept: number }>;
 }
@@ -278,8 +282,9 @@ export async function planProfile(
   known: KnownPeople,
   verify: VerifyFn,
   now: Date,
-  /** Save only people whose bio or posts name a competitor (the outreach flow can't contact anyone else). */
-  opts: { requireCompetitor?: boolean } = {},
+  /** Save only people whose bio or posts name a competitor (the outreach flow can't contact anyone else).
+   *  autoAccept: a competitor affiliate who isn't a store goes straight to the outreach queue. */
+  opts: { requireCompetitor?: boolean; autoAccept?: boolean } = {},
 ): Promise<{ candidates: Candidate[]; summary: ProfileRunSummary }> {
   const summary: ProfileRunSummary = emptyRunSummary(profile);
   const requireCompetitor = !!opts.requireCompetitor;
@@ -319,7 +324,7 @@ export async function planProfile(
   }
   summary.rejected = rejected;
 
-  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0, no_competitor: 0 };
+  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0, no_competitor: 0, competitor_account: 0 };
   const allowedCountries = (profile.countries ?? []).map((c) => c.toUpperCase());
   const outsideCountries = (c: string | null) => c != null && allowedCountries.length > 0 && !allowedCountries.includes(c);
   const gated: Array<{ key: string; reason: QualityReason }> = [];
@@ -395,6 +400,8 @@ export async function planProfile(
       ? "no_read"
       : requireCompetitor && !s.competitor
         ? "no_competitor"
+        : s.competitor && isCompetitorOwnAccount(h.handle, s.competitor)
+          ? "competitor_account"
         : outOfRange
         ? "followers"
         : outsideCountries(country)
@@ -458,7 +465,11 @@ export async function planProfile(
       promoTrackRecord: s.promoTrackRecord,
       contentOriginal: s.contentOriginal,
       doesLive: null,
-      sourcingReview: "pending",
+      ...(opts.autoAccept && s.competitor && !looksLikeStore(h.handle, v?.bio ?? h.bio, v?.businessCategory)
+        ? // Competitor affiliates skip the manual accept (Raza, 2026-09-16): the outreach flow's first
+          // message is ready at once. Stores stay pending for a person. "auto" marks who decided.
+          { sourcingReview: "accepted", subProfile: "SP1", subProfileConfidence: "auto", enrichmentStatus: "pending" }
+        : { sourcingReview: "pending" }),
       sourcingProfileId: profile.id,
       sourcingReason: `found by ${profile.name} via ${h.term}`,
       sourcingSample: sample,
@@ -847,6 +858,21 @@ export async function dailyLimitUsd(db: Db, env = process.env): Promise<number> 
   return parseDailyLimit(row?.value ?? env.SOURCING_DAILY_SPEND_USD);
 }
 
+/** Admin setting SOURCING_AUTO_ACCEPT: on unless set to false. On = competitor affiliates (not stores)
+ *  skip review and go straight to the outreach queue. */
+export async function autoAcceptSourcing(db: Db, env = process.env): Promise<boolean> {
+  const row = await db.query.appSettings.findFirst({ where: eq(schema.appSettings.key, "SOURCING_AUTO_ACCEPT") });
+  return String(row?.value ?? env.SOURCING_AUTO_ACCEPT ?? "").trim().toLowerCase() !== "false";
+}
+
+/** A competitor's own brand page, not an affiliate: "@atomiklabzofficial" for Atomik Labz (2026-09-16). */
+export function isCompetitorOwnAccount(handle: string, competitor: { name: string; domains?: string[] | null }): boolean {
+  const h = handle.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return [competitor.name, ...(competitor.domains ?? [])]
+    .map((n) => n.toLowerCase().replace(/\.[a-z]{2,}$/, "").replace(/[^a-z0-9]/g, ""))
+    .some((n) => n.length >= 6 && h.includes(n));
+}
+
 /** Admin setting SOURCING_COMPETITOR_ONLY: on unless set to false. On = only competitor searches
  *  run and only people who name a competitor are saved. */
 export async function competitorOnlySourcing(db: Db, env = process.env): Promise<boolean> {
@@ -985,6 +1011,7 @@ export async function runLeadIngest(
     const now = deps.now();
     const limit = await dailyLimitUsd(db);
     const competitorOnly = await competitorOnlySourcing(db);
+    const autoAccept = await autoAcceptSourcing(db);
     const spentEarlier = await spentTodayUsd(db, now, run!.id);
     summary.dailyLimitUsd = limit;
     summary.spentEarlierTodayUsd = spentEarlier;
@@ -1002,7 +1029,13 @@ export async function runLeadIngest(
     // Highest-tier niches spend first, so a tight daily limit cuts the lowest tiers.
     profiles.sort(byNichePriority);
     for (const configured of profiles) {
-      const room = opts.maxNew != null ? { cap: Math.max(0, opts.maxNew - summary.inserted), limited: false } : reviewRoom(maxPending, pendingNow, configured.dailyCap);
+      // With auto-accept on, new leads don't wait for review, so the review-queue limit doesn't hold sourcing back.
+      const room =
+        opts.maxNew != null
+          ? { cap: Math.max(0, opts.maxNew - summary.inserted), limited: false }
+          : autoAccept
+            ? { cap: configured.dailyCap, limited: false }
+            : reviewRoom(maxPending, pendingNow, configured.dailyCap);
       if (room.cap === 0) {
         // Review queue is full: search nothing, spend nothing, leave lastRunAt so tomorrow tries again.
         summary.profiles.push({ ...emptyRunSummary(configured), stoppedBy: "review_full" });
@@ -1030,7 +1063,7 @@ export async function runLeadIngest(
           termErrors.push(`${platform} ${term}: ${(err as Error).message}`);
         }
       }
-      const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now, { requireCompetitor: competitorOnly });
+      const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now, { requireCompetitor: competitorOnly, autoAccept });
       // Vendors creators name that aren't competitors yet, for a person to approve.
       const texts: Array<{ text: string; url: string | null }> = [];
       for (const hits of hitsByTerm.values()) for (const h of hits) texts.push({ text: `${h.bio ?? ""}\n${h.postText ?? ""}`, url: h.postUrl });
@@ -1060,7 +1093,8 @@ export async function runLeadIngest(
       const saved = await saveCandidates(db, candidates, now);
       ps.inserted -= saved.duplicates;
       ps.alreadyKnown += saved.duplicates;
-      pendingNow += ps.inserted;
+      pendingNow += Math.max(0, candidates.filter((c) => c.lead.sourcingReview === "pending").length - saved.duplicates);
+      ps.autoAccepted = candidates.filter((c) => c.lead.sourcingReview === "accepted").length;
       if (room.limited && ps.stoppedBy === "cap") ps.stoppedBy = "review_full";
       await db.update(schema.sourcingProfiles).set({ lastRunAt: now, lastRunSummary: ps }).where(eq(schema.sourcingProfiles.id, profile.id));
       summary.profiles.push(ps);
@@ -1076,6 +1110,8 @@ export async function runLeadIngest(
       .onDuplicateKeyUpdate({ set: { value: suggestions } });
     await db.update(schema.syncRuns).set({ status: "ok", finishedAt: new Date(), detail: summary }).where(eq(schema.syncRuns.id, run!.id));
     console.log(`[lead-ingest] ok — inserted=${summary.inserted} cost≈$${summary.estimatedCostUsd}`);
+    // Rank right away so auto-accepted leads are ordered in the queue now, not at the next 6-hourly run.
+    if (summary.inserted > 0) await runRankRecompute(db).catch((e) => console.error(`[lead-ingest] rank after run failed: ${(e as Error).message}`));
     return summary;
   } catch (err) {
     const message = (err as Error).message;

@@ -123,8 +123,15 @@ export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSe
 
       {step.kind === "send" && current && (
         <div className="outreach-next">
-          <div className="k">Next message</div>
-          <div className="muted" style={{ fontSize: 12.5 }}>{step.why}</div>
+          <div className="k">Your next message</div>
+          <ol className="outreach-steps">
+            <li><strong>Copy message</strong> (button below)</li>
+            <li><strong>Open their profile</strong> and paste it in a DM</li>
+            <li>Come back and press <strong>I sent it</strong></li>
+          </ol>
+          {(conv.messages.length > 1 || isOpener) && (
+          <details className="outreach-change">
+            <summary className="muted">Use a different version (optional)</summary>
           {conv.messages.length > 1 && (
             <div className="chips" style={{ margin: "6px 0" }}>
               {conv.messages.map((m, i) => (
@@ -145,6 +152,8 @@ export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSe
                 ))}
               </select>
             </label>
+          )}
+          </details>
           )}
           <textarea rows={Math.min(16, Math.max(5, text.split("\n").length + 1))} value={text} onChange={(e) => setText(e.target.value)} style={{ width: "100%" }} />
           {current.source === "drafted" && <div className="muted" style={{ fontSize: 12 }}>Draft wording: marketing can rewrite it on Message templates.</div>}
@@ -233,8 +242,9 @@ export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSe
 
       {awaitingReply && step.kind !== "done" && (
         <div className="outreach-next">
-          <div className="k">They replied?</div>
-          <textarea rows={3} value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder="Paste their reply here (optional, but it keeps the history complete)" style={{ width: "100%" }} />
+          <div className="k">When they reply</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>Paste their reply, then press the button that matches. The next message appears above.</div>
+          <textarea rows={3} value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder="Paste their reply here" style={{ width: "100%" }} />
           <div className="modal-actions" style={{ flexWrap: "wrap" }}>
             {REPLY_BUTTONS.map(([kind, label, help]) => (
               <button

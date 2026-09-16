@@ -87,6 +87,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
         placeholder: "50",
       },
       {
+        key: "SOURCING_AUTO_ACCEPT",
+        label: "Competitor affiliates skip review",
+        kind: "bool",
+        help: "ON (and blank) = a new lead who names a competitor goes straight to the outreach queue with the first message ready; stores and brand pages still wait for a person. OFF = every new lead waits for Accept on the Sourced page.",
+      },
+      {
         key: "SOURCING_COMPETITOR_ONLY",
         label: "Competitor affiliates only",
         kind: "bool",

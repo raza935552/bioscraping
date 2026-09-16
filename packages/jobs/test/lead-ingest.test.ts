@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
 import { linkCompetitor } from "../src/qualification.js";
-import { COMPETITOR_FOLLOWER_MIN, followerMinFor, competitorOfTerm, competitorQueries, recordSuggestions, parseMaxPending, reviewRoom, byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
+import { isCompetitorOwnAccount, COMPETITOR_FOLLOWER_MIN, followerMinFor, competitorOfTerm, competitorQueries, recordSuggestions, parseMaxPending, reviewRoom, byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
   id: 1,
@@ -315,7 +315,7 @@ describe("quality in planProfile (first live run lessons)", () => {
     const { candidates, summary } = await planProfile(wl, [], hits, emptyKnown(), v, now);
     expect(candidates.map((c) => c.hit.handle)).toEqual(["good"]);
     expect(reads).toBe(1);
-    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0, no_competitor: 0 });
+    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0, no_competitor: 0, competitor_account: 0 });
   });
 
   it("a competitor search hit that never names a competitor is dropped before any paid read", async () => {
@@ -499,6 +499,18 @@ describe("competitor affiliates only", () => {
     expect(candidates.map((c) => c.hit.handle)).toEqual(["aff"]);
     expect(summary.quality.no_competitor).toBe(1);
     expect(summary.gated).toEqual([{ key: "tiktok:plain", reason: "no_competitor" }]);
+  });
+
+  it("auto-accept: competitor affiliates go straight to the queue as Experts; brand pages are dropped; stores wait for a person", async () => {
+    const v: VerifyFn = async (h) => ({ followers: 20000, bio: h.handle === "shop" ? "Order now, free shipping on all kits" : null, lastPostAt: "2026-09-12T00:00:00Z", isRepostRatio: null, profileUrl: h.profileUrl, items: [{ url: h.profileUrl + "/v", text: "use code AFF10 at Atomik Labz for weight loss research" }] });
+    const atomik = { id: 2, name: "Atomik Labz", domains: ["atomik labz", "atomiklabz"], codePattern: null, codePrefix: null, commissionPct: null };
+    const profile = { id: 1, name: "t", active: true, niche: "Weight-loss seeker", brandFit: null, platforms: ["tiktok"], terms: {}, seedAccounts: null, followerMin: { tiktok: 5000 }, followerMax: {}, activityDays: 30, countries: ["US"], language: "en", matchTerms: ["weight loss"], excludeTerms: [], excludeHandles: [], dailyCap: 10, spendCapUsd: "5.00", lastRunAt: null, lastRunSummary: null } as unknown as ProfileRow;
+    const hit = (handle: string) => ({ platform: "tiktok" as const, handle, profileUrl: `https://www.tiktok.com/@${handle}`, displayName: handle, bio: null, followers: 20000, postUrl: `https://www.tiktok.com/@${handle}/video/1`, postText: "use code AFF10 at Atomik Labz", postedAt: "2026-09-12T00:00:00Z", country: null, isRepost: null, term: "Atomik Labz code" });
+    const { candidates, summary } = await planProfile(profile, [atomik], new Map([["t", [hit("jill"), hit("atomiklabzofficial"), hit("shop")]]]), emptyKnown(), v, new Date("2026-09-16T00:00:00Z"), { requireCompetitor: true, autoAccept: true });
+    expect(candidates.map((c) => [c.hit.handle, c.lead.sourcingReview, c.lead.subProfile ?? null])).toEqual([["jill", "accepted", "SP1"], ["shop", "pending", null]]);
+    expect(summary.quality.competitor_account).toBe(1);
+    expect(isCompetitorOwnAccount("atomiklabzofficial", atomik)).toBe(true);
+    expect(isCompetitorOwnAccount("amylovespeppers", atomik)).toBe(false);
   });
 
   it("vendor suggestions accumulate with counts and example links, and dismissed ones stay dismissed", () => {

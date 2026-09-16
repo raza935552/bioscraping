@@ -62,8 +62,14 @@ implemented and where the engine differs.
 
 ## Invariants (enforced in code, never relax)
 
-- SP5 ("goodwill advocate") leads are never contacted. Sourcing never sets a
-  sub-profile; a reviewer does, SP1 to SP4 only, and rejects SP5s.
+- SP5 ("goodwill advocate") leads are never contacted. A reviewer sets the
+  sub-profile, SP1 to SP4 only, and rejects SP5s. Exception (Raza,
+  2026-09-16, setting `SOURCING_AUTO_ACCEPT`, on unless false): a sourced lead
+  who names a competitor and isn't a store is accepted by sourcing as SP1
+  with `sub_profile_confidence` "auto" and goes straight to the outreach
+  queue; a competitor's own brand page (`competitor_account`) is dropped. The
+  admin shows sub-profiles as creator types (Expert, Beginner, Community
+  leader, Website owner).
 - Blank reach is never defaulted or estimated. Reach comes from a platform
   read or stays null. Reddit reach stays null even though Reddit's reader
   returns an opt-in follower count.

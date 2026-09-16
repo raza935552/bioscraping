@@ -359,3 +359,5 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
 .outreach-next { border-top: 1px solid var(--line-soft); padding-top: 8px; }
 .chip-button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.outreach-steps { margin: 4px 0 8px 18px; padding: 0; font-size: 13px; }
+.outreach-change summary { cursor: pointer; font-size: 12.5px; margin: 4px 0; }
