@@ -69,7 +69,14 @@ implemented and where the engine differs.
   returns an opt-in follower count.
 - The iDev referral tier setting `20` (= 5% of sale) is never changed.
 - Every outbound string passes the compliance linter. Suppressed emails are
-  never sent. Attribution is a foreign key, never a matched string.
+  never sent. Attribution is a foreign key, never a matched string. The
+  marketing team's outreach-flow copy is linted with `approvedCopy`, which
+  skips only the two AI-draft rules (commission in an opener, 5 sentences);
+  every other rule still blocks.
+- Only creators signed with a named competitor are messaged
+  (`core/outreach-path.ts`, the flow chart of 2026-09-16). Unsigned leads and
+  leads whose competitor isn't identified get no drafts; dispatch, approve and
+  the flow's "I sent it" all refuse them.
 - Secrets live in env or the encrypted Settings table, never in logs or the
   repo. PII lives in MySQL only.
 - Only http(s) URLs are ever stored in link columns (XSS guard in admin).
@@ -83,7 +90,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 295 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 316 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -193,6 +200,24 @@ implemented and where the engine differs.
   (`POST /api/content/assets/{id}/image`). The switch stays off until the
   Biolinx dev ships those changes (spec in the integration doc). A pasted
   https image link still works and is sent as `image_url`.
+- **Outreach flow** (Raza + marketing, 2026-09-16): the lead dialog's Outreach
+  panel shows the next message from the flow chart (`core/outreach-flow.ts`):
+  Offer 1 (competitor pays under 25% or rate unknown) or Offer 2 (pays 25%),
+  soft or direct split 50/50 by lead id, opening line rotated; then sign-up
+  ask, program details, recruitment + Aro, referral asks, check-ins (no reply
+  after `checkinDays`, 2 max). The person copies it, sends by hand, presses
+  "I sent it" (messages row, `lint_report.flowTemplate`), logs the reply
+  (replies `classified_as` `flow_yes|flow_tell_me_more|flow_no|flow_no_info`),
+  and records the sign-up (signups.`lead_id`). Wording in
+  `core/outreach-templates.ts`, editable on the Message templates page
+  (config `outreach_templates`: templates, opening lines, details link, Aro
+  commission/cookie/link, check-in days). Marketing's copy had the "free bac
+  water" bet changed to a free order; recruit + Aro, Aro sign-up, Aro details
+  and Aro referral are drafts. Leads link to a competitor row
+  (`leads.competitor_id`, linked from the research board's "other creator
+  company" on each rank run; 48 competitors, 32 added 2026-09-16 inactive for
+  sourcing). The Leads table's "Found · next step" bubble shows the channel,
+  proof, contact and the flow's next step.
 - **Customer.io:** every lead with an email is mirrored as a person hourly and
   on accept. Suppressed addresses go as unsubscribed only. No campaigns are
   triggered by us.
