@@ -64,6 +64,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
       { key: "ANTHROPIC_API_KEY", label: "Anthropic API key", kind: "secret" },
       { key: "DRAFT_MODEL", label: "Drafting model", kind: "text", placeholder: "claude-sonnet-5" },
       { key: "CLASSIFY_MODEL", label: "Reply-classifier model", kind: "text", placeholder: "claude-haiku-4-5-20251001" },
+      {
+        key: "OUTREACH_REPLY_AI",
+        label: "AI reads unclear replies",
+        kind: "bool",
+        help: "When an outreach person pastes a reply, keywords pick Yes / Tell me more / No first. ON = if the keywords are unsure, the reply-classifier model reads it (a fraction of a cent). The person can always change the pick.",
+      },
     ],
   },
   {

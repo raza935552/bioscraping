@@ -112,6 +112,34 @@ export type FlowStep =
   | { kind: "signup"; why: string }
   | { kind: "done"; outcome: "not_qualified" | "declined" | "no_reply" | "signed_up"; why: string };
 
+export interface ReplySuggestion {
+  kind: "yes" | "tell_me_more" | "no" | "no_info";
+  confidence: "high" | "low";
+  reason: string;
+  source: "keywords" | "ai";
+  details: { email: string | null; code: string | null; firstName: string | null; lastName: string | null };
+}
+
+export interface OutreachWork {
+  counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number };
+  next: { leadId: number; bucket: "answer" | "checkin" | "new" } | null;
+  waiting: Array<{ leadId: number; name: string; platform: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
+  lead: {
+    id: number;
+    name: string;
+    handle: string | null;
+    platform: string | null;
+    profileUrl: string | null;
+    followers: number | null;
+    competitor: string | null;
+    code: string | null;
+    email: string | null;
+    country: string | null;
+    evidence: { quote: string; url: string | null } | null;
+  } | null;
+  conversation: Conversation | null;
+}
+
 export interface Conversation {
   path: OutreachPath;
   qualified: boolean;
@@ -283,6 +311,11 @@ export const api = {
     request<{ ok: true }>(`/api/leads/${id}/outreach/reply`, { method: "POST", body: JSON.stringify(body) }),
   outreachSignup: (id: number, body: { firstName: string; lastName: string; email: string; code: string }) =>
     request<{ ok: true; signupId: number }>(`/api/leads/${id}/outreach/signup`, { method: "POST", body: JSON.stringify(body) }),
+  outreachWork: (skip: number[], lead?: number | null) =>
+    request<OutreachWork>(`/api/outreach/work?skip=${skip.join(",")}${lead ? `&lead=${lead}` : ""}`),
+  outreachClassify: (text: string, lastMessageLabel: string | null) =>
+    request<ReplySuggestion>("/api/outreach/classify", { method: "POST", body: JSON.stringify({ text, lastMessageLabel }) }),
+  outreachSkip: (id: number, reason: "gone" | "not_fit") => request<{ ok: true }>(`/api/leads/${id}/outreach/skip`, { method: "POST", body: JSON.stringify({ reason }) }),
   outreachSettings: () => request<{ settings: OutreachSettings; defaults: Record<string, TemplateDef> }>("/api/outreach/settings"),
   saveOutreachSettings: (settings: OutreachSettings) => request<{ ok: true; settings: OutreachSettings }>("/api/outreach/settings", { method: "PUT", body: JSON.stringify(settings) }),
   previewOutreach: (settings: OutreachSettings) => request<{ previews: Record<string, RenderedMessage> }>("/api/outreach/preview", { method: "POST", body: JSON.stringify({ settings }) }),

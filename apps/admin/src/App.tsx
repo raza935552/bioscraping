@@ -14,6 +14,7 @@ import { Settings } from "./pages/Settings.js";
 import { Signups } from "./pages/Signups.js";
 import { Swipe } from "./pages/Swipe.js";
 import { Templates } from "./pages/Templates.js";
+import { Outreach } from "./pages/Outreach.js";
 import { Team } from "./pages/Team.js";
 
 const WIDE_ROUTES = new Set(["/leads", "/swipe"]);
@@ -53,8 +54,10 @@ export function App() {
   if (!checked) return null;
   if (!me) return <Login onDone={refreshMe} />;
 
-  const nav = [
+  // Outreach people (operator role) see only their page and sign-ups.
+  const nav = me.role === "operator" ? ([["/outreach", "Outreach", "💌"], ["/signups", "Signups", "✍️"]] as const) : ([
     ["/dashboard", "Dashboard", "📊"],
+    ["/outreach", "Outreach", "💌"],
     ["/leads", "Leads", "🎯"],
     ...(me.role === "admin" || me.role === "ops" ? ([["/audiences", "Audiences", "🔎"], ["/templates", "Message templates", "📝"], ["/swipe", "Swipe file", "🖼️"]] as const) : []),
     ["/approvals", "Send messages", "✉️"],
@@ -64,7 +67,7 @@ export function App() {
     ["/affiliates", "Affiliates", "🤝"],
     ["/activity", "Activity", "🕡"],
     ...(me.role === "admin" ? ([["/team", "Team", "👥"], ["/settings", "Settings", "⚙️"]] as const) : []),
-  ] as const;
+  ] as const);
 
   const page = () => {
     switch (route) {
@@ -72,6 +75,8 @@ export function App() {
         return <Leads me={me} />;
       case "/audiences":
         return <Audiences />;
+      case "/outreach":
+        return <Outreach me={me} />;
       case "/templates":
         return <Templates />;
       case "/swipe":
@@ -93,7 +98,7 @@ export function App() {
       case "/settings":
         return <Settings />;
       default:
-        return <Dashboard me={me} />;
+        return me.role === "operator" ? <Outreach me={me} /> : <Dashboard me={me} />;
     }
   };
 

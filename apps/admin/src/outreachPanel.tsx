@@ -34,6 +34,14 @@ export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSe
   const [text, setText] = useState("");
   const [channel, setChannel] = useState("");
   const [replyText, setReplyText] = useState("");
+  const [suggested, setSuggested] = useState<{ kind: string; reason: string; source: string } | null>(null);
+  useEffect(() => {
+    if (!replyText.trim()) return setSuggested(null);
+    const t = window.setTimeout(() => {
+      void api.outreachClassify(replyText, null).then((r) => setSuggested(r)).catch(() => {});
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [replyText]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
@@ -245,10 +253,16 @@ export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSe
           <div className="k">When they reply</div>
           <div className="muted" style={{ fontSize: 12.5 }}>Paste their reply, then press the button that matches. The next message appears above.</div>
           <textarea rows={3} value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder="Paste their reply here" style={{ width: "100%" }} />
+          {suggested && (
+            <div className="muted" style={{ fontSize: 12.5 }}>
+              Looks like <strong>{REPLY_LABEL[suggested.kind]}</strong> ({suggested.reason}{suggested.source === "ai" ? ", read by AI" : ""}). Press it, or pick another.
+            </div>
+          )}
           <div className="modal-actions" style={{ flexWrap: "wrap" }}>
             {REPLY_BUTTONS.map(([kind, label, help]) => (
               <button
                 key={kind}
+                className={suggested?.kind === kind ? "primary" : ""}
                 title={help}
                 disabled={!canSend || busy}
                 onClick={() =>

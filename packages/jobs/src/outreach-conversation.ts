@@ -3,7 +3,10 @@
 // every message by hand; nothing here sends anything.
 
 import { and, asc, eq, inArray } from "drizzle-orm";
+import type { LlmClient } from "@biolinx/drafting";
 import {
+  classifyReplyKeywords,
+  type ReplySuggestion,
   CONTACT_CHANNELS,
   DEFAULT_FLOW_OPTIONS,
   DEFAULT_TEMPLATES,
@@ -282,4 +285,111 @@ export function stepSummary(step: FlowStep): { kind: FlowStep["kind"]; templateI
   if (step.kind === "wait") return { kind: "wait", templateId: step.lastTemplateId, label: "Waiting for their reply", dueAt: step.dueAt.toISOString(), outcome: null };
   if (step.kind === "signup") return { kind: "signup", templateId: null, label: "Record their sign-up", dueAt: null, outcome: null };
   return { kind: "done", templateId: null, label: step.why, dueAt: null, outcome: step.outcome };
+}
+
+export type WorkBucket = "answer" | "checkin" | "new";
+
+export interface WorkQueue {
+  counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number };
+  /** The next lead to work on, or null when everything is done. */
+  next: { leadId: number; bucket: WorkBucket } | null;
+  waiting: Array<{ leadId: number; name: string; platform: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
+}
+
+const CLOSED_STATUSES = ["Signed", "Passed", "No", "Signed up"];
+
+/** The outreach person's to-do list, in the order they should work it: replies to answer, then
+ *  check-ins that are due, then new leads by rank. Leads someone else has open are left out. */
+export async function outreachWorkQueue(
+  db: Db,
+  opts: { userId: number; now?: Date; exclude?: Set<number>; dayStart: Date; forceLeadId?: number | null },
+): Promise<WorkQueue> {
+  const now = opts.now ?? new Date();
+  const leads = await db.select().from(schema.leads);
+  const rates = ratesById(await db.select().from(schema.competitors));
+  const settings = await loadOutreachSettings(db);
+  const eligible = leads.filter(
+    (l) =>
+      (l.sourcingReview == null || l.sourcingReview === "accepted") &&
+      !l.isDead &&
+      !(l.subProfile ?? "").toUpperCase().startsWith("SP5") &&
+      !CLOSED_STATUSES.includes(l.status ?? "") &&
+      isQualifiedPath(pathOf(l, rates)),
+  );
+  const flows = await flowEventsByLead(db, eligible.map((l) => l.id));
+  const buckets: Record<WorkBucket, Array<{ leadId: number; sortKey: number }>> = { answer: [], checkin: [], new: [] };
+  const waiting: WorkQueue["waiting"] = [];
+  for (const l of eligible) {
+    const events = flows.get(l.id)?.events ?? [];
+    const step = flowStepFor(pathOf(l, rates), events, l.id, settings, now);
+    const last = events[events.length - 1];
+    if (step.kind === "wait") {
+      waiting.push({ leadId: l.id, name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)", platform: l.primaryPlatform, lastLabel: DEFAULT_TEMPLATES[step.lastTemplateId].label, sentAt: step.since.toISOString(), dueAt: step.dueAt.toISOString() });
+      continue;
+    }
+    if (step.kind === "done") continue;
+    if (last?.type === "reply") buckets.answer.push({ leadId: l.id, sortKey: last.at.getTime() });
+    else if (last?.type === "sent") buckets.checkin.push({ leadId: l.id, sortKey: last.at.getTime() });
+    else buckets.new.push({ leadId: l.id, sortKey: l.conversionRank ?? 1e9 });
+  }
+  for (const b of Object.values(buckets)) b.sort((a, c) => a.sortKey - c.sortKey);
+  waiting.sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+
+  let next: WorkQueue["next"] = null;
+  if (opts.forceLeadId != null) {
+    for (const k of ["answer", "checkin", "new"] as WorkBucket[]) if (buckets[k].some((x) => x.leadId === opts.forceLeadId)) next = { leadId: opts.forceLeadId, bucket: k };
+  }
+  if (!next) {
+    for (const k of ["answer", "checkin", "new"] as WorkBucket[]) {
+      const hit = buckets[k].find((x) => !opts.exclude?.has(x.leadId));
+      if (hit) {
+        next = { leadId: hit.leadId, bucket: k };
+        break;
+      }
+    }
+  }
+
+  const sent = await db.select({ by: schema.messages.sentByUserId, at: schema.messages.sentAt, report: schema.messages.lintReport }).from(schema.messages).where(eq(schema.messages.state, "sent"));
+  const today = sent.filter((m) => m.at && new Date(m.at) >= opts.dayStart && (m.report as { flowTemplate?: string } | null)?.flowTemplate);
+  return {
+    counts: { answer: buckets.answer.length, checkin: buckets.checkin.length, new: buckets.new.length, waiting: waiting.length, sentToday: today.length, sentTodayByMe: today.filter((m) => m.by === opts.userId).length },
+    next,
+    waiting,
+  };
+}
+
+/** Moves a lead out of the outreach person's way: the account is gone, or they're not a fit. */
+export async function skipOutreachLead(db: Db, leadId: number, reason: "gone" | "not_fit"): Promise<void> {
+  if (reason === "gone") await db.update(schema.leads).set({ isDead: true, nextFollowUpDate: null }).where(eq(schema.leads.id, leadId));
+  else await db.update(schema.leads).set({ status: "Passed", nextFollowUpDate: null }).where(eq(schema.leads.id, leadId));
+}
+
+/** Setting OUTREACH_REPLY_AI: "true" = when keywords are unsure, a model reads the reply. */
+export const REPLY_AI_MODEL = "claude-haiku-4-5-20251001";
+
+/** Suggests the button for a pasted reply: keywords, then (if allowed and unsure) a small model. */
+export async function suggestReplyKind(
+  text: string,
+  context: { lastMessageLabel: string | null },
+  llm: LlmClient | null,
+): Promise<ReplySuggestion & { source: "keywords" | "ai" }> {
+  const byKeywords = classifyReplyKeywords(text);
+  if (byKeywords.confidence === "high" || !llm || !text.trim()) return { ...byKeywords, source: "keywords" };
+  try {
+    const raw = await llm.complete(
+      `You sort replies from social media creators to an affiliate recruiting message. Answer with JSON only: {"kind":"yes"|"tell_me_more"|"no"|"no_info","reason":"under 12 words"}.
+yes = they agree, want to join, or sent sign-up details. tell_me_more = they ask a question or want details. no = they decline or aren't interested. no_info = anything else (emoji, thanks, unrelated, unclear).`,
+      `The message they are replying to: ${context.lastMessageLabel ?? "a recruiting message"}\nTheir reply:\n"""${text.slice(0, 1500)}"""`,
+      process.env.CLASSIFY_MODEL || REPLY_AI_MODEL,
+      { maxTokens: 120 },
+    );
+    const m = raw.match(/\{[\s\S]*\}/);
+    const j = m ? (JSON.parse(m[0]) as { kind?: string; reason?: string }) : null;
+    if (j && (REPLY_KINDS as string[]).includes(j.kind ?? "")) {
+      return { kind: j.kind as ReplyKind, confidence: "high", reason: String(j.reason ?? "read by AI").slice(0, 120), details: byKeywords.details, source: "ai" };
+    }
+  } catch {
+    /* fall back to the keyword guess */
+  }
+  return { ...byKeywords, source: "keywords" };
 }

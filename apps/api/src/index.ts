@@ -60,6 +60,10 @@ import {
   declineAndRegenerate,
   redoSwipeImage,
   runSwipeSearch,
+  outreachWorkQueue,
+  skipOutreachLead,
+  suggestReplyKind,
+  startOfBusinessDay,
   SUGGESTIONS_CONFIG_KEY,
   type CompetitorSuggestions,
   conversationView,
@@ -771,6 +775,69 @@ app.post("/api/outreach/preview", { preHandler: requireRole("admin", "ops") }, a
   return { previews: out };
 });
 
+// The Outreach page: one lead at a time. A lead handed to someone stays theirs for 15 minutes so two
+// people working at once don't message the same creator.
+const outreachClaims = new Map<number, { userId: number; until: number }>();
+
+app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operator") }, async (req) => {
+  const q = (req.query ?? {}) as { skip?: string; lead?: string };
+  const me = req.user!;
+  const now = new Date();
+  const exclude = new Set((q.skip ?? "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0));
+  for (const [id, c] of outreachClaims) {
+    if (c.until < now.getTime()) outreachClaims.delete(id);
+    else if (c.userId !== me.id) exclude.add(id);
+  }
+  const forceLeadId = q.lead ? Number(q.lead) : null;
+  const work = await outreachWorkQueue(db, { userId: me.id, now, exclude, dayStart: startOfBusinessDay(now), forceLeadId: forceLeadId && !exclude.has(forceLeadId) ? forceLeadId : null });
+  if (!work.next) return { ...work, lead: null, conversation: null };
+  outreachClaims.set(work.next.leadId, { userId: me.id, until: now.getTime() + 15 * 60_000 });
+  const l = (await db.query.leads.findFirst({ where: eq(schema.leads.id, work.next.leadId) }))!;
+  const bundle = (await latestReadBundles()).get(l.id) ?? null;
+  const d = sourcedDetails(l, bundle, now);
+  const conversation = await conversationView(db, l.id, me.name);
+  return {
+    ...work,
+    conversation,
+    lead: {
+      id: l.id,
+      name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)",
+      handle: d.handle,
+      platform: l.primaryPlatform,
+      profileUrl: profileUrlFor(l),
+      followers: l.totalReach,
+      competitor: conversation?.brand ?? l.otherCreatorCompany,
+      code: l.affiliateCode,
+      email: l.email,
+      country: l.geoCountry,
+      evidence: d.evidence,
+    },
+  };
+});
+
+app.post("/api/outreach/classify", { preHandler: requireRole("admin", "ops", "operator") }, async (req) => {
+  const b = (req.body ?? {}) as { text?: string; lastMessageLabel?: string | null };
+  let llm = null;
+  if (process.env.OUTREACH_REPLY_AI === "true") {
+    try {
+      llm = anthropicFromEnv();
+    } catch {
+      llm = null;
+    }
+  }
+  return suggestReplyKind(String(b.text ?? "").slice(0, 3000), { lastMessageLabel: b.lastMessageLabel ?? null }, llm);
+});
+
+app.post("/api/leads/:id/outreach/skip", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const reason = String((req.body as { reason?: string } | undefined)?.reason ?? "");
+  if (reason !== "gone" && reason !== "not_fit") return reply.code(400).send({ error: "reason must be gone or not_fit" });
+  await skipOutreachLead(db, id, reason);
+  outreachClaims.delete(id);
+  await audit(req, "outreach.skip", "leads", id, { reason });
+  return { ok: true };
+});
+
 app.get("/api/leads/:id/outreach", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
   const id = Number((req.params as { id: string }).id);
   const gap = (req.query as { gap?: string } | undefined)?.gap;
@@ -784,6 +851,7 @@ app.post("/api/leads/:id/outreach/sent", { preHandler: requireRole("admin", "ops
   const b = (req.body ?? {}) as { templateId?: string; body?: string; channel?: string; gapIndex?: number | null };
   try {
     const r = await recordFlowSent(db, { leadId: id, templateId: String(b.templateId ?? "") as never, body: String(b.body ?? ""), channel: String(b.channel ?? "") as never, gapIndex: typeof b.gapIndex === "number" ? b.gapIndex : null, userId: req.user!.id });
+    outreachClaims.delete(id);
     await audit(req, "outreach.sent", "leads", id, { templateId: b.templateId, channel: b.channel, messageId: r.messageId });
     return { ok: true, ...r };
   } catch (e) {
