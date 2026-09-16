@@ -68,7 +68,11 @@ function stageOf(events: FlowEvent[]): TemplateId | null {
 export function afterReply(stage: TemplateId, kind: ReplyKind, path: OutreachPath): FlowStep {
   const send = (templateId: TemplateId, why: string, alternatives: TemplateId[] = []): FlowStep => ({ kind: "send", templateId, alternatives, why });
   if (kind === "no_info") {
-    return SIGNUP_ASKS.includes(stage) ? send("checkin_no_info", "They replied without their details.") : send("checkin_no_info", "They replied but didn't answer. Nudge them.");
+    if (SIGNUP_ASKS.includes(stage)) return send("checkin_no_info", "They replied without their details: nudge them for the four details.");
+    if (stage === "reply3_referral" || stage === "reply3_aro_referral") return { kind: "done", outcome: "declined", why: "They already declined; nothing more to send." };
+    // An unclear answer to an offer or the details: give them the details (or the Aro details) instead of asking for sign-up info they never agreed to.
+    if (stage === "recruit_aro" || stage === "reply2b_aro_details") return send("reply2b_aro_details", "Their answer was unclear: send the Aro details.");
+    return send("reply2_details", "Their answer was unclear: send the program details.");
   }
   switch (stage) {
     case "offer1_soft":

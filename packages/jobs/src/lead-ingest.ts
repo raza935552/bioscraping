@@ -5,7 +5,6 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { NICHE_PRIORITY, brandFitForNiche, handleKey, normalizeEmail, normalizeNiche, type Niche } from "@biolinx/core";
 import { createDb, schema, type Db } from "@biolinx/db";
-import { runRankRecompute } from "./rank-recompute.js";
 import { alert, telegramFromEnv } from "@biolinx/notify";
 import {
   searchUnitPrice,
@@ -25,6 +24,7 @@ import {
   qualityGate,
   emailFromText,
   suggestCompetitors,
+  findTerm,
   looksLikeStore,
   findAffiliateCode,
   deadWithoutRead,
@@ -250,8 +250,17 @@ function audienceRules(profile: ProfileRow) {
 
 /** People in one search's results who pass the audience filters and aren't
  *  already known. Measured against the known set as it was before this run. */
-export function countFresh(profile: ProfileRow, hits: DiscoveryHit[], known: KnownPeople): number {
-  return applyFilters(hits, audienceRules(profile)).kept.filter((h) => !isKnown(h, null, known)).length;
+export function countFresh(profile: ProfileRow, hits: DiscoveryHit[], known: KnownPeople, competitors: CompetitorRule[] = [], now: Date = new Date()): number {
+  // The same follower minimum planProfile applies, or productive competitor searches look empty and rest.
+  return hits.filter((h) => {
+    const namesComp = !!findAffiliateCode(`${h.bio ?? ""}\n${h.postText ?? ""}`, competitors);
+    const min = followerMinFor(profile, h, namesComp, competitors, !!h.postText && !!findAffiliateCode(h.postText, competitors), now);
+    const base = audienceRules(profile);
+    const rules = { ...base, followerMin: { ...base.followerMin } };
+    if (min == null) delete rules.followerMin[h.platform];
+    else rules.followerMin[h.platform] = min;
+    return applyFilters([h], rules).kept.length === 1 && !isKnown(h, null, known);
+  }).length;
 }
 
 export function emptyRunSummary(profile: Pick<ProfileRow, "id" | "name">): ProfileRunSummary {
@@ -284,18 +293,28 @@ export async function planProfile(
   now: Date,
   /** Save only people whose bio or posts name a competitor (the outreach flow can't contact anyone else).
    *  autoAccept: a competitor affiliate who isn't a store goes straight to the outreach queue. */
-  opts: { requireCompetitor?: boolean; autoAccept?: boolean } = {},
+  opts: {
+    requireCompetitor?: boolean;
+    autoAccept?: boolean;
+    /** What the searches cost, counted as Apify bills them (every row, errored searches at their planned
+     *  maximum). Discoverers merge rows by person, so counting hits under-counted the bill. */
+    searchCostUsd?: number;
+    /** Niche → match terms of every audience. Competitor searches are shared by all audiences, so a lead
+     *  they find gets the niche its own words match best, not the niche of whichever audience ran first. */
+    nicheTerms?: Map<string, string[]>;
+  } = {},
 ): Promise<{ candidates: Candidate[]; summary: ProfileRunSummary }> {
   const summary: ProfileRunSummary = emptyRunSummary(profile);
   const requireCompetitor = !!opts.requireCompetitor;
   const spendCap = Number(profile.spendCapUsd);
+  if (opts.searchCostUsd != null) summary.estimatedCostUsd = round4(opts.searchCostUsd);
 
   // Merge by platform:handle; discovery cost is what we already paid for.
   const merged = new Map<string, DiscoveryHit>();
   for (const hits of hitsByTerm.values()) {
     for (const h of hits) {
       summary.hits++;
-      summary.estimatedCostUsd = round4(summary.estimatedCostUsd + searchUnitPrice(h.platform, h.term));
+      if (opts.searchCostUsd == null) summary.estimatedCostUsd = round4(summary.estimatedCostUsd + searchUnitPrice(h.platform, h.term));
       const key = handleKey(h.platform, h.handle);
       if (!merged.has(key)) merged.set(key, h);
     }
@@ -305,7 +324,7 @@ export async function planProfile(
   const names = (h: DiscoveryHit) => !!findAffiliateCode(`${h.bio ?? ""}\n${h.postText ?? ""}`, competitors);
   const groups = new Map<string, DiscoveryHit[]>();
   for (const h of merged.values()) {
-    const min = followerMinFor(profile, h, names(h), competitors);
+    const min = followerMinFor(profile, h, names(h), competitors, !!h.postText && !!findAffiliateCode(h.postText, competitors), now);
     const k = min == null ? "none" : String(min);
     groups.set(k, [...(groups.get(k) ?? []), h]);
   }
@@ -354,7 +373,9 @@ export async function planProfile(
     // must name a competitor in its post or bio: the search's whole point is the code or mention.
     const reason: QualityReason | null = competitorOfTerm(h.term, competitors) && !pre.competitor
       ? "no_mention"
-      : outsideCountries(h.country ?? countryFromText(h.bio)) ? "country" : qualityGate(gateInput(h, null, pre.competitor != null));
+      : pre.competitor && isCompetitorOwnAccount(h.handle, pre.competitor)
+        ? "competitor_account"
+        : outsideCountries(h.country ?? countryFromText(h.bio)) ? "country" : qualityGate(gateInput(h, null, pre.competitor != null));
     if (reason) {
       quality[reason]++;
       track(h, false);
@@ -364,8 +385,18 @@ export async function planProfile(
   });
   const ordered = interleaveByPlatform(fresh, profile.platforms);
 
-  const niche = (normalizeNiche(profile.niche) ?? profile.niche) as Niche;
-  const brandFit = profile.brandFit || brandFitForNiche(niche);
+  const audienceNiche = (normalizeNiche(profile.niche) ?? profile.niche) as Niche;
+  /** A competitor-search lead's niche from its own words; the audience's niche otherwise or when nothing matches. */
+  const nicheFor = (h: DiscoveryHit, v: VerifiedRead | null): Niche => {
+    if (!opts.nicheTerms || !competitorOfTerm(h.term, competitors)) return audienceNiche;
+    const corpus = [h.bio, h.postText, v?.bio, ...(v?.items ?? []).map((i) => i.text)].filter(Boolean).join("\n");
+    let best: { niche: Niche; n: number } | null = null;
+    for (const [n, terms] of opts.nicheTerms) {
+      const count = terms.filter((t) => findTerm(corpus, [t])).length;
+      if (count > 0 && (!best || count > best.n)) best = { niche: n as Niche, n: count };
+    }
+    return best?.niche ?? audienceNiche;
+  };
   const candidates: Candidate[] = [];
 
   for (const h of ordered) {
@@ -390,7 +421,7 @@ export async function planProfile(
     }
 
     const s = scoreHit({ hit: h, verified: v, rules: rulesFor(profile, h), competitors, now });
-    const fMin = followerMinFor(profile, h, !!s.competitor, competitors);
+    const fMin = followerMinFor(profile, h, !!s.competitor, competitors, !!h.postText && !!findAffiliateCode(h.postText, competitors), now);
     const fMax = profile.followerMax?.[h.platform];
     const outOfRange = v?.followers != null && ((fMin != null && v.followers < fMin) || (fMax != null && v.followers > fMax));
     const country = h.country ?? v?.country ?? countryFromText(h.bio);
@@ -413,8 +444,8 @@ export async function planProfile(
               : null;
     if (reason) {
       quality[reason]++;
-      // A failed read may be a timeout: not remembered, so the person gets another chance next run.
-      if (reason !== "no_read") gated.push({ key: handleKey(h.platform, h.handle), reason });
+      // A failed read may be a timeout, and a brand-page match may be wrong: neither is remembered.
+      if (reason !== "no_read" && reason !== "competitor_account") gated.push({ key: handleKey(h.platform, h.handle), reason });
       track(h, false);
       continue;
     }
@@ -439,6 +470,7 @@ export async function planProfile(
       ...(v?.items ?? []).filter((i) => i.url !== h.postUrl).slice(0, 12),
     ];
     const lastPost = v?.lastPostAt ?? h.postedAt ?? null;
+    const leadNiche = nicheFor(h, v);
     const displayName = h.displayName ?? h.handle;
     const lead: typeof schema.leads.$inferInsert = {
       firstName: displayName.split(" ")[0] ?? h.handle,
@@ -450,8 +482,8 @@ export async function planProfile(
       whereFound: h.postUrl,
       totalReach: v?.followers ?? null,
       reachSourceUrl: v ? v.profileUrl : null,
-      niche,
-      brandFit,
+      niche: leadNiche,
+      brandFit: profile.brandFit || brandFitForNiche(leadNiche),
       geoCountry: country,
       status: "Not contacted",
       motion: "A",
@@ -465,7 +497,8 @@ export async function planProfile(
       promoTrackRecord: s.promoTrackRecord,
       contentOriginal: s.contentOriginal,
       doesLive: null,
-      ...(opts.autoAccept && s.competitor && !looksLikeStore(h.handle, v?.bio ?? h.bio, v?.businessCategory)
+      // Auto-accept needs a personal code: a bare mention ("got mine from Amino Club", "Amino Club is a scam") waits for a person.
+      ...(opts.autoAccept && s.competitor && s.affiliateCode && !looksLikeStore(h.handle, v?.bio ?? h.bio, v?.businessCategory)
         ? // Competitor affiliates skip the manual accept (Raza, 2026-09-16): the outreach flow's first
           // message is ready at once. Stores stay pending for a person. "auto" marks who decided.
           { sourcingReview: "accepted", subProfile: "SP1", subProfileConfidence: "auto", enrichmentStatus: "pending" }
@@ -530,6 +563,8 @@ export function applyTermOutcome(stats: TermStats, outcome: Record<string, { che
 }
 
 export const SUGGESTIONS_CONFIG_KEY = "competitor_suggestions";
+/** Rest memory for competitor searches, shared by every audience. */
+export const SHARED_TERM_STATS_KEY = "sourcing_term_stats:competitors";
 export type CompetitorSuggestions = Record<string, { name: string; domain: string | null; count: number; examples: string[]; firstSeen: string; lastSeen: string; dismissed?: boolean }>;
 
 /** Adds this run's vendor mentions to the stored suggestions (config `competitor_suggestions`). */
@@ -550,7 +585,13 @@ export function recordSuggestions(
       next[key] = { name: prev?.name ?? sug.name, domain: prev?.domain ?? sug.domain, count: (prev?.count ?? 0) + 1, examples, firstSeen: prev?.firstSeen ?? now.toISOString(), lastSeen: now.toISOString(), ...(prev?.dismissed ? { dismissed: true } : {}) };
     }
   }
-  return next;
+  // Forget one-off mentions after 30 days, and keep at most 500 suggestions (most-seen first).
+  const cutoff = now.getTime() - 30 * 86_400_000;
+  const kept = Object.entries(next)
+    .filter(([, v]) => v.dismissed || v.count >= 2 || new Date(v.lastSeen).getTime() >= cutoff)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 500);
+  return Object.fromEntries(kept);
 }
 
 const compactName = (s: string) => s.toLowerCase().replace(/\.[a-z]{2,}$/, "").replace(/[^a-z0-9]/g, "");
@@ -676,13 +717,17 @@ export const COMPETITOR_VIRAL_VIEWS = 10_000;
 /** The follower minimum that applies to this hit. */
 export function followerMinFor(
   profile: Pick<ProfileRow, "followerMin">,
-  h: Pick<DiscoveryHit, "platform" | "term" | "views">,
+  h: Pick<DiscoveryHit, "platform" | "term" | "views"> & Partial<Pick<DiscoveryHit, "postedAt">>,
   namesCompetitor: boolean,
-  competitors: Pick<CompetitorRule, "name">[],
+  competitors: Array<{ name: string; domains?: string[] | null }>,
+  /** The viral post itself names the competitor (not just the bio). */
+  postNamesCompetitor = namesCompetitor,
+  now: Date = new Date(),
 ): number | undefined {
   const min = profile.followerMin?.[h.platform] ?? undefined;
   if (!namesCompetitor || !competitorOfTerm(h.term, competitors)) return min;
-  if ((h.views ?? 0) >= COMPETITOR_VIRAL_VIEWS) return undefined;
+  const recent = !!h.postedAt && now.getTime() - new Date(h.postedAt).getTime() <= 60 * 86_400_000;
+  if ((h.views ?? 0) >= COMPETITOR_VIRAL_VIEWS && postNamesCompetitor && recent) return undefined;
   return min == null ? COMPETITOR_FOLLOWER_MIN : Math.min(min, COMPETITOR_FOLLOWER_MIN);
 }
 
@@ -764,7 +809,9 @@ export function planSearches(
   // The rotation steps through competitors by their first phrasing ("<name> code"), which runs first.
   const perCompetitor = profile.platforms.filter((p) => COMPETITOR_NAME_PLATFORMS.has(p)).reduce((a, p) => a + priceOf(p), 0);
   const perDay = perCompetitor > 0 ? Math.min(Math.max(n, 1), Math.max(1, Math.floor(Math.max(0, budgetUsd - audienceCost) / perCompetitor))) : 1;
-  const shift = n > 0 ? (((rotation * perDay) % n) + n) % n : 0;
+  // When a day's budget covers every competitor, still start from a different one each day so the later
+  // phrasings ("discount", domains) reach every competitor over time.
+  const shift = n > 0 ? (((perDay >= n ? rotation : rotation * perDay) % n) + n) % n : 0;
   const rotated = [...competitors.slice(shift), ...competitors.slice(0, shift)];
   const seen = new Map<DiscoveryPlatform, Set<string>>();
   const make = (platform: DiscoveryPlatform, raw: string): PlannedSearch | null => {
@@ -866,11 +913,13 @@ export async function autoAcceptSourcing(db: Db, env = process.env): Promise<boo
 }
 
 /** A competitor's own brand page, not an affiliate: "@atomiklabzofficial" for Atomik Labz (2026-09-16). */
+const OWN_ACCOUNT_SUFFIXES = new Set(["", "official", "officialpage", "labs", "lab", "shop", "store", "co", "hq", "us", "usa", "llc", "inc", "team", "support", "research", "peptides"]);
 export function isCompetitorOwnAccount(handle: string, competitor: { name: string; domains?: string[] | null }): boolean {
   const h = handle.toLowerCase().replace(/[^a-z0-9]/g, "");
+  // The brand's name, then nothing or a company word: "atomiklabzofficial" yes, "passionpeptides" (Ion Peptide) no.
   return [competitor.name, ...(competitor.domains ?? [])]
     .map((n) => n.toLowerCase().replace(/\.[a-z]{2,}$/, "").replace(/[^a-z0-9]/g, ""))
-    .some((n) => n.length >= 6 && h.includes(n));
+    .some((n) => n.length >= 5 && h.startsWith(n) && OWN_ACCOUNT_SUFFIXES.has(h.slice(n.length)));
 }
 
 /** Admin setting SOURCING_COMPETITOR_ONLY: on unless set to false. On = only competitor searches
@@ -998,6 +1047,13 @@ export async function runLeadIngest(
     const profiles = all.filter((p) => (opts.profileId ? p.id === opts.profileId : p.active && (opts.allActive || !ranToday(p, now0))));
     const allCompetitorRows = await db.select().from(schema.competitors);
     const competitors = competitorRules(allCompetitorRows);
+    const sharedRow = await db.query.config.findFirst({ where: eq(schema.config.key, SHARED_TERM_STATS_KEY) });
+    let sharedStats = (sharedRow?.value as TermStats | undefined) ?? {};
+    const nicheTerms = new Map<string, string[]>();
+    for (const p of all) {
+      const n = normalizeNiche(p.niche);
+      if (n) nicheTerms.set(n, [...new Set([...(nicheTerms.get(n) ?? []), ...((p.matchTerms as string[] | null) ?? [])])]);
+    }
     const suggestionsRow = await db.query.config.findFirst({ where: eq(schema.config.key, SUGGESTIONS_CONFIG_KEY) });
     let suggestions = (suggestionsRow?.value as CompetitorSuggestions | undefined) ?? {};
     const known = await loadKnownPeople(db);
@@ -1048,7 +1104,9 @@ export async function runLeadIngest(
       const dayNumber = Math.floor(startOfBusinessDay(now).getTime() / 86_400_000);
       const statsRow = await db.query.config.findFirst({ where: eq(schema.config.key, termStatsConfigKey(profile.id)) });
       let stats = (statsRow?.value as TermStats | undefined) ?? {};
-      const searches = planSearches(profile, competitors, PER_TERM, dayNumber + profile.id, (p, t) => isResting(stats, p, t, now), searchedThisRun, { competitorOnly });
+      // Competitor searches are the same for every audience, so their rest memory is shared.
+      const isComp = (t: string) => competitorOfTerm(t, competitors) != null;
+      const searches = planSearches(profile, competitors, PER_TERM, dayNumber + profile.id, (p, t) => isResting(isComp(t) ? sharedStats : stats, p, t, now), searchedThisRun, { competitorOnly });
       for (const s of searches.run) searchedThisRun.add(termStatKey(s.platform, s.term));
       const termYield: Array<{ search: string; hits: number; fresh: number }> = [];
       for (const { platform, term } of searches.run) {
@@ -1056,24 +1114,45 @@ export async function runLeadIngest(
           const hits = await deps.discovererFor(platform)(term, { fetchImpl: deps.fetchImpl, apify: deps.apify, perTerm: PER_TERM }, discoveryOptsFor(profile, platform));
           hitsByTerm.set(`${platform}:${term}`, hits);
           // Measured before planProfile adds this run's people to `known`.
-          const fresh = countFresh(profile, hits, known);
+          const fresh = countFresh(profile, hits, known, competitors, now);
           termYield.push({ search: `${platform} ${term}`, hits: hits.length, fresh });
-          stats = recordTermRun(stats, platform, term, hits.length, fresh, now);
+          if (isComp(term)) sharedStats = recordTermRun(sharedStats, platform, term, hits.length, fresh, now);
+          else stats = recordTermRun(stats, platform, term, hits.length, fresh, now);
         } catch (err) {
           termErrors.push(`${platform} ${term}: ${(err as Error).message}`);
         }
       }
-      const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now, { requireCompetitor: competitorOnly, autoAccept });
-      // Vendors creators name that aren't competitors yet, for a person to approve.
-      const texts: Array<{ text: string; url: string | null }> = [];
-      for (const hits of hitsByTerm.values()) for (const h of hits) texts.push({ text: `${h.bio ?? ""}\n${h.postText ?? ""}`, url: h.postUrl });
-      for (const c of candidates) for (const i of (c.enrichment?.bundle as { items?: Array<{ text?: string; url?: string }> } | undefined)?.items ?? []) texts.push({ text: i.text ?? "", url: i.url ?? null });
+      // Every search that ran is billed, errored ones included: count each at its planned maximum.
+      const searchCostUsd = round4(searches.run.reduce((a, s) => a + s.estimatedCostUsd, 0));
+      const planned = await planProfile(profile, competitors, hitsByTerm, known, verify, now, { requireCompetitor: competitorOnly, autoAccept, searchCostUsd, nicheTerms });
+      const ps = planned.summary;
+      let candidates = planned.candidates;
+      // Auto-accepted leads skip review; the ones that still wait for a person keep the review-queue limit.
+      if (autoAccept && opts.maxNew == null && maxPending != null) {
+        let pendingRoom = Math.max(0, maxPending - pendingNow);
+        const before = candidates.length;
+        candidates = candidates.filter((c) => c.lead.sourcingReview !== "pending" || pendingRoom-- > 0);
+        ps.inserted = candidates.length;
+        if (candidates.length < before) ps.stoppedBy = "review_full";
+      }
+      // Vendors the saved leads name that aren't competitors yet, counted once per person, for a person to approve.
+      const texts = candidates.map((c) => ({
+        text: [c.hit.bio, c.hit.postText, ...((c.enrichment?.bundle as { items?: Array<{ text?: string }> } | undefined)?.items ?? []).map((i) => i.text)].filter(Boolean).join("\n"),
+        url: c.hit.postUrl,
+      }));
       suggestions = recordSuggestions(suggestions, texts, allCompetitorRows, now);
-      stats = applyTermOutcome(stats, ps.termOutcome ?? {}, now);
+      const outcome = ps.termOutcome ?? {};
+      const split = (comp: boolean) => Object.fromEntries(Object.entries(outcome).filter(([k]) => isComp(k.slice(k.indexOf(" ") + 1)) === comp));
+      stats = applyTermOutcome(stats, split(false), now);
+      sharedStats = applyTermOutcome(sharedStats, split(true), now);
       await db
         .insert(schema.config)
         .values({ key: termStatsConfigKey(profile.id), value: stats })
         .onDuplicateKeyUpdate({ set: { value: stats } });
+      await db
+        .insert(schema.config)
+        .values({ key: SHARED_TERM_STATS_KEY, value: sharedStats })
+        .onDuplicateKeyUpdate({ set: { value: sharedStats } });
       if (ps.gated && ps.gated.length > 0) {
         for (const g of ps.gated) {
           gatedMemory[g.key] = { reason: g.reason, at: now.toISOString() };
@@ -1110,8 +1189,6 @@ export async function runLeadIngest(
       .onDuplicateKeyUpdate({ set: { value: suggestions } });
     await db.update(schema.syncRuns).set({ status: "ok", finishedAt: new Date(), detail: summary }).where(eq(schema.syncRuns.id, run!.id));
     console.log(`[lead-ingest] ok — inserted=${summary.inserted} cost≈$${summary.estimatedCostUsd}`);
-    // Rank right away so auto-accepted leads are ordered in the queue now, not at the next 6-hourly run.
-    if (summary.inserted > 0) await runRankRecompute(db).catch((e) => console.error(`[lead-ingest] rank after run failed: ${(e as Error).message}`));
     return summary;
   } catch (err) {
     const message = (err as Error).message;

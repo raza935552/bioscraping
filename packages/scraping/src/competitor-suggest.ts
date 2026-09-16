@@ -4,7 +4,9 @@
 
 import { compact } from "./quality.js";
 
-const VENDOR_WORD = /(pep|amino|lab|chem|research|bio|gen|tide|compound|peptide)/i;
+// A vendor name holds one of these as its own word ("Nova Peptides") or ends with one ("novalabs").
+// Matching them anywhere made genius.com, linkinbio.com and labcorp.com look like vendors (review, 2026-09-16).
+const VENDOR_WORD = /(^|[^a-z])(peptides?|aminos?|labs?|labz|chems?|research|biotech|compounds?|tides?|peps)($|[^a-z])|(peptides?|aminos?|labs|labz|chems|biotech|tides?|sciences?)$/i;
 const NOT_BRANDS = new Set(
   "checkout the my all your any first orders order purchase purchases link bio site website tiktok instagram youtube shop store everything anything sitewide amazon today now".split(" "),
 );
@@ -55,6 +57,8 @@ export function suggestCompetitors(text: string | null | undefined, known: Array
   }
   // Store domains: "novapeptides.com", "shop.nova-labs.co/?ref=jamie"
   for (const m of text.matchAll(/\b(?:[a-z0-9-]+\.)?([a-z][a-z0-9-]{2,30})\.(com|co|net|shop|store|io|us)\b/gi)) {
+    // The domain of an email address is someone's inbox, not a store.
+    if (text[(m.index ?? 0) - 1] === "@" || /@[^\s]*$/.test(text.slice(Math.max(0, (m.index ?? 0) - 40), m.index ?? 0))) continue;
     const base = m[1]!.toLowerCase();
     if (NOT_DOMAINS.test(base) || !VENDOR_WORD.test(base)) continue;
     add(base, `${base}.${m[2]!.toLowerCase()}`);

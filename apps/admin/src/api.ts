@@ -123,8 +123,9 @@ export interface ReplySuggestion {
 export interface OutreachWork {
   counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number };
   next: { leadId: number; bucket: "answer" | "checkin" | "new" } | null;
-  waiting: Array<{ leadId: number; name: string; platform: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
+  waiting: Array<{ leadId: number; name: string; handle: string | null; platform: string | null; dmUrl: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
   lead: {
+    dmUrl: string | null;
     id: number;
     name: string;
     handle: string | null;
@@ -154,6 +155,7 @@ export interface Conversation {
 
 export interface LeadRow {
   id: number;
+  dmUrl?: string | null;
   flowStep?: { kind: "send" | "wait" | "signup" | "done"; templateId: string | null; label: string; dueAt: string | null; outcome: string | null };
   outreachPath?: OutreachPath;
   competitorLinked?: string | null;
@@ -313,6 +315,9 @@ export const api = {
     request<{ ok: true; signupId: number }>(`/api/leads/${id}/outreach/signup`, { method: "POST", body: JSON.stringify(body) }),
   outreachWork: (skip: number[], lead?: number | null) =>
     request<OutreachWork>(`/api/outreach/work?skip=${skip.join(",")}${lead ? `&lead=${lead}` : ""}`),
+  outreachCheck: (leadId: number, body: string, templateId: string) =>
+    request<{ placeholders: string[]; violations: Array<{ rule: string; detail: string }>; blocked: boolean }>("/api/outreach/check", { method: "POST", body: JSON.stringify({ leadId, body, templateId }) }),
+  outreachRelease: (leadId: number) => request<{ ok: true }>("/api/outreach/release", { method: "POST", body: JSON.stringify({ leadId }) }),
   outreachClassify: (text: string, lastMessageLabel: string | null) =>
     request<ReplySuggestion>("/api/outreach/classify", { method: "POST", body: JSON.stringify({ text, lastMessageLabel }) }),
   outreachSkip: (id: number, reason: "gone" | "not_fit") => request<{ ok: true }>(`/api/leads/${id}/outreach/skip`, { method: "POST", body: JSON.stringify({ reason }) }),

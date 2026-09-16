@@ -2,7 +2,7 @@
 // from the flow chart filled in for this lead, and recording each step. A person copies and sends
 // every message by hand; nothing here sends anything.
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gte, inArray } from "drizzle-orm";
 import type { LlmClient } from "@biolinx/drafting";
 import {
   classifyReplyKeywords,
@@ -28,6 +28,7 @@ import {
 import { isBlocked, lint, type LintViolation } from "@biolinx/compliance";
 import { schema, type Db } from "@biolinx/db";
 import { pathOf, ratesById } from "./qualification.js";
+import { handleOf } from "./sourced-details.js";
 
 export const OUTREACH_SETTINGS_KEY = "outreach_templates";
 const REPLY_PREFIX = "flow_";
@@ -90,10 +91,11 @@ export async function flowEventsByLead(db: Db, leadIds?: number[]): Promise<Map<
   };
   let seq = 0;
   for (const m of msgs) {
-    const t = flowTemplateOf(m);
-    if (!t) continue;
+    const flowT = flowTemplateOf(m);
+    // A DM sent earlier through Send messages counts as the first offer, so nobody sends them a second opener.
+    const t: TemplateId = flowT ?? (`offer1_${variantFor(m.leadId)}` as TemplateId);
     const at = m.sentAt ?? m.createdAt;
-    bucket(m.leadId).order.push({ at: new Date(at).getTime(), seq: seq++, e: { type: "sent", templateId: t, at: new Date(at) }, h: { type: "sent", at: new Date(at).toISOString(), templateId: t, label: DEFAULT_TEMPLATES[t].label, body: m.body, channel: m.channel, byUserId: m.sentByUserId } });
+    bucket(m.leadId).order.push({ at: new Date(at).getTime(), seq: seq++, e: { type: "sent", templateId: t, at: new Date(at) }, h: { type: "sent", at: new Date(at).toISOString(), templateId: t, label: flowT ? DEFAULT_TEMPLATES[t].label : "Earlier message (Send messages)", body: m.body, channel: m.channel, byUserId: m.sentByUserId } });
   }
   for (const r of reps) {
     const k = flowReplyKind(r);
@@ -108,7 +110,18 @@ export async function flowEventsByLead(db: Db, leadIds?: number[]): Promise<Map<
   return out as unknown as Map<number, { events: FlowEvent[]; history: HistoryItem[] }>;
 }
 
-export function flowStepFor(path: OutreachPath, events: FlowEvent[], leadId: number, settings: OutreachSettings, now = new Date()): FlowStep {
+export function flowStepFor(
+  path: OutreachPath,
+  events: FlowEvent[],
+  leadId: number,
+  settings: OutreachSettings,
+  now = new Date(),
+  lead?: { status: string | null; isDead: boolean },
+): FlowStep {
+  // The lead row knows what the flow can't: a sign-up was recorded, they were closed, or the account is gone.
+  if (lead?.status === "Signed" || lead?.status === "Signed up") return { kind: "done", outcome: "signed_up", why: "They signed up." };
+  if (lead?.status === "Passed" || lead?.status === "No") return { kind: "done", outcome: "declined", why: "Closed: not a fit or they declined." };
+  if (lead?.isDead) return { kind: "done", outcome: "declined", why: "The account is gone." };
   return nextOutreachStep(path, events, now, { ...DEFAULT_FLOW_OPTIONS, checkinDays: settings.checkinDays, variant: variantFor(leadId) });
 }
 
@@ -123,18 +136,22 @@ export interface RenderedMessage {
   blocked: boolean;
 }
 
-function lintFlowMessage(text: string, touchNumber: number, channel: "dm" | "email", lead: { geoCountry: string | null; emailProvenance: string | null }): LintViolation[] {
+export function lintFlowMessage(text: string, touchNumber: number, channel: "dm" | "email", lead: { geoCountry: string | null; emailProvenance: string | null }, approvedCopy = true): LintViolation[] {
   return lint(text, {
     channel,
     touchNumber,
     isPublic: false,
     audience: "prospect",
-    approvedCopy: true,
-    // A person sends email from their own inbox, one at a time: CAN-SPAM footer rules apply to bulk
-    // sends. The scraped-address and non-US rules still apply.
-    ...(channel === "email" ? { hasUnsubscribeLink: true, hasPostalAddress: true, recipientCountry: lead.geoCountry ?? "US", emailProvenance: null } : {}),
+    approvedCopy,
+    // A person sends email from their own inbox, one message at a time. The bulk-mail rules (unsubscribe
+    // link, postal address, "a scraped address is never auto-emailed") are about automated sends and are
+    // satisfied here. The non-US rule still applies, and an unknown country stays unknown, never assumed US.
+    ...(channel === "email" ? { hasUnsubscribeLink: true, hasPostalAddress: true, recipientCountry: lead.geoCountry, emailProvenance: null } : {}),
   });
 }
+
+/** Placeholders the system fills; one left in a message means it isn't ready. */
+export const PLACEHOLDER = /\[(curiosity gap|name|brand|first name|details link|aro details link|aro commission|aro cookie|intro)\]/i;
 
 export function renderFor(
   templateId: TemplateId,
@@ -173,7 +190,7 @@ export async function conversationView(db: Db, leadId: number, recruiterName: st
   const brand = (lead.competitorId != null ? competitors.find((c) => c.id === lead.competitorId)?.name : null) ?? lead.otherCreatorCompany ?? null;
   const settings = await loadOutreachSettings(db);
   const flow = (await flowEventsByLead(db, [leadId])).get(leadId) ?? { events: [], history: [] };
-  const step = flowStepFor(path, flow.events, leadId, settings, opts.now);
+  const step = flowStepFor(path, flow.events, leadId, settings, opts.now, lead);
   const gapIndex = opts.gapIndex != null && opts.gapIndex >= 0 && opts.gapIndex < settings.gaps.length ? opts.gapIndex : gapIndexFor(leadId, settings.gaps.length);
   const messages = step.kind === "send" ? [step.templateId, ...step.alternatives].map((t) => renderFor(t, lead, brand, recruiterName, settings, gapIndex)) : [];
   return { path, qualified: isQualifiedPath(path), brand, step, history: flow.history, messages, gapIndex, gaps: settings.gaps, channels: CONTACT_CHANNELS };
@@ -181,19 +198,63 @@ export async function conversationView(db: Db, leadId: number, recruiterName: st
 
 export class FlowError extends Error {}
 
-/** A person sent a flow message by hand. Checks qualification, the linter and suppression, then records it. */
+const CLOSED = ["Signed", "Signed up", "Passed", "No"];
+
+/** Refuses outreach on a lead the rules keep out of reach, whatever screen the request came from. */
+export function assertContactable(lead: { sourcingReview: string | null; subProfile: string | null; isDead: boolean; affiliationStatus: string | null; status: string | null }, action: "send" | "reply" | "signup"): void {
+  if (lead.sourcingReview === "pending" || lead.sourcingReview === "rejected") throw new FlowError("This lead hasn't been accepted for outreach.");
+  if ((lead.subProfile ?? "").trim().toUpperCase().startsWith("SP5")) throw new FlowError("Never message this person: they're already a Biolinx fan.");
+  if ((lead.affiliationStatus ?? "").toLowerCase() === "our affiliate") throw new FlowError("They're already our affiliate.");
+  if (action !== "signup" && lead.isDead) throw new FlowError("This account is marked as gone.");
+  if (CLOSED.includes(lead.status ?? "")) throw new FlowError("This conversation is closed.");
+}
+
+/** The team's approved copy may name the commission in a first message and run long. A message still
+ *  counts as their copy after small edits (a greeting, a name, another opening line) as long as every
+ *  line of the template is still there; anything rewritten is checked like any other message. */
+export function isApprovedWording(
+  body: string,
+  templateId: TemplateId,
+  lead: { firstName: string | null },
+  brand: string | null,
+  recruiterName: string,
+  settings: OutreachSettings,
+): boolean {
+  const norm = (t: string) => t.toLowerCase().replace(/\s+/g, " ").trim();
+  const b = norm(body);
+  for (let g = 0; g < Math.max(1, settings.gaps.length); g++) {
+    const r = renderTemplate(templateId, { curiosityGap: settings.gaps[g]?.text ?? "", recruiterName, brand, creatorFirstName: lead.firstName, settings });
+    if (norm(r.text) === b) return true;
+    const lines = r.text
+      .split("\n")
+      .map(norm)
+      .filter((l, i) => l && !(i === 0 && templateId.startsWith("offer")));
+    if (lines.length > 0 && lines.every((l) => b.includes(l))) return true;
+  }
+  return false;
+}
+
+/** When to record an event: now, but always after the lead's last event (the columns keep whole seconds). */
+export function eventTime(now: Date, events: FlowEvent[]): Date {
+  const last = events[events.length - 1];
+  const lastSecond = last ? Math.floor(last.at.getTime() / 1000) * 1000 : -Infinity;
+  return Math.floor(now.getTime() / 1000) * 1000 <= lastSecond ? new Date(lastSecond + 1000) : now;
+}
+
+/** A person sent a flow message by hand. Checks the lead, the flow's next step, the linter and suppression, then records it once. */
 export async function recordFlowSent(
   db: Db,
-  input: { leadId: number; templateId: TemplateId; body: string; channel: ContactChannel; gapIndex: number | null; userId: number },
+  input: { leadId: number; templateId: TemplateId; body: string; channel: ContactChannel; gapIndex: number | null; userId: number; recruiterName?: string },
   now = new Date(),
 ): Promise<{ messageId: number }> {
   const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, input.leadId) });
   if (!lead) throw new FlowError("lead not found");
+  assertContactable(lead, "send");
   if (!(input.templateId in DEFAULT_TEMPLATES)) throw new FlowError("unknown message");
   if (!(CONTACT_CHANNELS as readonly string[]).includes(input.channel)) throw new FlowError("pick where you sent it");
   const body = input.body.trim();
   if (body.length < 5) throw new FlowError("the message is empty");
-  if (/\[(curiosity gap|name|brand|first name|details link|aro details link|aro commission|aro cookie|intro)\]/i.test(body)) throw new FlowError("fill in every [placeholder] before sending");
+  if (PLACEHOLDER.test(body)) throw new FlowError("fill in every [placeholder] before sending");
   const competitors = await db.select().from(schema.competitors);
   const path = pathOf(lead, ratesById(competitors));
   if (!isQualifiedPath(path)) throw new FlowError("this lead doesn't qualify for outreach (not signed with a named competitor)");
@@ -203,49 +264,69 @@ export async function recordFlowSent(
     const suppressed = await db.query.suppressions.findFirst({ where: eq(schema.suppressions.emailNormalized, normalizeEmail(lead.email)) });
     if (suppressed) throw new FlowError("this email address opted out; never email it");
   }
-  const touchNumber = (lead.followUpsSent ?? 0) + 1;
-  const violations = lintFlowMessage(body, touchNumber, channel, lead);
-  if (isBlocked(violations)) throw new FlowError(`compliance: ${violations.filter((v) => v.severity === "block").map((v) => v.detail).join("; ")}`);
   const settings = await loadOutreachSettings(db);
-  const [ins] = await db
-    .insert(schema.messages)
-    .values({
-      idempotencyKey: `flow:${lead.id}:${touchNumber}:${now.getTime()}`,
-      leadId: lead.id,
-      touchNumber,
-      channel,
-      state: "sent",
-      draftVariant: input.templateId.slice(0, 24),
-      body,
-      lintReport: { flowTemplate: input.templateId, gapIndex: input.gapIndex, contactChannel: input.channel, violations },
-      approvedByUserId: input.userId,
-      approvedAt: now,
-      sentAt: now,
-      sentByUserId: input.userId,
-    })
-    .$returningId();
+  // Only the message the flow expects now can be recorded: a second press of "I sent it", or an old tab,
+  // would otherwise log the same message twice and push the check-in date.
+  const flow = (await flowEventsByLead(db, [lead.id])).get(lead.id) ?? { events: [], history: [] };
+  const step = flowStepFor(path, flow.events, lead.id, settings, now, lead);
+  if (step.kind !== "send" || ![step.templateId, ...step.alternatives].includes(input.templateId)) {
+    throw new FlowError(step.kind === "wait" ? "Already recorded. The next message shows when they reply or a check-in is due." : "That isn't the next message for this lead any more. Reload to see what to send.");
+  }
+  const brand = (lead.competitorId != null ? competitors.find((c) => c.id === lead.competitorId)?.name : null) ?? lead.otherCreatorCompany ?? null;
+  const approved = isApprovedWording(body, input.templateId, lead, brand, input.recruiterName ?? "", settings);
+  const touchNumber = (lead.followUpsSent ?? 0) + 1;
+  const violations = lintFlowMessage(body, touchNumber, channel, lead, approved);
+  if (isBlocked(violations)) throw new FlowError(`compliance: ${violations.filter((v) => v.severity === "block").map((v) => v.detail).join("; ")}`);
+  const at = eventTime(now, flow.events);
   const closing = input.templateId === "reply3_referral" || input.templateId === "reply3_aro_referral";
-  await db
-    .update(schema.leads)
-    .set({
-      lastReachedOut: now,
-      followUpsSent: touchNumber,
-      contactChannel: input.channel,
-      status: closing ? "Passed" : lead.status === "In talks" ? "In talks" : "Contacted",
-      nextFollowUpDate: closing ? null : new Date(now.getTime() + settings.checkinDays * 86_400_000),
-    })
-    .where(eq(schema.leads.id, lead.id));
-  return { messageId: ins!.id };
+  let messageId = 0;
+  await db.transaction(async (tx) => {
+    // Claim the touch number first: two presses at once can't both move follow_ups_sent from k to k+1.
+    const [res] = await tx
+      .update(schema.leads)
+      .set({
+        lastReachedOut: at,
+        followUpsSent: touchNumber,
+        contactChannel: input.channel,
+        status: closing ? "Passed" : lead.status === "In talks" ? "In talks" : "Contacted",
+        nextFollowUpDate: closing ? null : new Date(at.getTime() + settings.checkinDays * 86_400_000),
+      })
+      .where(and(eq(schema.leads.id, lead.id), eq(schema.leads.followUpsSent, lead.followUpsSent ?? 0)));
+    if (!(res as { affectedRows?: number }).affectedRows) throw new FlowError("Already recorded. The next message shows when they reply or a check-in is due.");
+    const [ins] = await tx
+      .insert(schema.messages)
+      .values({
+        idempotencyKey: `flow:${lead.id}:${touchNumber}`,
+        leadId: lead.id,
+        touchNumber,
+        channel,
+        state: "sent",
+        draftVariant: input.templateId.slice(0, 24),
+        body,
+        lintReport: { flowTemplate: input.templateId, gapIndex: input.gapIndex, contactChannel: input.channel, approvedCopy: approved, violations },
+        approvedByUserId: input.userId,
+        approvedAt: at,
+        sentAt: at,
+        sentByUserId: input.userId,
+      })
+      .$returningId();
+    messageId = ins!.id;
+  });
+  return { messageId };
 }
 
 /** A person logged the creator's reply. */
 export async function recordFlowReply(db: Db, input: { leadId: number; kind: ReplyKind; body: string; channel: string; userId: number }, now = new Date()): Promise<{ replyId: number }> {
   const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, input.leadId) });
   if (!lead) throw new FlowError("lead not found");
+  assertContactable(lead, "reply");
   if (!REPLY_KINDS.includes(input.kind)) throw new FlowError("pick what they replied");
+  const flow = (await flowEventsByLead(db, [lead.id])).get(lead.id) ?? { events: [], history: [] };
+  if (!flow.events.some((e) => e.type === "sent")) throw new FlowError("Send them a message first; there's nothing for them to reply to yet.");
+  const at = eventTime(now, flow.events);
   const [ins] = await db
     .insert(schema.replies)
-    .values({ leadId: lead.id, channel: input.channel.slice(0, 24) || "dm", body: input.body.trim() || null, classifiedAs: `${REPLY_PREFIX}${input.kind}`, classifierConfidence: "human", handledAt: now, handledByUserId: input.userId, receivedAt: now })
+    .values({ leadId: lead.id, channel: input.channel.slice(0, 24) || "dm", body: input.body.trim().slice(0, 5000) || null, classifiedAs: `${REPLY_PREFIX}${input.kind}`, classifierConfidence: "human", handledAt: at, handledByUserId: input.userId, receivedAt: at })
     .$returningId();
   await db.update(schema.leads).set({ status: "In talks", nextFollowUpDate: null }).where(eq(schema.leads.id, lead.id));
   return { replyId: ins!.id };
@@ -258,6 +339,7 @@ export async function recordFlowSignup(
 ): Promise<{ signupId: number }> {
   const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, input.leadId) });
   if (!lead) throw new FlowError("lead not found");
+  assertContactable(lead, "signup");
   const firstName = input.firstName.trim();
   const lastName = input.lastName.trim();
   const email = input.email.trim();
@@ -265,9 +347,9 @@ export async function recordFlowSignup(
   if (!firstName || !lastName) throw new FlowError("first and last name are required");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw new FlowError("that email doesn't look right");
   if (code.length < 3 || code.length > 20) throw new FlowError("the code should be 3 to 20 letters or numbers (like JOHND10)");
+  if (await db.query.signups.findFirst({ where: eq(schema.signups.leadId, lead.id) })) throw new FlowError("this lead already has a sign-up (see Signups)");
   const emailNormalized = normalizeEmail(email);
-  const existing = await db.query.signups.findFirst({ where: eq(schema.signups.emailNormalized, emailNormalized) });
-  if (existing) throw new FlowError("a sign-up with this email already exists (see Signups)");
+  if (await db.query.signups.findFirst({ where: eq(schema.signups.emailNormalized, emailNormalized) })) throw new FlowError("a sign-up with this email already exists (see Signups)");
   const [ins] = await db
     .insert(schema.signups)
     .values({ leadId: lead.id, firstName, lastName, email, emailNormalized, couponWordSuggestion: code, recruitedByUserId: input.userId, recruitedByName: input.userName.slice(0, 120) })
@@ -293,7 +375,19 @@ export interface WorkQueue {
   counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number };
   /** The next lead to work on, or null when everything is done. */
   next: { leadId: number; bucket: WorkBucket } | null;
-  waiting: Array<{ leadId: number; name: string; platform: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
+  waiting: Array<{ leadId: number; name: string; handle: string | null; platform: string | null; dmUrl: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
+}
+
+/** A link that opens the creator's profile where a DM can be sent, from platform + handle. YouTube has no DMs. */
+export function dmLinkFor(platform: string | null, handle: string | null): string | null {
+  const p = (platform ?? "").toLowerCase();
+  const h = (handle ?? "").replace(/^@/, "").trim();
+  if (!h || !/^[\w.\-]{1,60}$/.test(h)) return null;
+  if (p.includes("tiktok")) return `https://www.tiktok.com/@${h}`;
+  if (p.includes("instagram")) return `https://www.instagram.com/${h}/`;
+  if (p.includes("reddit")) return `https://www.reddit.com/user/${h}/`;
+  if (p === "x" || p.includes("twitter")) return `https://x.com/${h}`;
+  return null;
 }
 
 const CLOSED_STATUSES = ["Signed", "Passed", "No", "Signed up"];
@@ -317,14 +411,21 @@ export async function outreachWorkQueue(
       isQualifiedPath(pathOf(l, rates)),
   );
   const flows = await flowEventsByLead(db, eligible.map((l) => l.id));
+  // Leads with a draft still open in the older Send messages queue are handled there, so nobody messages
+  // them twice. (A DM already sent there counts as their first offer: see flowEventsByLead.)
+  const legacy = new Set(
+    (await db.select({ leadId: schema.messages.leadId }).from(schema.messages).where(inArray(schema.messages.state, ["drafted", "linted", "approved"]))).map((m) => m.leadId),
+  );
   const buckets: Record<WorkBucket, Array<{ leadId: number; sortKey: number }>> = { answer: [], checkin: [], new: [] };
   const waiting: WorkQueue["waiting"] = [];
   for (const l of eligible) {
+    if (legacy.has(l.id)) continue;
     const events = flows.get(l.id)?.events ?? [];
-    const step = flowStepFor(pathOf(l, rates), events, l.id, settings, now);
+    const step = flowStepFor(pathOf(l, rates), events, l.id, settings, now, l);
     const last = events[events.length - 1];
     if (step.kind === "wait") {
-      waiting.push({ leadId: l.id, name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)", platform: l.primaryPlatform, lastLabel: DEFAULT_TEMPLATES[step.lastTemplateId].label, sentAt: step.since.toISOString(), dueAt: step.dueAt.toISOString() });
+      const handle = handleOf(l.socialProfiles);
+      waiting.push({ leadId: l.id, name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)", handle, platform: l.primaryPlatform, dmUrl: dmLinkFor(l.primaryPlatform, handle), lastLabel: DEFAULT_TEMPLATES[step.lastTemplateId].label, sentAt: step.since.toISOString(), dueAt: step.dueAt.toISOString() });
       continue;
     }
     if (step.kind === "done") continue;
@@ -349,8 +450,12 @@ export async function outreachWorkQueue(
     }
   }
 
-  const sent = await db.select({ by: schema.messages.sentByUserId, at: schema.messages.sentAt, report: schema.messages.lintReport }).from(schema.messages).where(eq(schema.messages.state, "sent"));
-  const today = sent.filter((m) => m.at && new Date(m.at) >= opts.dayStart && (m.report as { flowTemplate?: string } | null)?.flowTemplate);
+  const today = (
+    await db
+      .select({ by: schema.messages.sentByUserId, report: schema.messages.lintReport })
+      .from(schema.messages)
+      .where(and(eq(schema.messages.state, "sent"), gte(schema.messages.sentAt, opts.dayStart)))
+  ).filter((m) => (m.report as { flowTemplate?: string } | null)?.flowTemplate);
   return {
     counts: { answer: buckets.answer.length, checkin: buckets.checkin.length, new: buckets.new.length, waiting: waiting.length, sentToday: today.length, sentTodayByMe: today.filter((m) => m.by === opts.userId).length },
     next,

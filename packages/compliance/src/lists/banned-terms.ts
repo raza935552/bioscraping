@@ -75,6 +75,8 @@ export const EARNINGS_CLAIM_PATTERNS: ReadonlyArray<RegExp> = [
   /\$\s?\d+(\.\d+)?\b[^.?!]{0,20}\b(earn|paid|commission|per)\b/i,
   /\b(earn|make|keep|get|paid)\b[^.?!]{0,15}(\d+\s?%|\$\s?\d+|a (quarter|third|half))/i,
   /\$342\.20\b/,
+  // "affiliates have earned so far: Nick → $441.71" (review, 2026-09-16): an earning word, then a dollar figure a line or two later.
+  /\b(earn(ed|ing|s)?|made|paid out)\b[^?!]{0,80}\$\s?\d/i,
 ];
 
 /** Any commission figure in an opener (percent, dollar, or fraction phrasing). */

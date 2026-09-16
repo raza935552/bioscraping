@@ -183,5 +183,7 @@ describe("competitor suggestions", () => {
     expect(suggestCompetitors("use code SAVE10 at checkout, link in bio", known)).toEqual([]);
     expect(suggestCompetitors("my site biolinxlabs.com and tiktok.com", known)).toEqual([]);
     expect(suggestCompetitors("code DDT10 at Gymshark", known)).toEqual([]);
+    expect(suggestCompetitors("lyrics on genius.com, links at linkinbio.com, results from labcorp.com", known)).toEqual([]);
+    expect(suggestCompetitors("email me: jane@biolabsconsulting.com", known)).toEqual([]);
   });
 });

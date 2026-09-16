@@ -53,6 +53,13 @@ export function Leads({ me }: { me: Me }) {
   const [data, setData] = useState<LeadsPage | null>(null);
   const [filters, setFilters] = useState<{ statuses: string[]; platforms: string[]; subProfiles: string[] } | null>(null);
   const [open, setOpen] = useState<number | null>(null);
+  // The open lead's row, kept after a reload drops it from the current filter (e.g. it just signed up).
+  const [openRow, setOpenRow] = useState<LeadRow | null>(null);
+  useEffect(() => {
+    if (open == null) return setOpenRow(null);
+    const r = data?.rows.find((x) => x.id === open);
+    if (r) setOpenRow(r);
+  }, [data, open]);
   const [detail, setDetail] = useState<LeadDetail | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -477,7 +484,7 @@ export function Leads({ me }: { me: Me }) {
       </div>
 
       {detail && (() => {
-        const row = data?.rows.find((r) => r.id === detail.lead.id) ?? null;
+        const row = data?.rows.find((r) => r.id === detail.lead.id) ?? (openRow?.id === detail.lead.id ? openRow : null);
         const d = row?.details ?? null;
         const pendingSourced = row?.sourcingReview === "pending" && canRun;
         const cell = (k: string, v: React.ReactNode, sub?: React.ReactNode) => (
@@ -536,8 +543,8 @@ export function Leads({ me }: { me: Me }) {
               </div>
             </>
           )}
-          {row && !row.sourcingReview?.match(/pending|rejected/) && (
-            <OutreachPanel row={row} canSend={me.role === "admin" || me.role === "ops" || me.role === "operator"} onChanged={() => void load()} />
+          {row && me.role !== "rep" && !row.sourcingReview?.match(/pending|rejected/) && (
+            <OutreachPanel key={row.id} row={row} canSend={me.role === "admin" || me.role === "ops" || me.role === "operator"} onChanged={() => void load()} />
           )}
           {row && (d?.channel || row.email || row.competitor || d?.surfaced) && (
             <div className="cards">
@@ -822,7 +829,15 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
           Accept selected
         </button>
         <input value={bulkReason} onChange={(e) => setBulkReason(e.target.value)} placeholder="reject reason" style={{ maxWidth: 180 }} />
-        <button disabled={bulkBusy || picked.size === 0} onClick={() => void bulk("reject")}>Reject selected</button>
+        <button
+          disabled={bulkBusy || picked.size === 0}
+          onClick={() => {
+            if (!bulkReason.trim()) return setBulkMsg("Type a reject reason first, so the team knows why.");
+            if (window.confirm(`Reject ${picked.size} lead${picked.size === 1 ? "" : "s"}? They won't come back in searches.`)) void bulk("reject");
+          }}
+        >
+          Reject selected
+        </button>
         {bulkMsg && <span className="muted">{bulkMsg}</span>}
       </div>
     )}

@@ -52,9 +52,11 @@ export type CandidateVerdict = "ok" | "unenriched" | "ineligible";
  *  fine, it just has no talking points yet. */
 export function isDispatchCandidate(
   l: CandidateLead,
-  o: { channel: "email" | "dm"; today: Date; openReplyLeadIds: Set<number>; competitorRates: Map<number, number | null> },
+  o: { channel: "email" | "dm"; today: Date; openReplyLeadIds: Set<number>; competitorRates: Map<number, number | null>; inFlowLeadIds?: Set<number> },
 ): CandidateVerdict {
   if (!isReviewable(l)) return "ineligible";
+  // Leads in the Outreach page's conversation flow are messaged there, never also drafted here.
+  if (o.inFlowLeadIds?.has(l.id)) return "ineligible";
   // The outreach flow: only competitor affiliates whose rate is at or under ours get messages.
   if (!isQualifiedPath(pathOf(l, o.competitorRates))) return "ineligible";
   if (l.isDead || isSp5(l.subProfile) || isConverted(l.affiliationStatus)) return "ineligible";
@@ -134,7 +136,11 @@ export async function runOutreachDispatch(opts: DispatchOptions, db: Db = create
     );
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const verdictOpts = { channel: opts.channel, today, openReplyLeadIds, competitorRates: ratesById(await db.select().from(schema.competitors)) };
+    const inFlowLeadIds = new Set([
+      ...(await db.select({ leadId: schema.messages.leadId, report: schema.messages.lintReport }).from(schema.messages)).filter((m) => (m.report as { flowTemplate?: string } | null)?.flowTemplate).map((m) => m.leadId),
+      ...(await db.select({ leadId: schema.replies.leadId, kind: schema.replies.classifiedAs }).from(schema.replies)).filter((r) => r.kind?.startsWith("flow_")).map((r) => r.leadId),
+    ]);
+    const verdictOpts = { channel: opts.channel, today, openReplyLeadIds, competitorRates: ratesById(await db.select().from(schema.competitors)), inFlowLeadIds };
     const candidates = all
       .filter((l) => {
         const v = isDispatchCandidate(l, verdictOpts);

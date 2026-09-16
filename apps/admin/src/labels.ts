@@ -107,7 +107,7 @@ export const ROLE_HELP: Record<string, string> = {
   admin: "Full control, including keys and team",
   ops: "Runs jobs, decides affiliates, prepares signups",
   rep: "Warm-network recruiting",
-  operator: "Approves and sends messages",
+  operator: "Outreach: copies each message into DMs and logs replies (sees only Outreach and Signups)",
 };
 
 const JOB_LABEL: Record<string, string> = {

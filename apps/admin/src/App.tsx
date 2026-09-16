@@ -57,7 +57,7 @@ export function App() {
   // Outreach people (operator role) see only their page and sign-ups.
   const nav = me.role === "operator" ? ([["/outreach", "Outreach", "💌"], ["/signups", "Signups", "✍️"]] as const) : ([
     ["/dashboard", "Dashboard", "📊"],
-    ["/outreach", "Outreach", "💌"],
+    ...(me.role === "admin" || me.role === "ops" ? ([["/outreach", "Outreach", "💌"]] as const) : []),
     ["/leads", "Leads", "🎯"],
     ...(me.role === "admin" || me.role === "ops" ? ([["/audiences", "Audiences", "🔎"], ["/templates", "Message templates", "📝"], ["/swipe", "Swipe file", "🖼️"]] as const) : []),
     ["/approvals", "Send messages", "✉️"],
@@ -69,7 +69,10 @@ export function App() {
     ...(me.role === "admin" ? ([["/team", "Team", "👥"], ["/settings", "Settings", "⚙️"]] as const) : []),
   ] as const);
 
+  // Outreach people only use their page and Signups; anything else lands on Outreach.
+  const allowed = me.role !== "operator" || ["/outreach", "/signups"].includes(route);
   const page = () => {
+    if (!allowed) return <Outreach me={me} />;
     switch (route) {
       case "/leads":
         return <Leads me={me} />;

@@ -1,6 +1,7 @@
 // Default wording for the outreach flow (outreach-flow.ts). "marketing" templates are the team's
 // copy from 2026-09-16 (typos fixed; the "free bac water" bet became a free order, since BAC water
-// is an injection supply and conflicts with research-use-only). "drafted" templates fill the flow
+// is an injection supply and conflicts with research-use-only; the affiliate earnings in Reply 2 are
+// labelled historical, which the linter requires next to any earnings figure). "drafted" templates fill the flow
 // chart's gaps and are placeholders for marketing to rewrite. Every template can be edited in the
 // admin (config key `outreach_templates`); these are used for anything not edited.
 
@@ -117,10 +118,10 @@ cookie: lifetime
 payout: monthly (check or zelle)
 support: free promo assets + telegram community
 (detailed version: [details link])
-Here's how much some of our affiliates have earned so far:
-Nick (team member) → $441.71
-Jason (mortgage lender) → $222.49
-David (influencer) → $190.55
+What a few affiliates earned so far (historical results, not a promise):
+Nick (team member) → historical $441.71
+Jason (mortgage lender) → historical $222.49
+David (influencer) → historical $190.55
 lmk if you have any questions
 ps - we reply FAST (within 48 hours)`,
   },

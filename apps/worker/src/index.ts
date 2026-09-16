@@ -4,7 +4,7 @@
 import { loadEnv } from "@biolinx/core";
 loadEnv();
 
-const { connect, hydrateEnvFromSettings } = await import("@biolinx/db");
+const { connect, hydrateEnvFromSettings, withMysqlLock } = await import("@biolinx/db");
 const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize, runLeadIngest, runCustomerioSync, runSwipeSync, runSwipeSearch } =
   await import("@biolinx/jobs");
 const { startScheduler } = await import("./scheduler.js");
@@ -25,7 +25,16 @@ startScheduler(conn, [
   // Jobs that spend Apify/Anthropic credit never run on boot: a restart must not spend money.
   // Their first run follows their last run in sync_runs, at least an hour after boot.
   { name: "enrich-personalize", everyMs: 24 * HOUR, spends: true, fn: async () => void (await runEnrichPersonalize(conn.db)) },
-  { name: "lead-ingest", everyMs: 24 * HOUR, spends: true, fn: async () => void (await runLeadIngest(conn.db)) },
+  {
+    name: "lead-ingest",
+    everyMs: 24 * HOUR,
+    spends: true,
+    // New leads are ranked straight after (under the rank job's lock) so they're ordered in the outreach queue.
+    fn: async () => {
+      const r = await runLeadIngest(conn.db);
+      if (r.inserted > 0) await withMysqlLock(conn.pool, "job:rank-recompute", () => runRankRecompute(conn.db));
+    },
+  },
   { name: "customerio-sync", everyMs: HOUR, runOnBoot: true, fn: async () => void (await runCustomerioSync(conn.db)) },
   { name: "metrics-digest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runMetricsDigest(conn.db)) },
   // Sends only posts a person approved (and only when auto-send is on); looks up missed callbacks.

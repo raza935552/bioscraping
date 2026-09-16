@@ -180,6 +180,8 @@ export async function runSwipeSearch(
         rows = await runActorSync<TikTokRow>({ token, fetchImpl: opts.fetchImpl ?? fetch }, actor, { hashtags: [t.tag], resultsPerPage: SWIPE_SEARCH_PER_TAG }, { timeoutSec: 180 });
       } catch (e) {
         summary.tags.push({ tag: t.tag, rows: 0, kept: 0, error: (e as Error).message.slice(0, 200) });
+        // A failed or timed-out run may still be billed for what it returned: count its planned maximum.
+        summary.estimatedCostUsd += perTagUsd;
         continue;
       }
       const { kept, seen } = sourcesFromTikTokRows(rows, t, now);
@@ -200,6 +202,8 @@ export async function runSwipeSearch(
       }
       summary.added += added;
       summary.tags.push({ tag: t.tag, rows: seen, kept: added, ...(rows[0]?.error && seen === 0 ? { error: rows[0].error.slice(0, 120) } : {}) });
+      // Running total on the run row after every tag, so the daily limit sees this spend even mid-run or after a crash.
+      await db.update(schema.syncRuns).set({ detail: { ...summary, estimatedCostUsd: Math.round(summary.estimatedCostUsd * 10000) / 10000 } }).where(eq(schema.syncRuns.id, run!.id));
     }
     summary.estimatedCostUsd = Math.round(summary.estimatedCostUsd * 10000) / 10000;
     await db

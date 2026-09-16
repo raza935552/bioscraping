@@ -61,6 +61,9 @@ import {
   redoSwipeImage,
   runSwipeSearch,
   outreachWorkQueue,
+  dmLinkFor,
+  isApprovedWording,
+  lintFlowMessage,
   skipOutreachLead,
   suggestReplyKind,
   startOfBusinessDay,
@@ -452,7 +455,7 @@ app.post("/api/settings/alerts/test", { preHandler: requireRole("admin"), config
 
 // ── Leads ───────────────────────────────────────────────────────────────
 
-app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
+app.get("/api/leads", { preHandler: requireRole("admin", "ops", "rep") }, async (req) => {
   const q = (req.query ?? {}) as {
     view?: string;
     page?: string;
@@ -630,7 +633,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       const settings = await loadOutreachSettings(db);
       const flows = await flowEventsByLead(db, pageRows.map((l) => l.id));
       const now = new Date();
-      return pageRows.map((l) => ({ l, flowStep: stepSummary(flowStepFor(paths.get(l.id)!, flows.get(l.id)?.events ?? [], l.id, settings, now)) }));
+      return pageRows.map((l) => ({ l, flowStep: stepSummary(flowStepFor(paths.get(l.id)!, flows.get(l.id)?.events ?? [], l.id, settings, now, l)) }));
     })().then((list) => list.map(({ l, flowStep }) => ({
       flowStep,
       id: l.id,
@@ -667,6 +670,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       rejectedReason: l.sourcingRejectedReason,
       email: l.email,
       outreachPath: paths.get(l.id)!,
+      dmUrl: dmLinkFor(l.primaryPlatform, details.get(l.id)?.handle ?? null),
       competitorLinked: l.competitorId != null ? competitorById.get(l.competitorId)?.name ?? null : null,
       competitorRatePct: l.competitorId != null ? competitorById.get(l.competitorId)?.commissionPct ?? null : null,
       details: details.get(l.id) ?? null,
@@ -700,11 +704,12 @@ function profileUrlFor(lead: { websiteUrl: string | null; whereFound: string | n
 }
 
 /** Latest profile-read bundle per lead: sourcing reads and research-run reads (not failed runs). */
-async function latestReadBundles(): Promise<Map<number, DetailBundle>> {
+async function latestReadBundles(leadIds?: number[]): Promise<Map<number, DetailBundle>> {
   const out = new Map<number, DetailBundle>();
   for (const e of await db
     .select({ leadId: schema.leadEnrichments.leadId, bundle: schema.leadEnrichments.bundle, status: schema.leadEnrichments.status })
     .from(schema.leadEnrichments)
+    .where(leadIds ? inArray(schema.leadEnrichments.leadId, leadIds.length ? leadIds : [-1]) : undefined)
     .orderBy(desc(schema.leadEnrichments.id))) {
     if (out.has(e.leadId) || e.status === "failed") continue;
     const b = e.bundle as DetailBundle | null;
@@ -737,7 +742,7 @@ app.get("/api/leads/sourced.csv", { preHandler: requireRole("admin", "ops") }, a
 });
 
 /** Distinct filter values for the Leads UI dropdowns. */
-app.get("/api/leads/filters", { preHandler: requireAuth }, async () => {
+app.get("/api/leads/filters", { preHandler: requireRole("admin", "ops", "rep") }, async () => {
   const rows = await db.select().from(schema.leads);
   const uniq = (vals: (string | null)[]) => [...new Set(vals.filter(Boolean) as string[])].sort();
   return {
@@ -791,9 +796,11 @@ app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operato
   const forceLeadId = q.lead ? Number(q.lead) : null;
   const work = await outreachWorkQueue(db, { userId: me.id, now, exclude, dayStart: startOfBusinessDay(now), forceLeadId: forceLeadId && !exclude.has(forceLeadId) ? forceLeadId : null });
   if (!work.next) return { ...work, lead: null, conversation: null };
+  // One lead held per person: handing out the next one releases the last.
+  for (const [id, c] of outreachClaims) if (c.userId === me.id) outreachClaims.delete(id);
   outreachClaims.set(work.next.leadId, { userId: me.id, until: now.getTime() + 15 * 60_000 });
   const l = (await db.query.leads.findFirst({ where: eq(schema.leads.id, work.next.leadId) }))!;
-  const bundle = (await latestReadBundles()).get(l.id) ?? null;
+  const bundle = (await latestReadBundles([l.id])).get(l.id) ?? null;
   const d = sourcedDetails(l, bundle, now);
   const conversation = await conversationView(db, l.id, me.name);
   return {
@@ -805,6 +812,7 @@ app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operato
       handle: d.handle,
       platform: l.primaryPlatform,
       profileUrl: profileUrlFor(l),
+      dmUrl: dmLinkFor(l.primaryPlatform, d.handle),
       followers: l.totalReach,
       competitor: conversation?.brand ?? l.otherCreatorCompany,
       code: l.affiliateCode,
@@ -813,6 +821,32 @@ app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operato
       evidence: d.evidence,
     },
   };
+});
+
+/** Checks the message as the person edited it, before they copy it. */
+app.post("/api/outreach/check", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
+  const b = (req.body ?? {}) as { leadId?: number; body?: string; templateId?: string };
+  const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, Number(b.leadId)) });
+  if (!lead) return reply.code(404).send({ error: "not found" });
+  const body = String(b.body ?? "");
+  const placeholders = [...body.matchAll(/\[(curiosity gap|name|brand|first name|details link|aro details link|aro commission|aro cookie|intro)\]/gi)].map((m) => m[1]!.toLowerCase());
+  // Same rule as "I sent it": the team's approved copy (with small edits) gets the approved-copy check.
+  const templateId = String(b.templateId ?? "") as keyof typeof DEFAULT_TEMPLATES;
+  let approved = false;
+  if (templateId in DEFAULT_TEMPLATES) {
+    const competitors = await db.select().from(schema.competitors);
+    const brand = (lead.competitorId != null ? competitors.find((c) => c.id === lead.competitorId)?.name : null) ?? lead.otherCreatorCompany ?? null;
+    approved = isApprovedWording(body, templateId, lead, brand, req.user!.name, await loadOutreachSettings(db));
+  }
+  const violations = lintFlowMessage(body, (lead.followUpsSent ?? 0) + 1, "dm", lead, approved).filter((v) => v.severity === "block");
+  return { placeholders: [...new Set(placeholders)], violations, blocked: placeholders.length > 0 || violations.length > 0 || body.trim().length < 5 };
+});
+
+app.post("/api/outreach/release", { preHandler: requireRole("admin", "ops", "operator") }, async (req) => {
+  const id = Number((req.body as { leadId?: number } | undefined)?.leadId);
+  const c = outreachClaims.get(id);
+  if (c && c.userId === req.user!.id) outreachClaims.delete(id);
+  return { ok: true };
 });
 
 app.post("/api/outreach/classify", { preHandler: requireRole("admin", "ops", "operator") }, async (req) => {
@@ -832,6 +866,8 @@ app.post("/api/leads/:id/outreach/skip", { preHandler: requireRole("admin", "ops
   const id = Number((req.params as { id: string }).id);
   const reason = String((req.body as { reason?: string } | undefined)?.reason ?? "");
   if (reason !== "gone" && reason !== "not_fit") return reply.code(400).send({ error: "reason must be gone or not_fit" });
+  const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, id) });
+  if (!lead || (lead.sourcingReview != null && lead.sourcingReview !== "accepted")) return reply.code(404).send({ error: "not found" });
   await skipOutreachLead(db, id, reason);
   outreachClaims.delete(id);
   await audit(req, "outreach.skip", "leads", id, { reason });
@@ -850,7 +886,7 @@ app.post("/api/leads/:id/outreach/sent", { preHandler: requireRole("admin", "ops
   const id = Number((req.params as { id: string }).id);
   const b = (req.body ?? {}) as { templateId?: string; body?: string; channel?: string; gapIndex?: number | null };
   try {
-    const r = await recordFlowSent(db, { leadId: id, templateId: String(b.templateId ?? "") as never, body: String(b.body ?? ""), channel: String(b.channel ?? "") as never, gapIndex: typeof b.gapIndex === "number" ? b.gapIndex : null, userId: req.user!.id });
+    const r = await recordFlowSent(db, { leadId: id, templateId: String(b.templateId ?? "") as never, body: String(b.body ?? ""), channel: String(b.channel ?? "") as never, gapIndex: typeof b.gapIndex === "number" ? b.gapIndex : null, userId: req.user!.id, recruiterName: req.user!.name });
     outreachClaims.delete(id);
     await audit(req, "outreach.sent", "leads", id, { templateId: b.templateId, channel: b.channel, messageId: r.messageId });
     return { ok: true, ...r };
@@ -883,7 +919,7 @@ app.post("/api/leads/:id/outreach/signup", { preHandler: requireRole("admin", "o
   }
 });
 
-app.get("/api/leads/:id", { preHandler: requireAuth }, async (req, reply) => {
+app.get("/api/leads/:id", { preHandler: requireRole("admin", "ops", "rep") }, async (req, reply) => {
   const id = Number((req.params as { id: string }).id);
   const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, id) });
   if (!lead) return reply.code(404).send({ error: "not found" });
@@ -1103,6 +1139,8 @@ app.post("/api/competitors/suggestions/:key", { preHandler: requireRole("admin",
 
 app.delete("/api/competitors/:id", { preHandler: requireRole("admin", "ops") }, async (req) => {
   const id = Number((req.params as { id: string }).id);
+  // Leads linked to it go back to "competitor unknown" rather than pointing at a row that's gone.
+  await db.update(schema.leads).set({ competitorId: null }).where(eq(schema.leads.competitorId, id));
   await db.delete(schema.competitors).where(eq(schema.competitors.id, id));
   await audit(req, "competitor.delete", "competitors", id, {});
   return { ok: true };
@@ -1190,7 +1228,12 @@ const jobTriggers: Record<string, () => Promise<unknown>> = {
   "referral-expiry": () => runReferralExpiry(db),
   "metrics-digest": () => runMetricsDigest(db),
   "enrich-personalize": () => runEnrichPersonalize(db),
-  "lead-ingest": () => runLeadIngest(db),
+  // New leads are ranked straight after, under the rank job's own lock, so they're ordered in the queue now.
+  "lead-ingest": async () => {
+    const r = await runLeadIngest(db);
+    if (r.inserted > 0) await withMysqlLock(conn.pool, "job:rank-recompute", () => runRankRecompute(db));
+    return r;
+  },
   "customerio-sync": () => runCustomerioSync(db),
 };
 
@@ -1283,8 +1326,15 @@ app.post("/api/messages/:id/approve", { preHandler: requireRole("admin", "ops", 
       .where(eq(schema.messages.id, id));
   }
 
+  if (msg.state !== "linted") return reply.code(409).send({ error: `this message is ${msg.state}, not a draft waiting for approval` });
   if (msg.channel === "email") {
     const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, msg.leadId) });
+    // Edited copy is checked again before anything leaves.
+    if (body != null || subject != null) {
+      const { lintEmail, isBlocked } = await import("@biolinx/jobs");
+      const v = lintEmail(subject ?? msg.subject ?? "", body ?? msg.body ?? "", { channel: "email", touchNumber: msg.touchNumber, isPublic: false, audience: "prospect", hasUnsubscribeLink: true, hasPostalAddress: !!process.env.POSTAL_ADDRESS, recipientCountry: lead?.geoCountry ?? null, emailProvenance: (lead?.emailProvenance as never) ?? null });
+      if (isBlocked(v)) return reply.code(409).send({ error: `compliance: ${v.filter((x: { severity: string }) => x.severity === "block").map((x: { detail: string }) => x.detail).join("; ")}` });
+    }
     const pusher = instantlyPusher();
     if (!pusher) return reply.code(409).send({ error: "email not configured (campaign/API key) — cannot send" });
     if (!lead?.email) return reply.code(409).send({ error: "lead has no email address" });

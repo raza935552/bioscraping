@@ -117,3 +117,11 @@ describe("approved outreach copy (marketing's flow templates, 2026-09-16)", () =
     expect(lint("we can offer you 25% commission, see biolinxlabs.com", { ...ctx, approvedCopy: true }).map((v) => v.rule)).toContain("L2-opener-link");
   });
 });
+
+describe("earnings lists (review, 2026-09-16)", () => {
+  const ctx = { channel: "dm" as const, touchNumber: 2, isPublic: false, audience: "prospect" as const, approvedCopy: true };
+  it("blocks a dollar list after an earning word unless it's labelled historical", () => {
+    expect(lint("Here's how much some of our affiliates have earned so far:\nNick (team member) → $441.71", ctx).map((v) => v.rule)).toContain("L7-earnings");
+    expect(lint("What a few affiliates earned so far (historical results, not a promise):\nNick (team member) → historical $441.71", ctx)).toEqual([]);
+  });
+});

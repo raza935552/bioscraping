@@ -19,3 +19,11 @@ describe("reply suggestions", () => {
     expect(extractSignupDetails("first name: Sam, last name: Lee, sam@x.co, SAML10")).toEqual({ email: "sam@x.co", code: "SAML10", firstName: "Sam", lastName: "Lee" });
   });
 });
+
+describe("polite declines (review, 2026-09-16)", () => {
+  it("reads soft no's as no", () => {
+    expect(classifyReplyKeywords("not really interested").kind).toBe("no");
+    expect(classifyReplyKeywords("ok no worries").kind).toBe("no");
+    expect(classifyReplyKeywords("maybe later").kind).toBe("no");
+  });
+});

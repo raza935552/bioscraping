@@ -156,9 +156,12 @@ describe("planSearches", () => {
 
   it("rotation starts from a different competitor each day and wraps", () => {
     const three = [{ name: "A" }, { name: "B" }, { name: "C" }];
-    // Budget covers all three, so each day advances by three: same set, no gap.
+    // Budget covers all three: every competitor every day, starting one later each day so the later
+    // phrasings (discount, domains) reach every competitor over time (review, 2026-09-16).
     const p = { platforms: ["tiktok"] as ProfileRow["platforms"], terms: { tiktok: [] }, dailyCap: 10, spendCapUsd: "1.00" };
-    expect(planSearches(p, three, 30, 1).run.map((s) => s.term)).toEqual(["A code", "B code", "C code", "A discount", "B discount", "C discount"]);
+    expect(planSearches(p, three, 30, 0).run.map((s) => s.term)).toEqual(["A code", "B code", "C code", "A discount", "B discount", "C discount"]);
+    expect(planSearches(p, three, 30, 1).run.map((s) => s.term)).toEqual(["B code", "C code", "A code", "B discount", "C discount", "A discount"]);
+    expect(planSearches(p, three, 30, 3).run.map((s) => s.term)[0]).toBe("A code");
   });
 
   it("consecutive days search different competitors when the budget only covers some", () => {
@@ -335,9 +338,12 @@ describe("quality in planProfile (first live run lessons)", () => {
   it("competitor affiliates who name the competitor get a 1K follower minimum, or none with a 10K-view post", async () => {
     const comps = [{ name: "Amino Club" }];
     const p = { followerMin: { tiktok: 5000 } };
-    const h = (views: number | undefined, term = "Amino Club code") => ({ platform: "tiktok" as const, term, views });
-    expect(followerMinFor(p, h(500), true, comps)).toBe(COMPETITOR_FOLLOWER_MIN);
-    expect(followerMinFor(p, h(178_700), true, comps)).toBeUndefined();
+    const h = (views: number | undefined, term = "Amino Club code", postedAt: string | null = "2026-09-10T00:00:00Z") => ({ platform: "tiktok" as const, term, views, postedAt });
+    expect(followerMinFor(p, h(500), true, comps, true, now)).toBe(COMPETITOR_FOLLOWER_MIN);
+    expect(followerMinFor(p, h(178_700), true, comps, true, now)).toBeUndefined();
+    // The viral post must name the competitor itself and be recent (review, 2026-09-16).
+    expect(followerMinFor(p, h(178_700), true, comps, false, now)).toBe(COMPETITOR_FOLLOWER_MIN);
+    expect(followerMinFor(p, h(178_700, "Amino Club code", "2025-01-01T00:00:00Z"), true, comps, true, now)).toBe(COMPETITOR_FOLLOWER_MIN);
     expect(followerMinFor(p, h(178_700), false, comps)).toBe(5000); // doesn't name the competitor
     expect(followerMinFor(p, h(178_700, "#peptidetok"), true, comps)).toBe(5000); // audience search
     expect(followerMinFor({ followerMin: { tiktok: 500 } }, h(10), true, comps)).toBe(500); // never raises a lower minimum
@@ -347,7 +353,7 @@ describe("quality in planProfile (first live run lessons)", () => {
     const club = { id: 1, name: "Amino Club", domains: ["amino club"], codePattern: null, codePrefix: null, commissionPct: null };
     const say = "Use code REVIVE at Amino Club for 35% off, weight loss research";
     const hits = new Map([["t", [
-      hit("viral", { term: "Amino Club code", followers: 64, views: 178_700, postText: say }),
+      hit("viral", { term: "Amino Club code", followers: 64, views: 178_700, postText: say, postedAt: "2026-09-10T00:00:00Z" }),
       hit("small", { term: "Amino Club code", followers: 2843, views: 2461, postText: say }),
       hit("tiny", { term: "Amino Club code", followers: 400, views: 900, postText: say }),
       hit("plain", { term: "#weightloss", followers: 2843, views: 2461, postText: english }),
@@ -480,7 +486,13 @@ describe("linking research-board leads to a competitor", () => {
   it("takes the competitor named first, handles squashed names and field-only aliases, and names nobody for vague entries", () => {
     expect(linkCompetitor("Amino Club; Peptira", comps)).toBe(1);
     expect(linkCompetitor("Peptira + Amino Club", comps)).toBe(2);
-    expect(linkCompetitor("Multi-vendor: Flawless, Atomik Labz, Glacier Aminos", comps)).toBe(3);
+    expect(linkCompetitor("Multi-vendor: Flawless, Atomik Labz, Glacier Aminos", comps, { companyField: true })).toBe(3);
+    // Review, 2026-09-16: no squashed-text or short-alias matches outside the company field.
+    const ion = [...comps, { id: 5, name: "Ion Peptide", domains: ["ionpeptide", "ion peptide"] }];
+    expect(linkCompetitor("clear product information peptides", ion)).toBeNull();
+    expect(linkCompetitor("the ion channel explained", ion)).toBeNull();
+    expect(linkCompetitor("Ion (research vendor)", ion, { companyField: true })).toBe(5);
+    expect(linkCompetitor("flawless skin routine", comps)).toBeNull();
     expect(linkCompetitor("ModernAminos", comps)).toBe(4);
     expect(linkCompetitor("Unnamed source", comps)).toBeNull();
     expect(linkCompetitor("unknown (code LACEY10)", comps)).toBeNull();
@@ -521,5 +533,40 @@ describe("competitor affiliates only", () => {
     expect(s.novapeptides).toMatchObject({ name: "Nova Peptides", count: 3, examples: ["https://www.tiktok.com/@a/video/1", "https://www.tiktok.com/@b/video/2"] });
     s = recordSuggestions({ ...s, novapeptides: { ...s.novapeptides!, dismissed: true } }, [{ text: "code Z at Nova Peptides", url: null }], known, now);
     expect(s.novapeptides?.dismissed).toBe(true);
+  });
+});
+
+describe("review fixes (2026-09-16)", () => {
+  it("a brand page is its name plus nothing or a company word, not any handle containing it", () => {
+    const ion = { name: "Ion Peptide", domains: ["ionpeptide", "ion peptide"] };
+    expect(isCompetitorOwnAccount("ionpeptide", ion)).toBe(true);
+    expect(isCompetitorOwnAccount("ionpeptideofficial", ion)).toBe(true);
+    expect(isCompetitorOwnAccount("passionpeptides", ion)).toBe(false);
+    expect(isCompetitorOwnAccount("visionpeptide_coach", ion)).toBe(false);
+    expect(isCompetitorOwnAccount("champion_peptides", ion)).toBe(false);
+  });
+
+  it("countFresh uses the competitor follower minimum, so productive code searches don't rest", () => {
+    const club = { id: 1, name: "Amino Club", domains: ["amino club"], codePattern: null, codePrefix: null, commissionPct: null };
+    const profile = { followerMin: { tiktok: 5000 }, followerMax: {}, countries: ["US"], language: "en", excludeTerms: [], excludeHandles: [] } as unknown as ProfileRow;
+    const mk = (handle: string) => ({ platform: "tiktok" as const, handle, profileUrl: `https://www.tiktok.com/@${handle}`, displayName: handle, bio: null, followers: 2500, postUrl: null, postText: "code KAY at Amino Club", postedAt: "2026-09-10T00:00:00Z", country: null, isRepost: null, term: "Amino Club code" });
+    expect(countFresh(profile, [mk("a"), mk("b")], emptyKnown(), [club], new Date("2026-09-16T00:00:00Z"))).toBe(2);
+    expect(countFresh(profile, [mk("a")], emptyKnown(), [], new Date("2026-09-16T00:00:00Z"))).toBe(0);
+  });
+
+  it("auto-accept needs a personal code; a bare mention waits for a person", async () => {
+    const v: VerifyFn = async (h) => ({ followers: 20000, bio: null, lastPostAt: "2026-09-12T00:00:00Z", isRepostRatio: null, profileUrl: h.profileUrl, items: [{ url: h.profileUrl + "/v", text: h.handle === "coded" ? "use code AFF10 at Amino Club, weight loss" : "got my stuff from Amino Club, weight loss" }] });
+    const club = { id: 1, name: "Amino Club", domains: ["amino club"], codePattern: null, codePrefix: null, commissionPct: null };
+    const profile = { id: 1, name: "t", active: true, niche: "Weight-loss seeker", brandFit: null, platforms: ["tiktok"], terms: {}, seedAccounts: null, followerMin: { tiktok: 5000 }, followerMax: {}, activityDays: 30, countries: ["US"], language: "en", matchTerms: ["weight loss"], excludeTerms: [], excludeHandles: [], dailyCap: 10, spendCapUsd: "5.00", lastRunAt: null, lastRunSummary: null } as unknown as ProfileRow;
+    const hit = (handle: string, text: string) => ({ platform: "tiktok" as const, handle, profileUrl: `https://www.tiktok.com/@${handle}`, displayName: handle, bio: null, followers: 20000, postUrl: `https://www.tiktok.com/@${handle}/video/1`, postText: text, postedAt: "2026-09-12T00:00:00Z", country: null, isRepost: null, term: "Amino Club code" });
+    const { candidates } = await planProfile(profile, [club], new Map([["t", [hit("coded", "use code AFF10 at Amino Club"), hit("mention", "got my stuff from Amino Club")]]]), emptyKnown(), v, new Date("2026-09-16T00:00:00Z"), { requireCompetitor: true, autoAccept: true });
+    expect(candidates.map((c) => [c.hit.handle, c.lead.sourcingReview])).toEqual([["coded", "accepted"], ["mention", "pending"]]);
+  });
+
+  it("search cost counts what the searches bill, not the people merged from them", async () => {
+    const v: VerifyFn = async () => null;
+    const profile = { id: 1, name: "t", active: true, niche: "Biohacker", brandFit: null, platforms: ["tiktok"], terms: {}, seedAccounts: null, followerMin: {}, followerMax: {}, activityDays: 30, countries: ["US"], language: "en", matchTerms: [], excludeTerms: [], excludeHandles: [], dailyCap: 0, spendCapUsd: "5.00", lastRunAt: null, lastRunSummary: null } as unknown as ProfileRow;
+    const { summary } = await planProfile(profile, [], new Map(), emptyKnown(), v, new Date(), { searchCostUsd: 0.27 });
+    expect(summary.estimatedCostUsd).toBe(0.27);
   });
 });

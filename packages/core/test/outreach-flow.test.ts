@@ -70,3 +70,12 @@ describe("templates", () => {
     expect(gapIndexFor(10, 7)).toBe(5);
   });
 });
+
+describe("unclear replies at each stage", () => {
+  it("offers details at an offer, nudges at a sign-up ask, and stops after a referral ask", () => {
+    expect(next("offer1", [sent("offer1_soft", 0), reply("no_info", 1)])).toMatchObject({ templateId: "reply2_details" });
+    expect(next("offer1", [sent("offer1_soft", 0), reply("no", 1), sent("recruit_aro", 1), reply("no_info", 2)])).toMatchObject({ templateId: "reply2b_aro_details" });
+    expect(next("offer1", [sent("reply1_signup", 1), reply("no_info", 2)])).toMatchObject({ templateId: "checkin_no_info" });
+    expect(next("offer2", [sent("offer2_soft", 0), reply("no", 1), sent("reply3_referral", 1), reply("no_info", 2)])).toMatchObject({ kind: "done", outcome: "declined" });
+  });
+});

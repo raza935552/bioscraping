@@ -22,7 +22,8 @@ const flag = (name: string) => {
 const maxNew = flag("--max");
 const spendCapUsd = flag("--cap");
 const arg = argv[0];
-const opts = { ...(arg === "all" ? { allActive: true } : arg ? { profileId: Number(arg) } : {}), ...(maxNew ? { maxNew } : {}), ...(spendCapUsd ? { spendCapUsd } : {}) };
+// A requested batch (--max) runs every active audience, even ones that already ran today.
+const opts = { ...(arg === "all" || (!arg && maxNew) ? { allActive: true } : arg ? { profileId: Number(arg) } : {}), ...(maxNew ? { maxNew } : {}), ...(spendCapUsd ? { spendCapUsd } : {}) };
 if ("profileId" in opts && !Number.isInteger(opts.profileId)) {
   console.error(`usage: run:ingest [profileId | all] (got "${arg}")`);
   process.exit(1);
@@ -33,6 +34,10 @@ const summary = await withMysqlLock(conn.pool, "job:lead-ingest", () => runLeadI
 if (summary === null) {
   console.error("lead-ingest is already running (scheduler or admin). Try again when it finishes.");
   process.exit(1);
+}
+if (summary.inserted > 0) {
+  const { runRankRecompute } = await import("@biolinx/jobs");
+  await withMysqlLock(conn.pool, "job:rank-recompute", () => runRankRecompute(conn.db));
 }
 console.log(JSON.stringify(summary, null, 2));
 process.exit(0);

@@ -61,7 +61,7 @@ export const discoverTikTok: Discoverer = async (term, deps) => {
       bio: r.authorMeta?.signature ? clip(r.authorMeta.signature, 300) : null,
       followers: toNumber(r.authorMeta?.fans),
       postUrl: isHttpUrl(r.webVideoUrl) ? r.webVideoUrl : null,
-      postText: r.text ? clip(r.text, 300) : null,
+      postText: r.text ? clip(r.text, 2000) : null,
       postedAt,
       country: countryCode(r.locationMeta?.countryCode),
       isRepost: null,

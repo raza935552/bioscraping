@@ -26,6 +26,19 @@ export function Templates() {
       .catch((e) => setErr((e as Error).message));
   }, []);
 
+  // Previews follow the edits (after a short pause), so "passes compliance" is never out of date.
+  useEffect(() => {
+    if (!settings) return;
+    let stale = false;
+    const t = window.setTimeout(() => {
+      void api.previewOutreach(settings).then((p) => !stale && setPreviews(p.previews)).catch(() => {});
+    }, 700);
+    return () => {
+      stale = true;
+      window.clearTimeout(t);
+    };
+  }, [settings]);
+
   if (!settings) return err ? <div className="error">{err}</div> : <div className="muted">Loading…</div>;
 
   const set = (patch: Partial<OutreachSettings>) => setSettings({ ...settings, ...patch });

@@ -21,7 +21,7 @@ export function nextStep(l: LeadRow): NextStep {
   const status = l.status ?? "Not contacted";
   if (l.outreachPath === "converted") return { tone: "stop", title: "Already our affiliate", detail: "Nothing to send." };
   if (l.isDead) return { tone: "stop", title: "Skip: unreachable", detail: "The account couldn't be found or has gone quiet." };
-  if ((l.subProfile ?? "").toUpperCase().startsWith("SP5")) return { tone: "stop", title: "Never message", detail: "Goodwill advocate (SP5): they already like Biolinx; a pitch would do harm." };
+  if ((l.subProfile ?? "").toUpperCase().startsWith("SP5")) return { tone: "stop", title: "Never message", detail: "They're already a Biolinx fan; a sales pitch would do harm." };
   if (["Signed", "Signed up"].includes(status)) return { tone: "stop", title: "Signed", detail: "They've signed up. Nothing to send." };
   if (["Passed", "No"].includes(status)) return { tone: "stop", title: "Closed", detail: "They said no or were passed on." };
   switch (l.outreachPath) {
@@ -45,12 +45,12 @@ export function nextStep(l: LeadRow): NextStep {
           : l.competitorRatePct != null
             ? `${brand} pays ${l.competitorRatePct}%, under our 25% for life.`
             : `They promote ${brand}. Pitch our 25% for life.`;
-      if (status === "Not contacted" || f?.kind === "send") return { tone: "go", title: `Send ${offer} · ${channel}`, detail: `${why} Open the lead: the ${offer} message is filled in and ready to copy.${l.affiliateCode ? ` Their code with ${brand} is ${l.affiliateCode}.` : ""}` };
+      if (status === "Not contacted" || f?.kind === "send") return { tone: "go", title: `Send the first message · ${channel}`, detail: `${why} Open the lead: the message (${offer}) is filled in and ready to copy.${l.affiliateCode ? ` Their code with ${brand} is ${l.affiliateCode}.` : ""}` };
       if (status === "Contacted") return { tone: "wait", title: "Waiting for their reply", detail: `Messaged ${l.lastReachedOut?.slice(0, 10) ?? ""} (touch ${l.followUpsSent}). When they answer, log it: yes → sign-up details, tell me more → program details, no → the next offer.` };
-      return { tone: "go", title: "Continue the conversation", detail: `Status: ${status}. Follow the reply flow for ${offer}.` };
+      return { tone: "go", title: "Continue the conversation", detail: `Status: ${status}. Open the lead: the next message is ready.` };
     }
     default:
-      return { tone: "wait", title: "Recompute ranks", detail: "This lead has no outreach path yet." };
+      return { tone: "wait", title: "Not ready yet", detail: "The system hasn't sorted this lead yet. Check again after the next update." };
   }
 }
 
@@ -78,11 +78,28 @@ export function LeadBubbleCell({ l }: { l: LeadRow }) {
     if (closeTimer.current) window.clearTimeout(closeTimer.current);
     closeTimer.current = window.setTimeout(() => setRect(null), 180);
   };
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const lastPointer = useRef<string>("mouse");
   useEffect(() => {
     if (!rect) return;
-    const close = () => setRect(null);
-    window.addEventListener("scroll", close, true);
-    return () => window.removeEventListener("scroll", close, true);
+    // Page scrolls close it; scrolling inside the bubble doesn't. A tap outside or Escape closes it too.
+    const onScroll = (e: Event) => {
+      if (bubbleRef.current && e.target instanceof Node && bubbleRef.current.contains(e.target)) return;
+      setRect(null);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (anchor.current?.contains(e.target as Node) || bubbleRef.current?.contains(e.target as Node)) return;
+      setRect(null);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setRect(null);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [rect]);
 
   const width = 360;
@@ -93,10 +110,22 @@ export function LeadBubbleCell({ l }: { l: LeadRow }) {
     <div
       ref={anchor}
       className="bubble-anchor"
-      onMouseEnter={show}
-      onMouseLeave={hideSoon}
+      role="button"
+      tabIndex={0}
+      aria-label="How we found them and what to do"
+      onPointerDown={(e) => (lastPointer.current = e.pointerType)}
+      onMouseEnter={() => lastPointer.current === "mouse" && show()}
+      onMouseLeave={() => lastPointer.current === "mouse" && hideSoon()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (rect) setRect(null);
+          else show();
+        }
+      }}
       onClick={(e) => {
         e.stopPropagation();
+        if (lastPointer.current === "mouse" && rect) return; // already open from hovering
         if (rect) setRect(null);
         else show();
       }}
@@ -105,6 +134,7 @@ export function LeadBubbleCell({ l }: { l: LeadRow }) {
       <span className={`chip ${TONE_CHIP[step.tone]}`}>{step.title}</span>
       {rect && (
         <div
+          ref={bubbleRef}
           className="bubble"
           style={{ left, width, ...(below ? { top: rect.bottom + 6 } : { bottom: window.innerHeight - rect.top + 6 }) }}
           onMouseEnter={show}

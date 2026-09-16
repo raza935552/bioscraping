@@ -60,6 +60,22 @@ describe("findAffiliateCode / PROMO_PATTERN", () => {
     expect(findAffiliateCode("love peptide sciences, great stuff", [named])).toEqual({ code: null, competitor: named });
     expect(findAffiliateCode("use code 'Mel' at checkout with peptide sciences", [named])?.code).toBe("MEL");
     expect(findAffiliateCode("Peptide Sciences💙 S@Le cod3: ThatGeek #glowup", [named])?.code).toBe("THATGEEK");
+  });
+  it("ordinary words after 'code' aren't codes, and only the competitor's own referral links count (review, 2026-09-16)", () => {
+    const club = { ...ps, name: "Amino Club", codePrefix: null, domains: ["aminoclub.com", "amino club"] };
+    const code = (t: string) => findAffiliateCode(t, [club])?.code ?? null;
+    expect(code("Use Amino Club code JANE")).toBe("JANE");
+    expect(code("Amino Club discount code for 20% off")).toBeNull();
+    expect(code("I use them daily. Amino Club, code SARAH10")).toBe("SARAH10");
+    expect(code("amino club code: none needed")).toBeNull();
+    expect(code("amino club https://youtube.com/watch?v=abc&ref=share")).toBeNull();
+    expect(code("Use my code for JAMIE222 at Amino Club")).toBe("JAMIE222");
+    expect(code("Code:MOSES(AMINOCLUB) #aminoclub")).toBe("MOSES");
+    expect(code("code DDT10 first, then Amino Club code KAY")).toBe("KAY");
+    expect(code("shop aminoclub.com/?ref=Chasity")).toBe("CHASITY");
+    expect(code("Amino Club weekend flash sale! Use northern for 15% off")).toBe("NORTHERN");
+    expect(code("I use them daily, Amino Club is great")).toBeNull();
+    expect(code("amino club discount: Soyylapri")).toBe("SOYYLAPRI");
     expect(findAffiliateCode("nothing here", [ps])).toBeNull();
     expect(findAffiliateCode("code ABC12", [{ ...ps, codePrefix: null, codePattern: "^ABC\\d+$" }])).toEqual({
       code: "ABC12",

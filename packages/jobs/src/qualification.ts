@@ -5,7 +5,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { isQualifiedPath, outreachPath, type OutreachPath } from "@biolinx/core";
 import { schema, type Db } from "@biolinx/db";
-import { compact, mentionIndex } from "@biolinx/scraping";
+import { mentionIndex } from "@biolinx/scraping";
 
 type CompetitorRow = Pick<typeof schema.competitors.$inferSelect, "id" | "name" | "domains" | "commissionPct" | "active">;
 
@@ -18,21 +18,22 @@ const FIELD_ONLY_ALIASES: Record<string, string[]> = {
   "True Peptide": ["true peptide"],
 };
 
-/** The competitor named first in the text, or null. "Unnamed source" and similar name nobody. */
-export function linkCompetitor(text: string | null | undefined, competitors: Array<Pick<CompetitorRow, "id" | "name" | "domains">>): number | null {
+/** The competitor named first in the text, or null. "Unnamed source" and similar name nobody.
+ *  Whole words only: squashing text made "information peptides" read as Ion Peptide. Short aliases
+ *  ("ion", "flawless") count only in the research board's company field (`companyField`). */
+export function linkCompetitor(text: string | null | undefined, competitors: Array<Pick<CompetitorRow, "id" | "name" | "domains">>, opts: { companyField?: boolean } = {}): number | null {
   if (!text?.trim()) return null;
   const lower = text.toLowerCase();
-  const squashed = compact(text);
   let best: { id: number; at: number } | null = null;
   for (const c of competitors) {
-    const needles = [c.name, ...(((c.domains as string[] | null) ?? []).map((d) => d.replace(/\.[a-z]{2,}$/i, ""))), ...(FIELD_ONLY_ALIASES[c.name] ?? [])];
+    const domains = ((c.domains as string[] | null) ?? []).flatMap((d) => [d, d.replace(/\.[a-z]{2,}$/i, "")]);
+    const needles = [c.name, ...domains, ...(opts.companyField ? FIELD_ONLY_ALIASES[c.name] ?? [] : [])];
     let at = Infinity;
     for (const n of needles) {
-      const i = mentionIndex(lower, n);
-      if (i >= 0) at = Math.min(at, i);
-      else {
-        const sq = compact(n);
-        if (sq.length >= 8 && squashed.includes(sq)) at = Math.min(at, 10_000 + squashed.indexOf(sq));
+      // A squashed spelling ("ModernAminos") still counts when it's a whole word of its own.
+      for (const form of [n, n.replace(/\s+/g, "")]) {
+        const i = mentionIndex(lower, form);
+        if (i >= 0) at = Math.min(at, i);
       }
     }
     if (at !== Infinity && (!best || at < best.at)) best = { id: c.id, at };
@@ -45,6 +46,8 @@ export function ratesById(competitors: Array<Pick<CompetitorRow, "id" | "commiss
 }
 
 export function pathOf(lead: { affiliationStatus: string | null; competitorId: number | null }, rates: Map<number, number | null>): OutreachPath {
+  // A competitor_id whose row was deleted names nobody: never read it as "no rate on file".
+  if (lead.competitorId != null && !rates.has(lead.competitorId)) return outreachPath({ ...lead, competitorId: null }, null);
   return outreachPath(lead, lead.competitorId != null ? rates.get(lead.competitorId) : null);
 }
 
@@ -58,7 +61,7 @@ export async function linkLeadCompetitors(db: Db): Promise<{ checked: number; li
     .where(and(eq(schema.leads.affiliationStatus, "Signed elsewhere"), isNull(schema.leads.competitorId)));
   let linked = 0;
   for (const l of leads) {
-    const id = linkCompetitor([l.company, l.promoted].filter(Boolean).join(" ; "), competitors);
+    const id = linkCompetitor(l.company, competitors, { companyField: true }) ?? linkCompetitor(l.promoted, competitors);
     if (id == null) continue;
     await db.update(schema.leads).set({ competitorId: id }).where(and(eq(schema.leads.id, l.id), isNull(schema.leads.competitorId)));
     linked++;
