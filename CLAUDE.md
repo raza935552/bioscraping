@@ -225,8 +225,8 @@ implemented and where the engine differs.
   water" bet changed to a free order; recruit + Aro, Aro sign-up, Aro details
   and Aro referral are drafts. Leads link to a competitor row
   (`leads.competitor_id`, linked from the research board's "other creator
-  company" on each rank run; 48 competitors, 32 added 2026-09-16 inactive for
-  sourcing). The Leads table's "Found · next step" bubble shows the channel,
+  company" on each rank run; 48 competitors, 32 added 2026-09-16; 42 active for sourcing, 6 with
+  generic names like "Simple Peptide" inactive so captions don't false-match). The Leads table's "Found · next step" bubble shows the channel,
   proof, contact and the flow's next step.
 - **Customer.io:** every lead with an email is mirrored as a person hourly and
   on accept. Suppressed addresses go as unsubscribed only. No campaigns are
@@ -246,7 +246,7 @@ implemented and where the engine differs.
   32 waiting, 44 rejected (15 for weak reach, audit actor
   `quality-backfill`); 12 emails saved from bios. Earlier rejections (under 5K followers,
   businesses, non-English, UK/Sweden, off-niche, dead, failed reads).
-- **Active audiences (8, US only):** TikTok and YouTube for Weight-loss
+- **Active audiences (4, US only, since 2026-09-16 competitor-only; YouTube paused):** TikTok and YouTube for Weight-loss
   seeker (caps 10/5), Biohacker (10/5), Gym (8/4), Anti-aging (5/3).
   Instagram was split out and paused on 2026-09-15 (17 of 18 Instagram leads
   rejected, 0 confirmed US). Skool, Reddit and Sexual wellness are paused;
