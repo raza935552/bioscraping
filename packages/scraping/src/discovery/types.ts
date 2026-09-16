@@ -82,6 +82,17 @@ export const VERIFY_PRICE: Record<DiscoveryPlatform, number> = {
 /** @deprecated flat estimate; use VERIFY_PRICE[platform]. Kept as the most expensive common read. */
 export const VERIFY_UNIT_PRICE = VERIFY_PRICE.tiktok;
 
+/** TikTok keyword search (clockworks/tiktok-scraper), used for competitor searches such as
+ *  "amino club code". Hashtag feeds don't work for vendors: of 10 leads found through
+ *  #<competitor> hashtags on 2026-09-14/15, none mentioned the competitor. */
+export const TIKTOK_KEYWORD_ACTOR = "clockworks/tiktok-scraper";
+export const TIKTOK_KEYWORD_UNIT_PRICE = 0.003;
+
+/** USD per search result: TikTok hashtags ("#x") and TikTok keyword searches are priced differently. */
+export function searchUnitPrice(platform: DiscoveryPlatform, term: string): number {
+  return platform === "tiktok" && !term.trim().startsWith("#") ? TIKTOK_KEYWORD_UNIT_PRICE : ACTOR_UNIT_PRICE[platform];
+}
+
 export function estimateCost(platform: DiscoveryPlatform, items: number): number {
   return Math.round(ACTOR_UNIT_PRICE[platform] * items * 10000) / 10000;
 }

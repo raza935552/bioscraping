@@ -3,7 +3,7 @@
 
 import { runActorSync } from "../apify.js";
 import { clip, engagement, toIso, toNumber } from "../fetchers/shared.js";
-import { DISCOVERY_ACTORS, countryCode, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
+import { DISCOVERY_ACTORS, TIKTOK_KEYWORD_ACTOR, countryCode, isHttpUrl, type Discoverer, type DiscoveryHit } from "./types.js";
 
 interface Row {
   text?: string;
@@ -28,12 +28,25 @@ export function tagOf(term: string): string {
     .replace(/[^\p{L}\p{N}_]/gu, "");
 }
 
+/** "#tag" searches the hashtag feed; any other term is a keyword search ("amino club code"),
+ *  which finds captions that say the words even without a hashtag. */
 export const discoverTikTok: Discoverer = async (term, deps) => {
-  const rows = await runActorSync<Row>(
-    { token: deps.apify.token, fetchImpl: deps.fetchImpl },
-    deps.apify.actors["discover:tiktok"] ?? DISCOVERY_ACTORS.tiktok,
-    { hashtags: [tagOf(term)], resultsPerPage: deps.perTerm },
-  );
+  const keyword = !term.trim().startsWith("#");
+  const rows = keyword
+    ? await runActorSync<Row>(
+        { token: deps.apify.token, fetchImpl: deps.fetchImpl },
+        deps.apify.actors["discover:tiktok-search"] ?? TIKTOK_KEYWORD_ACTOR,
+        { searchQueries: [term.trim()], searchSection: "/video", resultsPerPage: deps.perTerm, shouldDownloadVideos: false, shouldDownloadCovers: false, shouldDownloadSubtitles: false },
+        { timeoutSec: 180 },
+      )
+    : await runActorSync<Row>(
+        { token: deps.apify.token, fetchImpl: deps.fetchImpl },
+        deps.apify.actors["discover:tiktok"] ?? DISCOVERY_ACTORS.tiktok,
+        { hashtags: [tagOf(term)], resultsPerPage: deps.perTerm },
+      );
+  // For a keyword search, the post that says the searched words is the evidence to keep.
+  const words = keyword ? term.toLowerCase().replace(/\b(code|discount|promo)\b/g, " ").split(/\s+/).filter((w) => w.length > 2) : [];
+  const says = (text: string | null) => words.length > 0 && !!text && words.every((w) => text.toLowerCase().replace(/[^a-z0-9]/g, "").includes(w.replace(/[^a-z0-9]/g, "")));
   const byHandle = new Map<string, DiscoveryHit>();
   for (const r of rows) {
     const name = r.authorMeta?.name?.trim().toLowerCase();
@@ -58,8 +71,8 @@ export const discoverTikTok: Discoverer = async (term, deps) => {
     const prev = byHandle.get(name);
     if (!prev) byHandle.set(name, hit);
     else {
-      // Keep the newest post as the sample; keep any bio/name we learned.
-      const newer = (postedAt ?? "") > (prev.postedAt ?? "");
+      // Keep the post that says the searched words, else the newest; keep any bio/name we learned.
+      const newer = says(hit.postText) !== says(prev.postText) ? says(hit.postText) : (postedAt ?? "") > (prev.postedAt ?? "");
       byHandle.set(name, {
         ...(newer ? hit : prev),
         displayName: prev.displayName ?? hit.displayName,

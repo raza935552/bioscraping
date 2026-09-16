@@ -7,7 +7,7 @@ import { NICHE_PRIORITY, brandFitForNiche, handleKey, normalizeEmail, normalizeN
 import { createDb, schema, type Db } from "@biolinx/db";
 import { alert, telegramFromEnv } from "@biolinx/notify";
 import {
-  ACTOR_UNIT_PRICE,
+  searchUnitPrice,
   VERIFY_ITEMS,
   VERIFY_PRICE,
   apifyConfigFromEnv,
@@ -285,7 +285,7 @@ export async function planProfile(
   for (const hits of hitsByTerm.values()) {
     for (const h of hits) {
       summary.hits++;
-      summary.estimatedCostUsd = round4(summary.estimatedCostUsd + ACTOR_UNIT_PRICE[h.platform]);
+      summary.estimatedCostUsd = round4(summary.estimatedCostUsd + searchUnitPrice(h.platform, h.term));
       const key = handleKey(h.platform, h.handle);
       if (!merged.has(key)) merged.set(key, h);
     }
@@ -294,7 +294,7 @@ export async function planProfile(
   const { kept, rejected } = applyFilters([...merged.values()], audienceRules(profile));
   summary.rejected = rejected;
 
-  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0, weak_reach: 0 };
+  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0 };
   const allowedCountries = (profile.countries ?? []).map((c) => c.toUpperCase());
   const outsideCountries = (c: string | null) => c != null && allowedCountries.length > 0 && !allowedCountries.includes(c);
   const gated: Array<{ key: string; reason: QualityReason }> = [];
@@ -320,8 +320,11 @@ export async function planProfile(
       summary.alreadyKnown++;
       return false;
     }
-    // Free checks on the search row before paying for a profile read.
-    const reason = outsideCountries(h.country ?? countryFromText(h.bio)) ? "country" : qualityGate(gateInput(h, null, pre.competitor != null));
+    // Free checks on the search row before paying for a profile read. A hit from a competitor search
+    // must name a competitor in its post or bio: the search's whole point is the code or mention.
+    const reason: QualityReason | null = competitorOfTerm(h.term, competitors) && !pre.competitor
+      ? "no_mention"
+      : outsideCountries(h.country ?? countryFromText(h.bio)) ? "country" : qualityGate(gateInput(h, null, pre.competitor != null));
     if (reason) {
       quality[reason]++;
       track(h, false);
@@ -381,8 +384,9 @@ export async function planProfile(
       track(h, false);
       continue;
     }
-    // An email written in the bio. Someone we already have under that email is not a new lead.
-    const email = emailFromText(v?.bio ?? h.bio);
+    // An email written in the bio, else in the post that found them or their recent posts.
+    // Someone we already have under that email is not a new lead.
+    const email = emailFromText(v?.bio ?? h.bio) ?? emailFromText(h.bio) ?? emailFromText(h.postText) ?? (v?.items ?? []).map((i) => emailFromText(i.text)).find(Boolean) ?? null;
     if (email && known.emails.has(normalizeEmail(email))) {
       summary.alreadyKnown++;
       track(h, false);
@@ -568,7 +572,7 @@ export async function loadKnownPeople(db: Db): Promise<KnownPeople> {
   return known;
 }
 
-function competitorRules(rows: Array<typeof schema.competitors.$inferSelect>): CompetitorRule[] {
+export function competitorRules(rows: Array<typeof schema.competitors.$inferSelect>): CompetitorRule[] {
   return rows
     .filter((c) => c.active)
     .map((c) => ({
@@ -595,6 +599,19 @@ function discoveryOptsFor(profile: ProfileRow, platform: DiscoveryPlatform): Dis
 /** Platforms whose discoverer can search a competitor's name. Reddit reads a
  *  subreddit by name, so "Peptide Sciences" would be a subreddit that doesn't exist. */
 const COMPETITOR_NAME_PLATFORMS = new Set<DiscoveryPlatform>(["tiktok", "instagram", "youtube", "skool"]);
+
+/** What a competitor search looks for. Affiliates announce codes ("use code JAMIE222 at Amino Club"),
+ *  and that is how the 411 hand-researched leads were found; searching the bare name as a hashtag
+ *  found nobody who mentioned the competitor. Skool searches communities, so it keeps the name. */
+export function competitorQuery(platform: DiscoveryPlatform, name: string): string {
+  return platform === "tiktok" || platform === "youtube" ? `${name.trim()} code` : name.trim();
+}
+
+/** The competitor a search was for, when the term is a competitor search. */
+export function competitorOfTerm(term: string, competitors: Pick<CompetitorRule, "name">[]): string | null {
+  const t = term.trim().toLowerCase();
+  return competitors.find((c) => t === c.name.toLowerCase() || t === `${c.name.toLowerCase()} code`)?.name ?? null;
+}
 
 export interface PlannedSearch {
   platform: DiscoveryPlatform;
@@ -634,13 +651,13 @@ export function planSearches(
   const n = competitors.length;
   // Advance by as many competitors as one day's budget covers, so tomorrow starts
   // where today stopped instead of repeating most of today's searches.
-  const priceOf = (p: DiscoveryPlatform) => round4(ACTOR_UNIT_PRICE[p] * perTerm);
+  const priceOf = (p: DiscoveryPlatform) => round4(searchUnitPrice(p, competitorQuery(p, "x")) * perTerm);
   const audienceCost = Math.min(
     profile.platforms.reduce((a, p) => a + (profile.terms[p]?.length ?? 0) * priceOf(p), 0),
     n > 0 ? budgetUsd * AUDIENCE_SHARE : Infinity,
   );
   const perCompetitor = profile.platforms.filter((p) => COMPETITOR_NAME_PLATFORMS.has(p)).reduce((a, p) => a + priceOf(p), 0);
-  const perDay = perCompetitor > 0 ? Math.max(1, Math.floor(Math.max(0, budgetUsd - audienceCost) / perCompetitor)) : 1;
+  const perDay = perCompetitor > 0 ? Math.min(Math.max(n, 1), Math.max(1, Math.floor(Math.max(0, budgetUsd - audienceCost) / perCompetitor))) : 1;
   const shift = n > 0 ? (((rotation * perDay) % n) + n) % n : 0;
   const rotated = [...competitors.slice(shift), ...competitors.slice(0, shift)].map((c) => c.name);
   const seen = new Map<DiscoveryPlatform, Set<string>>();
@@ -651,7 +668,7 @@ export function planSearches(
     seen.set(platform, s);
     if (!key || s.has(key)) return null;
     s.add(key);
-    const planned = { platform, term, estimatedCostUsd: round4(ACTOR_UNIT_PRICE[platform] * perTerm) };
+    const planned = { platform, term, estimatedCostUsd: round4(searchUnitPrice(platform, term) * perTerm) };
     if (alreadySearched.has(termStatKey(platform, term))) return null;
     if (resting(platform, term)) {
       restingOut.push(planned);
@@ -672,7 +689,7 @@ export function planSearches(
     return out;
   };
   const audience = roundRobin((p) => profile.terms[p] ?? []);
-  const named = roundRobin((p) => (COMPETITOR_NAME_PLATFORMS.has(p) ? rotated : []));
+  const named = roundRobin((p) => (COMPETITOR_NAME_PLATFORMS.has(p) ? rotated.map((name) => competitorQuery(p, name)) : []));
   // Competitor-name searches are how tier-one affiliates are found, so audience terms may use
   // at most AUDIENCE_SHARE of the search budget when there are competitors to search. On
   // 2026-09-14 hashtags used every dollar and not one of 47 leads was a competitor affiliate.

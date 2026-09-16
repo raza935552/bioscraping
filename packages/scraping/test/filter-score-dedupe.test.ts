@@ -54,7 +54,12 @@ describe("applyFilters", () => {
 describe("findAffiliateCode / PROMO_PATTERN", () => {
   it("finds a prefixed code and its competitor; domain match without code returns the competitor with code null", () => {
     expect(findAffiliateCode("use code PS20 at checkout", [ps])).toEqual({ code: "PS20", competitor: ps });
-    expect(findAffiliateCode("shop peptidesciences.com/?ref=ann", [ps])).toEqual({ code: null, competitor: ps });
+    // A referral link carries the affiliate's code (live 2026-09-16: "ameanopeptides.com/?ref=Chasity").
+    expect(findAffiliateCode("shop peptidesciences.com/?ref=ann", [ps])).toEqual({ code: "ANN", competitor: ps });
+    const named = { ...ps, domains: [...ps.domains, "peptide sciences"] };
+    expect(findAffiliateCode("love peptide sciences, great stuff", [named])).toEqual({ code: null, competitor: named });
+    expect(findAffiliateCode("use code 'Mel' at checkout with peptide sciences", [named])?.code).toBe("MEL");
+    expect(findAffiliateCode("Peptide Sciences💙 S@Le cod3: ThatGeek #glowup", [named])?.code).toBe("THATGEEK");
     expect(findAffiliateCode("nothing here", [ps])).toBeNull();
     expect(findAffiliateCode("code ABC12", [{ ...ps, codePrefix: null, codePattern: "^ABC\\d+$" }])).toEqual({
       code: "ABC12",

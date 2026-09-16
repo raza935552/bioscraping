@@ -23,6 +23,10 @@ export interface DetailBundle {
 
 export interface DetailLead {
   socialProfiles: string | null;
+  primaryPlatform?: string | null;
+  email?: string | null;
+  otherCreatorCompany?: string | null;
+  affiliateCode?: string | null;
   niche: string | null;
   totalReach: number | null;
   whereFound: string | null;
@@ -49,6 +53,36 @@ export interface SourcedDetails {
   term: string | null;
   /** Whole days since the last post, or null. */
   daysSinceLastPost: number | null;
+  /** How the engine found them, in words: "TikTok keyword search for "Amino Club code"". */
+  channel: { kind: "competitor" | "hashtag" | "keyword" | "community" | null; label: string } | null;
+  /** Where the saved email was written: their bio or one of their posts (with its link). */
+  emailSource: { where: "bio" | "post"; url: string | null } | null;
+  /** The exact words that show the competitor deal, and the post they're in. */
+  evidence: { quote: string; url: string | null } | null;
+}
+
+const PLATFORM_NAME: Record<string, string> = { tiktok: "TikTok", youtube: "YouTube", instagram: "Instagram", reddit: "Reddit", skool: "Skool" };
+
+/** "found by Biohacker · TikTok via Amino Club code" → how they were found, in words. */
+export function acquisitionChannel(sourcingReason: string | null, platform: string | null | undefined, competitor: string | null | undefined): SourcedDetails["channel"] {
+  const m = (sourcingReason ?? "").match(/^found by (.+) via (.+)$/);
+  if (!m) return null;
+  const term = m[2]!.trim();
+  const where = PLATFORM_NAME[(platform ?? "").toLowerCase()] ?? platform ?? "";
+  if (/ code$/i.test(term) || (competitor && term.toLowerCase() === competitor.toLowerCase())) return { kind: "competitor", label: `${where} search for "${term}" (competitor affiliates)` };
+  if (term.startsWith("#")) return { kind: "hashtag", label: `${where} hashtag ${term}` };
+  if ((platform ?? "").toLowerCase() === "skool") return { kind: "community", label: `Skool community search for "${term}"` };
+  return { kind: "keyword", label: `${where} search for "${term}"` };
+}
+
+/** The sentence around the first mention of `needle`, trimmed to about 200 characters. */
+export function quoteAround(text: string, needle: string): string | null {
+  const i = text.toLowerCase().indexOf(needle.toLowerCase());
+  if (i < 0 || !needle.trim()) return null;
+  const start = Math.max(0, text.lastIndexOf("\n", i) + 1, i - 100);
+  const endLine = text.indexOf("\n", i + needle.length);
+  const end = Math.min(endLine < 0 ? text.length : endLine, i + needle.length + 100);
+  return `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
 }
 
 const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
@@ -96,7 +130,26 @@ export function sourcedDetails(lead: DetailLead, bundle: DetailBundle | null, no
   const bio = bundle?.bio?.trim() || null;
   const last = lead.lastPostAt ? new Date(lead.lastPostAt) : null;
 
+  const texts: Array<{ text: string; url: string | null; where: "bio" | "post" }> = [
+    ...(bio ? [{ text: bio, url: null, where: "bio" as const }] : []),
+    ...[...sample, ...(bundle?.items ?? [])].filter((p) => p?.text).map((p) => ({ text: p.text!, url: typeof p.url === "string" ? p.url : null, where: "post" as const })),
+  ];
+  const email = lead.email?.toLowerCase() ?? null;
+  const emailHit = email ? texts.find((t) => t.text.toLowerCase().includes(email) || t.text.toLowerCase().replace(/\s*[\[(]\s*at\s*[\])]\s*/g, "@").replace(/\s*[\[(]\s*dot\s*[\])]\s*/g, ".").includes(email)) : null;
+  let evidence: SourcedDetails["evidence"] = null;
+  const needles = [lead.affiliateCode, lead.otherCreatorCompany, lead.otherCreatorCompany?.replace(/\s+/g, "")].filter((n): n is string => !!n && n.length >= 3);
+  for (const n of needles) {
+    const hit = texts.find((t) => t.text.toLowerCase().includes(n.toLowerCase()));
+    if (hit) {
+      evidence = { quote: quoteAround(hit.text, n)!, url: hit.url };
+      break;
+    }
+  }
+
   return {
+    channel: acquisitionChannel(lead.sourcingReason, lead.primaryPlatform, lead.otherCreatorCompany),
+    emailSource: email ? (emailHit ? { where: emailHit.where, url: emailHit.url } : { where: "bio", url: null }) : null,
+    evidence,
     handle,
     niche: normalizeNiche(lead.niche) ?? lead.niche,
     bio,

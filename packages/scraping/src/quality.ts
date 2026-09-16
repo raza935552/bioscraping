@@ -11,7 +11,7 @@ import type { DiscoveryHit } from "./discovery/types.js";
 /** "country": evidence places the creator outside the audience's countries (see country.ts).
  *  "no_read": the profile read failed or found nothing, so reach and activity can't be verified.
  *  "weak_reach": recent posts reach a tiny share of the followers (bought, stale or dying reach). */
-export type QualityReason = "non_english" | "dead" | "off_niche" | "followers" | "country" | "no_read" | "weak_reach";
+export type QualityReason = "non_english" | "dead" | "off_niche" | "followers" | "country" | "no_read" | "weak_reach" | "no_mention";
 
 /** Lowercase letters and digits only: "#WeightLoss" and "weight loss" both → "weightloss". */
 export function compact(s: string): string {

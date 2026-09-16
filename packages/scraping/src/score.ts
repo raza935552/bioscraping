@@ -52,7 +52,11 @@ export interface ScoreResult {
 
 export const PROMO_PATTERN = /(\d{1,2}\s?%\s?off|link in (my )?bio|#ad\b|#sponsored|use (my )?code|discount code|promo code|coupon|affiliate link)/i;
 
-const CODE_TOKEN = /\b(?:(?:use\s+)?(?:my\s+)?code|use)\s*[:\-]?\s*([A-Z][A-Z0-9]{2,15})\b/gi;
+// "use code JAMIE222", "Code: DALIA", "use code 'Mel'", and "cod3: ThatGeek" spelled to dodge TikTok's
+// filters (all seen live 2026-09-16).
+const CODE_TOKEN = /\b(?:(?:use\s+)?(?:my\s+)?c[o0]d[e3]|use)\s*[:\-]?\s*["'“‘]?([A-Z][A-Z0-9]{2,15})\b/gi;
+// Referral links: "ameanopeptides.com/?ref=Chasity", "site.com/ref/JANE", "?aff=jane".
+const REF_LINK = /[a-z0-9-]+\.[a-z]{2,}\/?[^\s]*?(?:[?&](?:ref|code|aff|affiliate|referral|coupon|discount)=|\/(?:ref|r|go)\/)([A-Za-z0-9_-]{2,30})/gi;
 const NOT_CODES = new Set(["CODE", "MY", "THE", "THIS", "LINK"]);
 
 function safeRegex(source: string): RegExp | null {
@@ -92,6 +96,9 @@ export function findAffiliateCode(text: string, competitors: CompetitorRule[]): 
     for (const m of text.matchAll(CODE_TOKEN)) {
       const t = m[1]!.toUpperCase();
       if (!NOT_CODES.has(t) && Math.abs((m.index ?? 0) - at) <= 80) return t;
+    }
+    for (const m of text.matchAll(REF_LINK)) {
+      if (Math.abs((m.index ?? 0) - at) <= 120) return m[1]!.toUpperCase();
     }
     return null;
   };

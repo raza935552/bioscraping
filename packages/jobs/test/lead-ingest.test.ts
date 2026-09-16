@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
-import { parseMaxPending, reviewRoom, byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
+import { competitorOfTerm, competitorQuery, parseMaxPending, reviewRoom, byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
   id: 1,
@@ -136,8 +136,8 @@ describe("planSearches", () => {
       "tiktok #weightloss",
       "reddit r/loseit",
       "tiktok #glp1journey",
-      "tiktok Peptide Sciences",
-      "tiktok Limitless Life",
+      "tiktok Peptide Sciences code",
+      "tiktok Limitless Life code",
     ]);
   });
 
@@ -146,7 +146,7 @@ describe("planSearches", () => {
     const p = { platforms: ["tiktok", "instagram"] as ProfileRow["platforms"], terms: { tiktok: ["#a", "#b"], instagram: ["#a", "#b"] }, dailyCap: 10, spendCapUsd: "1.00" };
     const { run } = planSearches(p, many, 30);
     const labels = run.map((s) => `${s.platform} ${s.term}`);
-    expect(labels.slice(0, 6)).toEqual(["tiktok #a", "instagram #a", "tiktok #b", "instagram #b", "tiktok Vendor 0", "instagram Vendor 0"]);
+    expect(labels.slice(0, 6)).toEqual(["tiktok #a", "instagram #a", "tiktok #b", "instagram #b", "tiktok Vendor 0 code", "instagram Vendor 0"]);
     expect(labels.filter((l) => l.startsWith("instagram")).length).toBeGreaterThan(2);
   });
 
@@ -154,18 +154,18 @@ describe("planSearches", () => {
     const three = [{ name: "A" }, { name: "B" }, { name: "C" }];
     // Budget covers all three, so each day advances by three: same set, no gap.
     const p = { platforms: ["tiktok"] as ProfileRow["platforms"], terms: { tiktok: [] }, dailyCap: 10, spendCapUsd: "1.00" };
-    expect(planSearches(p, three, 30, 1).run.map((s) => s.term)).toEqual(["A", "B", "C"]);
+    expect(planSearches(p, three, 30, 1).run.map((s) => s.term)).toEqual(["A code", "B code", "C code"]);
   });
 
   it("consecutive days search different competitors when the budget only covers some", () => {
     const vendors = Array.from({ length: 12 }, (_, i) => ({ name: `V${i}` }));
-    // TikTok only, cap $0.50: reserve $0.25, $0.25 budget, $0.06 per search → 4 a day.
+    // TikTok only, cap $0.50: reserve $0.25, $0.25 budget, $0.09 per keyword search → 2 a day.
     const p = { platforms: ["tiktok"] as ProfileRow["platforms"], terms: { tiktok: [] }, dailyCap: 10, spendCapUsd: "0.50" };
     const day = (d: number) => planSearches(p, vendors, 30, d).run.map((s) => s.term);
-    expect(day(0)).toEqual(["V0", "V1", "V2", "V3"]);
-    expect(day(1)).toEqual(["V4", "V5", "V6", "V7"]);
-    expect(day(2)).toEqual(["V8", "V9", "V10", "V11"]);
-    expect(day(3)).toEqual(["V0", "V1", "V2", "V3"]);
+    expect(day(0)).toEqual(["V0 code", "V1 code"]);
+    expect(day(1)).toEqual(["V2 code", "V3 code"]);
+    expect(day(5)).toEqual(["V10 code", "V11 code"]);
+    expect(day(6)).toEqual(["V0 code", "V1 code"]);
   });
 
   it("the spend cap gates searching and keeps a reserve for profile reads", () => {
@@ -173,9 +173,9 @@ describe("planSearches", () => {
     const p = { ...base, platforms: ["tiktok"] as ProfileRow["platforms"], spendCapUsd: "0.30" };
     const { run, skipped, budgetUsd } = planSearches(p, competitors, 30);
     expect(budgetUsd).toBe(0.15);
-    // Audience terms get 60% of $0.15 ($0.09): one hashtag, then a competitor name, then the rest.
-    expect(run.map((s) => s.term)).toEqual(["#weightloss", "Peptide Sciences"]);
-    expect(skipped.map((s) => s.term)).toEqual(["Limitless Life", "#glp1journey"]);
+    // Audience terms get 60% of $0.15 ($0.09): one hashtag ($0.06), then a competitor code search ($0.09) fits, nothing else.
+    expect(run.map((s) => s.term)).toEqual(["#weightloss", "Peptide Sciences code"]);
+    expect(skipped.map((s) => s.term)).toEqual(["Limitless Life code", "#glp1journey"]);
     expect(run.reduce((a, s) => a + s.estimatedCostUsd, 0) + verifyReserveUsd(p)).toBeLessThanOrEqual(0.3);
   });
 
@@ -190,12 +190,22 @@ describe("planSearches", () => {
     const p = { ...base, platforms: ["tiktok"] as ProfileRow["platforms"], spendCapUsd: "0.30" };
     const { run, resting } = planSearches(p, competitors, 30, 0, (_pl, t) => t === "#weightloss");
     expect(resting.map((s) => s.term)).toEqual(["#weightloss"]);
-    expect(run.map((s) => s.term)).toEqual(["#glp1journey", "Peptide Sciences"]);
+    expect(run.map((s) => s.term)).toEqual(["#glp1journey", "Peptide Sciences code"]);
   });
 
-  it("dedupes a competitor name that is already an audience term", () => {
-    const { run } = planSearches({ ...base, platforms: ["tiktok"], terms: { tiktok: ["#peptidesciences"] } }, competitors, 30);
-    expect(run.map((s) => s.term)).toEqual(["#peptidesciences", "Limitless Life"]);
+  it("a competitor hashtag audience term and the competitor's code search are different searches", () => {
+    const { run } = planSearches({ ...base, platforms: ["tiktok"], terms: { tiktok: ["#peptidesciences"] }, spendCapUsd: "2.00" }, competitors, 30);
+    expect(run.map((s) => s.term)).toEqual(["#peptidesciences", "Peptide Sciences code", "Limitless Life code"]);
+  });
+
+  it("competitor searches look for codes on TikTok and YouTube, and priced as keyword searches on TikTok", () => {
+    expect(competitorQuery("tiktok", "Amino Club")).toBe("Amino Club code");
+    expect(competitorQuery("youtube", "Amino Club")).toBe("Amino Club code");
+    expect(competitorQuery("skool", "Amino Club")).toBe("Amino Club");
+    expect(competitorOfTerm("amino club code", [{ name: "Amino Club" }])).toBe("Amino Club");
+    expect(competitorOfTerm("#aminoclub", [{ name: "Amino Club" }])).toBeNull();
+    const { run } = planSearches({ platforms: ["tiktok"], terms: { tiktok: ["#a"] }, dailyCap: 10, spendCapUsd: "2.00" }, [{ name: "Amino Club" }], 30);
+    expect(run.map((s) => [s.term, s.estimatedCostUsd])).toEqual([["#a", 0.06], ["Amino Club code", 0.09]]);
   });
 });
 
@@ -292,7 +302,21 @@ describe("quality in planProfile (first live run lessons)", () => {
     const { candidates, summary } = await planProfile(wl, [], hits, emptyKnown(), v, now);
     expect(candidates.map((c) => c.hit.handle)).toEqual(["good"]);
     expect(reads).toBe(1);
-    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0, no_read: 0, weak_reach: 0 });
+    expect(summary.quality).toEqual({ non_english: 1, dead: 0, off_niche: 1, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0 });
+  });
+
+  it("a competitor search hit that never names a competitor is dropped before any paid read", async () => {
+    let reads = 0;
+    const v: VerifyFn = async (h) => { reads++; return { followers: 20000, bio: null, lastPostAt: "2026-09-12T00:00:00Z", isRepostRatio: null, profileUrl: h.profileUrl, items: [{ url: h.profileUrl + "/v", text: english }] }; };
+    const club = { id: 1, name: "Amino Club", domains: ["aminoclub.com", "amino club"], codePattern: null, codePrefix: null, commissionPct: null };
+    const hits = new Map([["t", [
+      hit("hairoil", { term: "Amino Club code", postText: "#healthyhair #growthickhair my peptide hair routine for weight loss" }),
+      hit("jamie", { term: "Amino Club code", postText: "Amino club is the best! Use my code JAMIE222 for 20% off first timers, weight loss research" }),
+    ]]]);
+    const { candidates, summary } = await planProfile(wl, [club], hits, emptyKnown(), v, now);
+    expect(candidates.map((c) => [c.hit.handle, c.lead.otherCreatorCompany, c.lead.affiliateCode])).toEqual([["jamie", "Amino Club", "JAMIE222"]]);
+    expect(reads).toBe(1);
+    expect(summary.quality.no_mention).toBe(1);
   });
 
   it("a dead account after the read is not saved, does not use a slot, and is remembered", async () => {
@@ -329,9 +353,9 @@ describe("quality in planProfile (first live run lessons)", () => {
 describe("many audiences sharing a run", () => {
   it("a search another audience already ran this run is skipped and not paid for", () => {
     const p = { platforms: ["tiktok"] as ProfileRow["platforms"], terms: { tiktok: ["#biohacking"] }, dailyCap: 10, spendCapUsd: "1.00" };
-    const done = new Set(["tiktok:aminoclub"]);
+    const done = new Set(["tiktok:aminoclubcode"]);
     const { run, skipped, resting } = planSearches(p, [{ name: "Amino Club" }, { name: "Swiss Chems" }], 30, 0, () => false, done);
-    expect(run.map((s) => s.term)).toEqual(["#biohacking", "Swiss Chems"]);
+    expect(run.map((s) => s.term)).toEqual(["#biohacking", "Swiss Chems code"]);
     expect([...skipped, ...resting]).toEqual([]);
   });
 

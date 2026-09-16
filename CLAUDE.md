@@ -83,7 +83,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 285 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 294 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -107,7 +107,19 @@ implemented and where the engine differs.
     while that many wait) all gate spend. Real per-platform read prices in
     `VERIFY_PRICE`.
   - Search planning: audience terms round-robin across platforms, then
-    competitor names (40% of the search budget is reserved for them), daily
+    competitor searches (40% of the search budget is reserved for them):
+    `"<competitor> code"` as a TikTok keyword search (`clockworks/tiktok-scraper`,
+    $0.003/result, config key `discover:tiktok-search`) and a YouTube search;
+    Skool keeps the bare name. Searching the name as a hashtag (the old way)
+    found 10 leads, none of whom mentioned the competitor. A competitor-search
+    hit must name a competitor in its post or bio before any paid read
+    (`no_mention`). Codes are read from "use code X", quoted codes, disguised
+    "cod3", and referral links (`?ref=X`). Test on 2026-09-16 (Amino Club,
+    Ameano, Peptira; about $0.40): TikTok keyword search returned real code
+    posts (17 of 24 for Amino Club), but most code posters have under 5K
+    followers (34 dropped by the minimum), so the follower minimum for
+    competitor affiliates is a decision for Jakob. YouTube titles rarely carry
+    codes (0-5 of about 20 channels). daily
     rotation through competitors, a search already run by another audience
     this run is skipped, searches that stop finding new people rest (term
     memory in config `sourcing_term_stats:<id>`).
@@ -130,7 +142,11 @@ implemented and where the engine differs.
     word, a personal code within 80 characters of the mention.
   - Email written in the bio is saved (`emailFromText`, provenance
     `scraped`, so the linter blocks automated email to it) and is a dedupe
-    key; shown in the Sourced table, the lead dialog and the CSV.
+    key, falling back to an email written in their posts; shown in the
+    Sourced table, the lead dialog and the CSV with where it was written.
+    The lead dialog groups "How we found them" (acquisition channel, the
+    post and its stats), "Contact" and "Competitor" (the exact words and
+    the post link); the CSV has the same columns.
   - Dedupe: five keys from every table holding a person, handles parsed from
     every imported `social_profiles` format, plus the unique `lead_handles`
     index inside a per-lead transaction.

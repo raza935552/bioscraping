@@ -500,6 +500,58 @@ export function Leads({ me }: { me: Me }) {
               </div>
             </>
           )}
+          {row && (d?.channel || row.email || row.competitor || d?.surfaced) && (
+            <div className="cards">
+              <div className="card">
+                <div className="k">How we found them</div>
+                <div>{d?.channel?.label ?? "Imported from the research board"}</div>
+                {d?.audience && <div className="muted" style={{ fontSize: 12.5 }}>Audience: {d.audience}</div>}
+                {d?.surfaced && isHttp(d.surfaced.url) && (
+                  <div style={{ fontSize: 12.5, marginTop: 4 }}>
+                    <a href={d.surfaced.url} target="_blank" rel="noreferrer">The post that found them ↗</a>
+                    <span className="muted"> · {compact(d.surfaced.views)} views · {compact(d.surfaced.likes)} likes · {compact(d.surfaced.comments)} comments</span>
+                  </div>
+                )}
+                {row.sample[0]?.text && <div className="muted" style={{ fontSize: 12.5, marginTop: 4, whiteSpace: "pre-wrap" }}>“{row.sample[0].text.slice(0, 280)}”</div>}
+              </div>
+              <div className="card">
+                <div className="k">Contact</div>
+                {row.email ? (
+                  <div>
+                    ✉ <strong>{row.email}</strong>
+                    <div className="muted" style={{ fontSize: 12.5 }}>
+                      Written in their {d?.emailSource?.where === "post" ? (isHttp(d.emailSource.url) ? <a href={d.emailSource.url} target="_blank" rel="noreferrer">post ↗</a> : "post") : "bio"}. Never emailed automatically.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="muted">No email in their bio or posts</div>
+                )}
+                <div style={{ fontSize: 12.5, marginTop: 4 }}>
+                  {row.platform ?? "—"} DM{isHttp(row.profileUrl) && <> · <a href={row.profileUrl} target="_blank" rel="noreferrer">profile ↗</a></>}
+                  {row.country ? ` · ${row.country}` : " · location unknown"}
+                </div>
+              </div>
+              <div className="card">
+                <div className="k">Competitor</div>
+                {row.competitor ? (
+                  <>
+                    <div>
+                      <strong>{row.competitor}</strong>
+                      {row.affiliateCode && <> · code <code>{row.affiliateCode}</code></>}
+                      {row.currentOffer && <> · {row.currentOffer}</>}
+                    </div>
+                    {d?.evidence && (
+                      <div className="muted" style={{ fontSize: 12.5, marginTop: 4, whiteSpace: "pre-wrap" }}>
+                        “{d.evidence.quote}”{isHttp(d.evidence.url) && <> <a href={d.evidence.url} target="_blank" rel="noreferrer">post ↗</a></>}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="muted">No competitor deal found</div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="cards">
             <div className="card" style={{ gridColumn: "1 / -1" }}>
               <div className="k">Personalization notes</div>
@@ -756,7 +808,8 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
                 <td>
                   <div className="flags">
                   {d?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">store</span>}
-                  {l.email && <span className="chip ok" title={`Email in bio: ${l.email}`}>✉ email</span>}
+                  {l.email && <span className="chip ok" title={`Email ${d?.emailSource?.where === "post" ? "in a post" : "in bio"}: ${l.email}`}>✉ email</span>}
+                  {d?.channel?.kind === "competitor" && <span className="chip suggest" title={d.channel.label}>via competitor search</span>}
                   {l.promoTrackRecord && <span className="chip ok" title="Has run a code, discount link or #ad before">promo</span>}
                   {l.doesLive && <span className="chip ok">LIVE</span>}
                   {l.country ? (
