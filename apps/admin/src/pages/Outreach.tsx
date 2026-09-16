@@ -231,7 +231,15 @@ function LeadCard({
         <>
           <ol className="outreach-steps">
             <li><strong>Copy the message</strong></li>
-            <li>{noDm ? <>Send it where you can reach them{lead.email ? <> (email: <strong>{lead.email}</strong>)</> : null}</> : <>Open <strong>{handleLabel}</strong> on {lead.platform} and paste it in a DM</>}</li>
+            <li>
+              {noDm ? (
+                <>Send it where you can reach them{lead.email ? <> (email: <strong>{lead.email}</strong>)</> : null}</>
+              ) : lead.dmKind === "search" ? (
+                <>We don't have their handle: search <strong>{lead.name}</strong> on {lead.platform}, check it's them, and paste it in a DM</>
+              ) : (
+                <>Open <strong>{handleLabel}</strong> on {lead.platform} and paste it in a DM</>
+              )}
+            </li>
             <li>Come back and press <strong>I sent it</strong></li>
           </ol>
           <textarea ref={textRef} className="outreach-message" rows={Math.min(14, Math.max(5, text.split("\n").length + 1))} value={text} onChange={(e) => { setText(e.target.value); setCopied("no"); }} aria-label="Message to send" />
@@ -245,7 +253,9 @@ function LeadCard({
               {copied === "yes" ? "✓ Copied" : "📋 Copy message"}
             </button>
             {lead.dmUrl ? (
-              <a className="btn-link big" href={lead.dmUrl} target="_blank" rel="noreferrer">Open {handleLabel} on {lead.platform} ↗</a>
+              <a className="btn-link big" href={lead.dmUrl} target="_blank" rel="noreferrer">
+                {lead.dmKind === "search" ? `Search "${lead.name}" on ${lead.platform} ↗` : `Open ${handleLabel} on ${lead.platform} ↗`}
+              </a>
             ) : (
               <span className="muted" style={{ alignSelf: "center" }}>{lead.platform ?? "This platform"} has no DMs{lead.email ? ": email them instead" : ""}.</span>
             )}

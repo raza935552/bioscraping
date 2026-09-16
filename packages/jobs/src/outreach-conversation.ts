@@ -378,6 +378,44 @@ export interface WorkQueue {
   waiting: Array<{ leadId: number; name: string; handle: string | null; platform: string | null; dmUrl: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
 }
 
+export interface DmTarget {
+  url: string;
+  /** "profile": their account, where the DM button is. "search": no handle on file, a search for their name. */
+  kind: "profile" | "search";
+  handle: string | null;
+}
+
+/** Where to reach a lead: their profile from any handle we have (sourcing, the research board's handles,
+ *  a post link), or else a search for their name on their platform. Never their website: that opened a
+ *  competitor's store for research-board leads (2026-09-16). */
+export function dmTargetFor(
+  lead: { primaryPlatform: string | null; socialProfiles: string | null; whereFound: string | null; firstName: string | null; lastName: string | null },
+  handleKeys: string[] = [],
+): DmTarget | null {
+  const platform = (lead.primaryPlatform ?? "").toLowerCase();
+  const key = platform.includes("tiktok") ? "tiktok" : platform.includes("instagram") ? "instagram" : platform.includes("reddit") ? "reddit" : platform === "x" ? "x" : null;
+  const candidates: string[] = [];
+  if (key) for (const k of handleKeys) if (k.startsWith(`${key}:`)) candidates.push(k.slice(key.length + 1));
+  const fromSocial = handleOf(lead.socialProfiles);
+  if (fromSocial) candidates.push(fromSocial);
+  const fromPost = (lead.whereFound ?? "").match(/tiktok\.com\/@([\w.\-]+)/i)?.[1];
+  if (fromPost && key === "tiktok") candidates.push(fromPost);
+  for (const h of candidates) {
+    const url = dmLinkFor(lead.primaryPlatform, h);
+    if (url) return { url, kind: "profile", handle: h };
+  }
+  const name = [lead.firstName, lead.lastName].filter(Boolean).join(" ").replace(/\(([^)]*)\)/g, " $1 ").replace(/\s+/g, " ").trim();
+  if (!name || !key) return null;
+  const q = encodeURIComponent(name.slice(0, 60));
+  const search: Record<string, string> = {
+    tiktok: `https://www.tiktok.com/search/user?q=${q}`,
+    instagram: `https://www.instagram.com/explore/search/keyword/?q=${q}`,
+    reddit: `https://www.reddit.com/search/?q=${q}&type=user`,
+    x: `https://x.com/search?q=${q}&f=user`,
+  };
+  return { url: search[key]!, kind: "search", handle: null };
+}
+
 /** A link that opens the creator's profile where a DM can be sent, from platform + handle. YouTube has no DMs. */
 export function dmLinkFor(platform: string | null, handle: string | null): string | null {
   const p = (platform ?? "").toLowerCase();
@@ -411,6 +449,8 @@ export async function outreachWorkQueue(
       isQualifiedPath(pathOf(l, rates)),
   );
   const flows = await flowEventsByLead(db, eligible.map((l) => l.id));
+  const handleKeys = new Map<number, string[]>();
+  for (const h of await db.select({ leadId: schema.leadHandles.leadId, key: schema.leadHandles.handleKey }).from(schema.leadHandles)) handleKeys.set(h.leadId, [...(handleKeys.get(h.leadId) ?? []), h.key]);
   // Leads with a draft still open in the older Send messages queue are handled there, so nobody messages
   // them twice. (A DM already sent there counts as their first offer: see flowEventsByLead.)
   const legacy = new Set(
@@ -424,14 +464,15 @@ export async function outreachWorkQueue(
     const step = flowStepFor(pathOf(l, rates), events, l.id, settings, now, l);
     const last = events[events.length - 1];
     if (step.kind === "wait") {
-      const handle = handleOf(l.socialProfiles);
-      waiting.push({ leadId: l.id, name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)", handle, platform: l.primaryPlatform, dmUrl: dmLinkFor(l.primaryPlatform, handle), lastLabel: DEFAULT_TEMPLATES[step.lastTemplateId].label, sentAt: step.since.toISOString(), dueAt: step.dueAt.toISOString() });
+      const target = dmTargetFor(l, handleKeys.get(l.id));
+      waiting.push({ leadId: l.id, name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)", handle: target?.handle ?? null, platform: l.primaryPlatform, dmUrl: target?.url ?? null, lastLabel: DEFAULT_TEMPLATES[step.lastTemplateId].label, sentAt: step.since.toISOString(), dueAt: step.dueAt.toISOString() });
       continue;
     }
     if (step.kind === "done") continue;
     if (last?.type === "reply") buckets.answer.push({ leadId: l.id, sortKey: last.at.getTime() });
     else if (last?.type === "sent") buckets.checkin.push({ leadId: l.id, sortKey: last.at.getTime() });
-    else buckets.new.push({ leadId: l.id, sortKey: l.conversionRank ?? 1e9 });
+    // New leads we can open straight on their profile come before the ones that need a name search.
+    else buckets.new.push({ leadId: l.id, sortKey: (dmTargetFor(l, handleKeys.get(l.id)) ?.kind === "profile" ? 0 : 1e7) + (l.conversionRank ?? 1e6) });
   }
   for (const b of Object.values(buckets)) b.sort((a, c) => a.sortKey - c.sortKey);
   waiting.sort((a, b) => a.dueAt.localeCompare(b.dueAt));

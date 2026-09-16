@@ -39,3 +39,15 @@ describe("reply suggestion", () => {
     expect(await suggestReplyKind("🙂", { lastMessageLabel: null }, broken)).toMatchObject({ kind: "no_info", source: "keywords" });
   });
 });
+
+describe("where to reach a lead", () => {
+  const base = { primaryPlatform: "TikTok", socialProfiles: null, whereFound: null, firstName: "Aaron", lastName: "Homoki" };
+  it("uses any handle we have, a TikTok post link, or else a name search; never a website", async () => {
+    const { dmTargetFor } = await import("../src/outreach-conversation.js");
+    expect(dmTargetFor({ ...base, socialProfiles: "TikTok @jaws" })).toEqual({ url: "https://www.tiktok.com/@jaws", kind: "profile", handle: "jaws" });
+    expect(dmTargetFor(base, ["tiktok:aaronjaws"])).toMatchObject({ url: "https://www.tiktok.com/@aaronjaws", kind: "profile" });
+    expect(dmTargetFor({ ...base, whereFound: "https://www.tiktok.com/@jawsclips/video/1" })).toMatchObject({ kind: "profile", handle: "jawsclips" });
+    expect(dmTargetFor({ ...base, primaryPlatform: "Instagram", firstName: "Aaron 'Jaws'" })).toMatchObject({ kind: "search", url: expect.stringContaining("instagram.com/explore/search") });
+    expect(dmTargetFor({ ...base, primaryPlatform: "YouTube" })).toBeNull();
+  });
+});

@@ -176,11 +176,11 @@ export function LeadBubbleCell({ l }: { l: LeadRow }) {
             <div className="k">Reach them</div>
             <div>
               {l.platform ?? "—"} DM
-              {isHttp(l.profileUrl) && (
+              {isHttp(l.dmUrl) && (
                 <>
                   {" · "}
-                  <a href={l.profileUrl} target="_blank" rel="noreferrer">
-                    profile ↗
+                  <a href={l.dmUrl!} target="_blank" rel="noreferrer">
+                    {l.dmKind === "search" ? "search their name ↗" : "profile ↗"}
                   </a>
                 </>
               )}

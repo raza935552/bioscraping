@@ -62,6 +62,7 @@ import {
   runSwipeSearch,
   outreachWorkQueue,
   dmLinkFor,
+  dmTargetFor,
   isApprovedWording,
   lintFlowMessage,
   skipOutreachLead,
@@ -486,6 +487,8 @@ app.get("/api/leads", { preHandler: requireRole("admin", "ops", "rep") }, async 
   const competitorById = new Map(competitorRows.map((c) => [c.id, c]));
   const rates = ratesById(competitorRows);
   const paths = new Map(rows.map((l) => [l.id, pathOf(l, rates)]));
+  const handleKeysByLead = new Map<number, string[]>();
+  for (const h of await db.select({ leadId: schema.leadHandles.leadId, key: schema.leadHandles.handleKey }).from(schema.leadHandles)) handleKeysByLead.set(h.leadId, [...(handleKeysByLead.get(h.leadId) ?? []), h.key]);
   const sourcedView = q.view === "sourced";
   // Derived details for every lead (engagement, activity, bio, surfaced post) from its latest
   // profile read: the sourcing read, or a research run's read for imported leads.
@@ -670,7 +673,10 @@ app.get("/api/leads", { preHandler: requireRole("admin", "ops", "rep") }, async 
       rejectedReason: l.sourcingRejectedReason,
       email: l.email,
       outreachPath: paths.get(l.id)!,
-      dmUrl: dmLinkFor(l.primaryPlatform, details.get(l.id)?.handle ?? null),
+      ...(() => {
+        const t = dmTargetFor(l, handleKeysByLead.get(l.id));
+        return { dmUrl: t?.url ?? null, dmKind: t?.kind ?? null };
+      })(),
       competitorLinked: l.competitorId != null ? competitorById.get(l.competitorId)?.name ?? null : null,
       competitorRatePct: l.competitorId != null ? competitorById.get(l.competitorId)?.commissionPct ?? null : null,
       details: details.get(l.id) ?? null,
@@ -801,6 +807,7 @@ app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operato
   outreachClaims.set(work.next.leadId, { userId: me.id, until: now.getTime() + 15 * 60_000 });
   const l = (await db.query.leads.findFirst({ where: eq(schema.leads.id, work.next.leadId) }))!;
   const bundle = (await latestReadBundles([l.id])).get(l.id) ?? null;
+  const handleKeysFor = (await db.select({ key: schema.leadHandles.handleKey }).from(schema.leadHandles).where(eq(schema.leadHandles.leadId, l.id))).map((h) => h.key);
   const d = sourcedDetails(l, bundle, now);
   const conversation = await conversationView(db, l.id, me.name);
   return {
@@ -809,10 +816,12 @@ app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operato
     lead: {
       id: l.id,
       name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)",
-      handle: d.handle,
       platform: l.primaryPlatform,
       profileUrl: profileUrlFor(l),
-      dmUrl: dmLinkFor(l.primaryPlatform, d.handle),
+      ...(() => {
+        const t = dmTargetFor(l, handleKeysFor);
+        return { dmUrl: t?.url ?? null, dmKind: t?.kind ?? null, handle: t?.handle ?? d.handle };
+      })(),
       followers: l.totalReach,
       competitor: conversation?.brand ?? l.otherCreatorCompany,
       code: l.affiliateCode,
