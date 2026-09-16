@@ -445,7 +445,7 @@ export async function planProfile(
       source: "sourcing",
       affiliationStatus: s.competitor ? "Signed elsewhere" : "Unsigned",
       otherCreatorCompany: s.competitor?.name ?? null,
-      currentOffer: s.competitor?.commissionPct != null ? `${s.competitor.commissionPct}%` : null,
+      competitorId: s.competitor?.id ?? null,
       whatTheyPromoted: s.competitor ? s.competitor.name : null,
       affiliateCode: s.affiliateCode,
       lastPostAt: lastPost ? new Date(lastPost) : null,
@@ -760,8 +760,10 @@ export function planSearches(
 
 const termStatsConfigKey = (profileId: number) => `sourcing_term_stats:${profileId}`;
 
-/** Share of an audience's search budget its own terms may use before competitor names get a turn. */
-export const AUDIENCE_SHARE = 0.6;
+/** Share of an audience's search budget its own terms may use before competitor searches get a turn.
+ *  0.2 since 2026-09-16: the outreach flow contacts only competitor affiliates, and hashtag
+ *  searches mostly find unsigned creators. */
+export const AUDIENCE_SHARE = 0.2;
 
 const PER_TERM = 30;
 

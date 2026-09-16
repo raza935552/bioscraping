@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type SamplePost, type SourcedFacets } from "../api.js";
 import { Modal, PageInfo, Pagination } from "../components.js";
-import { BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
+import { PATH_LABEL, BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
 
 const VIEWS: Array<[string, string]> = [
   ["queue", "Queue"],
@@ -69,6 +69,8 @@ export function Leads({ me }: { me: Me }) {
   const [country, setCountry] = useState("");
   const [audience, setAudience] = useState("");
   const [competitorName, setCompetitorName] = useState("");
+  // Outreach flow path. The queue shows qualified leads (Offer 1 or 2) unless another path is picked.
+  const [path, setPath] = useState(view === "queue" ? "qualified" : "");
   const sourcedFilters = { review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName };
   const clearSourcedFilters = () => {
     setNiche(""); setCompetitor(""); setStore(""); setActive(""); setMinReach(""); setMinScore(""); setMinEngagement(""); setCountry(""); setAudience(""); setCompetitorName("");
@@ -81,6 +83,7 @@ export function Leads({ me }: { me: Me }) {
     if (status) p.set("status", status);
     if (platform) p.set("platform", platform);
     if (sp) p.set("sp", sp);
+    if (path && view !== "sourced") p.set("path", path);
     for (const [k, v] of Object.entries(sourcedFilters)) {
       if (!v) continue;
       if (view !== "sourced" && (k === "review" || k === "audience" || k === "minScore")) continue;
@@ -88,7 +91,7 @@ export function Leads({ me }: { me: Me }) {
     }
     return p;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, page, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName, pageSize]);
+  }, [view, page, sort, dir, search, status, platform, sp, path, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName, pageSize]);
 
   const load = useCallback(async () => {
     try {
@@ -111,11 +114,12 @@ export function Leads({ me }: { me: Me }) {
   }, [open]);
 
   // Reset to page 1 when filters/sort change.
-  useEffect(() => setPage(1), [pageSize, view, sort, dir, search, status, platform, sp, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
+  useEffect(() => setPage(1), [pageSize, view, sort, dir, search, status, platform, sp, path, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
   // The Sourced view ranks by score; the other views by conversion rank.
   useEffect(() => {
     if (view === "sourced" && !SOURCED_SORTS.has(sort)) { setSort("score"); setDir(""); }
     if (view !== "sourced" && SOURCED_ONLY_SORTS.has(sort)) { setSort("rank"); setDir(""); }
+    setPath(view === "queue" ? "qualified" : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
@@ -148,8 +152,10 @@ export function Leads({ me }: { me: Me }) {
     <>
       <PageInfo title="Leads — the recruiting pipeline">
         Every creator/brand we might recruit as an affiliate, ranked by conversion likelihood. The{" "}
-        <strong>queue</strong> view is who to contact next (SP5, dead, and already-signed leads are excluded
-        automatically). Click a row for the full history and personalization notes. Use the analytics row to see how
+        <strong>queue</strong> view is who to contact next. Following the outreach flow, only creators signed with a
+        competitor qualify: <strong>Offer 1</strong> when their competitor pays under our 25%, <strong>Offer 2</strong> when
+        it pays the same. Unsigned creators, unknown competitors and competitors without a rate on file are shown by path
+        but get no messages (SP5 and dead leads are excluded too). Click a row for the full history and personalization notes. Use the analytics row to see how
         many are contacted, in talks, or signed.
       </PageInfo>
 
@@ -242,6 +248,21 @@ export function Leads({ me }: { me: Me }) {
           <div className="stat"><div className="n">{a.verifiedReach.toLocaleString()}</div><div className="l">Verified reach</div></div>
           <div className="stat"><div className="n">{a.dead.toLocaleString()}</div><div className="l">Unreachable</div></div>
           <div className="stat"><div className="n">{a.sourcedPending.toLocaleString()}</div><div className="l">Waiting for review</div></div>
+        </div>
+      )}
+
+      {view !== "sourced" && data?.pathCounts && (
+        <div className="toolbar" style={{ flexWrap: "wrap", gap: 6 }}>
+          <span className="muted" style={{ fontSize: 12.5 }}>Outreach flow:</span>
+          <button className={path === "qualified" ? "primary" : ""} onClick={() => setPath("qualified")} title="Offer 1 or Offer 2: the only leads that get messages">
+            Qualified ({(data.pathCounts.offer1 ?? 0) + (data.pathCounts.offer2 ?? 0)})
+          </button>
+          {(["offer1", "offer2", "rate_unknown", "competitor_unnamed", "higher", "unsigned"] as const).map((k) => (
+            <button key={k} className={path === k ? "primary" : ""} onClick={() => setPath(k)} title={PATH_LABEL[k]!.help}>
+              {PATH_LABEL[k]!.short} ({data.pathCounts?.[k] ?? 0})
+            </button>
+          ))}
+          <button className={path === "" || path === "all" ? "primary" : ""} onClick={() => setPath("all")}>All</button>
         </div>
       )}
 
@@ -374,6 +395,14 @@ export function Leads({ me }: { me: Me }) {
                 </td>
                 <td>
                   {l.competitor ? <span className="chip suggest">{l.competitor}</span> : <span className="muted">—</span>}
+                  {l.outreachPath && PATH_LABEL[l.outreachPath] && (
+                    <div>
+                      <span className={`chip ${PATH_LABEL[l.outreachPath]!.tone === "ok" ? "ok" : PATH_LABEL[l.outreachPath]!.tone === "bad" ? "failed" : "unresolved"}`} title={PATH_LABEL[l.outreachPath]!.help}>
+                        {PATH_LABEL[l.outreachPath]!.short}
+                        {l.competitorRatePct != null ? ` · ${l.competitorRatePct}%` : ""}
+                      </span>
+                    </div>
+                  )}
                   {(l.affiliateCode || l.currentOffer) && (
                     <div className="muted" style={{ fontSize: 11 }} title="Their code or offer with that competitor">
                       {l.affiliateCode ? <code>{l.affiliateCode}</code> : l.currentOffer}
@@ -533,6 +562,17 @@ export function Leads({ me }: { me: Me }) {
               </div>
               <div className="card">
                 <div className="k">Competitor</div>
+                {row.outreachPath && PATH_LABEL[row.outreachPath] && (
+                  <div style={{ marginBottom: 4 }}>
+                    <span className={`chip ${PATH_LABEL[row.outreachPath]!.tone === "ok" ? "ok" : PATH_LABEL[row.outreachPath]!.tone === "bad" ? "failed" : "unresolved"}`}>
+                      {PATH_LABEL[row.outreachPath]!.short}
+                    </span>
+                    <div className="muted" style={{ fontSize: 12.5 }}>
+                      {PATH_LABEL[row.outreachPath]!.help}
+                      {row.competitorLinked ? ` Linked to ${row.competitorLinked}${row.competitorRatePct != null ? ` (${row.competitorRatePct}%)` : " (rate not on file)"}.` : ""}
+                    </div>
+                  </div>
+                )}
                 {row.competitor ? (
                   <>
                     <div>

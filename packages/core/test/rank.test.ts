@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { bandOf, rankAll, type RankInput } from "../src/rank.js";
+import { isQualifiedPath, outreachPath } from "../src/outreach-path.js";
 
 const lead = (partial: Partial<RankInput> & { id: string }): RankInput => ({
   affiliationStatus: null,
@@ -91,5 +92,28 @@ describe("rankAll — global ordinal", () => {
       lead({ id: "second", affiliationStatus: "Unsigned", totalReach: 1000, niche: "Gym" }),
     ]);
     expect(results.map((r) => r.id)).toEqual(["first", "second"]);
+  });
+});
+
+describe("outreach flow chart (2026-09-16)", () => {
+  it("only competitor affiliates with a lower or equal rate qualify", () => {
+    const signed = { affiliationStatus: "Signed elsewhere", competitorId: 1 };
+    expect(outreachPath(signed, 20)).toBe("offer1");
+    expect(outreachPath(signed, 25)).toBe("offer2");
+    expect(outreachPath(signed, 30)).toBe("higher");
+    expect(outreachPath(signed, null)).toBe("rate_unknown");
+    expect(outreachPath({ ...signed, competitorId: null }, 20)).toBe("competitor_unnamed");
+    expect(outreachPath({ affiliationStatus: "Unsigned", competitorId: 1 }, 20)).toBe("unsigned");
+    expect(outreachPath({ affiliationStatus: "Our affiliate", competitorId: null }, null)).toBe("converted");
+    expect(["offer1", "offer2", "higher", "rate_unknown", "unsigned"].map((p) => isQualifiedPath(p as never))).toEqual([true, true, false, false, false]);
+  });
+
+  it("the path sorts before the band: a qualified signed lead outranks an unsigned band-1 lead", () => {
+    const r = rankAll([
+      { id: "u", affiliationStatus: "Unsigned", totalReach: 900_000, entryTier: null, niche: null, path: "unsigned" },
+      { id: "wait", affiliationStatus: "Signed elsewhere", totalReach: 50_000, entryTier: "Gold", niche: null, path: "rate_unknown" },
+      { id: "o1", affiliationStatus: "Signed elsewhere", totalReach: 5_000, entryTier: "Bronze", niche: null, path: "offer1" },
+    ]);
+    expect(r.map((x) => x.id)).toEqual(["o1", "wait", "u"]);
   });
 });

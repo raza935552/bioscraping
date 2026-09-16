@@ -80,6 +80,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface LeadRow {
   id: number;
+  outreachPath?: OutreachPath;
+  competitorLinked?: string | null;
+  competitorRatePct?: number | null;
   email?: string | null;
   rank: number | null;
   band: string | null;
@@ -293,7 +296,10 @@ export interface SettingsSection {
   fields: SettingsField[];
 }
 
+export type OutreachPath = "offer1" | "offer2" | "higher" | "rate_unknown" | "competitor_unnamed" | "unsigned" | "converted";
+
 export interface LeadsPage {
+  pathCounts?: Partial<Record<OutreachPath, number>>;
   analytics: {
     total: number;
     contacted: number;

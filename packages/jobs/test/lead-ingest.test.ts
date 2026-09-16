@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
+import { linkCompetitor } from "../src/qualification.js";
 import { COMPETITOR_FOLLOWER_MIN, followerMinFor, competitorOfTerm, competitorQuery, parseMaxPending, reviewRoom, byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
@@ -104,7 +105,7 @@ describe("planProfile", () => {
     const ps = { id: 9, name: "Peptide Sciences", domains: [], codePattern: null, codePrefix: "PS", commissionPct: 15 };
     const hits = new Map([["#perimenopause", [hit("x", { bio: "use code PSANN for 10% off" })]]]);
     const { candidates } = await planProfile(profile, [ps], hits, emptyKnown(), verified(60000), now);
-    expect(candidates[0]?.lead).toMatchObject({ affiliationStatus: "Signed elsewhere", otherCreatorCompany: "Peptide Sciences", affiliateCode: "PSANN", currentOffer: "15%" });
+    expect(candidates[0]?.lead).toMatchObject({ affiliationStatus: "Signed elsewhere", otherCreatorCompany: "Peptide Sciences", affiliateCode: "PSANN", competitorId: 9 });
     const known = emptyKnown();
     known.codes.add("psann");
     const again = await planProfile(profile, [ps], hits, known, verified(60000), now);
@@ -129,15 +130,16 @@ describe("planSearches", () => {
   const base = { platforms: ["tiktok", "reddit"] as ProfileRow["platforms"], terms: { tiktok: ["#weightloss", "#glp1journey"], reddit: ["r/loseit"] }, dailyCap: 10, spendCapUsd: "1.00" };
   const competitors = [{ name: "Peptide Sciences" }, { name: "Limitless Life" }];
 
-  it("audience terms first across platforms, competitor names after, never competitor names on Reddit", () => {
+  it("a small share of audience terms first, then competitor code searches, never competitor names on Reddit", () => {
     const { run, skipped } = planSearches(base, competitors, 30);
     expect(skipped).toEqual([]);
+    // Audience terms may use 20% of the budget up front ($0.15 of $0.75): one hashtag.
     expect(run.map((s) => `${s.platform} ${s.term}`)).toEqual([
       "tiktok #weightloss",
-      "reddit r/loseit",
-      "tiktok #glp1journey",
       "tiktok Peptide Sciences code",
       "tiktok Limitless Life code",
+      "reddit r/loseit",
+      "tiktok #glp1journey",
     ]);
   });
 
@@ -146,7 +148,7 @@ describe("planSearches", () => {
     const p = { platforms: ["tiktok", "instagram"] as ProfileRow["platforms"], terms: { tiktok: ["#a", "#b"], instagram: ["#a", "#b"] }, dailyCap: 10, spendCapUsd: "1.00" };
     const { run } = planSearches(p, many, 30);
     const labels = run.map((s) => `${s.platform} ${s.term}`);
-    expect(labels.slice(0, 6)).toEqual(["tiktok #a", "instagram #a", "tiktok #b", "instagram #b", "tiktok Vendor 0 code", "instagram Vendor 0"]);
+    expect(labels.slice(0, 6)).toEqual(["tiktok #a", "instagram #a", "tiktok Vendor 0 code", "instagram Vendor 0", "tiktok Vendor 1 code", "instagram Vendor 1"]);
     expect(labels.filter((l) => l.startsWith("instagram")).length).toBeGreaterThan(2);
   });
 
@@ -173,8 +175,8 @@ describe("planSearches", () => {
     const p = { ...base, platforms: ["tiktok"] as ProfileRow["platforms"], spendCapUsd: "0.30" };
     const { run, skipped, budgetUsd } = planSearches(p, competitors, 30);
     expect(budgetUsd).toBe(0.15);
-    // Audience terms get 60% of $0.15 ($0.09): one hashtag ($0.06), then a competitor code search ($0.09) fits, nothing else.
-    expect(run.map((s) => s.term)).toEqual(["#weightloss", "Peptide Sciences code"]);
+    // Audience terms get 20% of $0.15 ($0.03), not enough for a hashtag ($0.06): the competitor code search ($0.09) goes first.
+    expect(run.map((s) => s.term)).toEqual(["Peptide Sciences code", "#weightloss"]);
     expect(skipped.map((s) => s.term)).toEqual(["Limitless Life code", "#glp1journey"]);
     expect(run.reduce((a, s) => a + s.estimatedCostUsd, 0) + verifyReserveUsd(p)).toBeLessThanOrEqual(0.3);
   });
@@ -190,7 +192,7 @@ describe("planSearches", () => {
     const p = { ...base, platforms: ["tiktok"] as ProfileRow["platforms"], spendCapUsd: "0.30" };
     const { run, resting } = planSearches(p, competitors, 30, 0, (_pl, t) => t === "#weightloss");
     expect(resting.map((s) => s.term)).toEqual(["#weightloss"]);
-    expect(run.map((s) => s.term)).toEqual(["#glp1journey", "Peptide Sciences code"]);
+    expect(run.map((s) => s.term)).toEqual(["Peptide Sciences code", "#glp1journey"]);
   });
 
   it("a competitor hashtag audience term and the competitor's code search are different searches", () => {
@@ -454,5 +456,23 @@ describe("US only (2026-09-14)", () => {
     expect(candidates.map((c) => [c.hit.handle, c.lead.geoCountry])).toEqual([["texasmom", "US"], ["unknown", null]]);
     expect(summary.quality?.country).toBe(2);
     expect(reads).toBe(3); // londonpt never read
+  });
+});
+
+describe("linking research-board leads to a competitor", () => {
+  const comps = [
+    { id: 1, name: "Amino Club", domains: ["aminoclub.com", "amino club"] },
+    { id: 2, name: "Peptira", domains: ["peptira"] },
+    { id: 3, name: "Flawless Compounds", domains: ["flawless compounds", "flawlesscompounds"] },
+    { id: 4, name: "Modern Aminos", domains: ["modernaminos", "modern aminos"] },
+  ];
+  it("takes the competitor named first, handles squashed names and field-only aliases, and names nobody for vague entries", () => {
+    expect(linkCompetitor("Amino Club; Peptira", comps)).toBe(1);
+    expect(linkCompetitor("Peptira + Amino Club", comps)).toBe(2);
+    expect(linkCompetitor("Multi-vendor: Flawless, Atomik Labz, Glacier Aminos", comps)).toBe(3);
+    expect(linkCompetitor("ModernAminos", comps)).toBe(4);
+    expect(linkCompetitor("Unnamed source", comps)).toBeNull();
+    expect(linkCompetitor("unknown (code LACEY10)", comps)).toBeNull();
+    expect(linkCompetitor(null, comps)).toBeNull();
   });
 });

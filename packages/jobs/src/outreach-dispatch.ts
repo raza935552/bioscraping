@@ -8,6 +8,7 @@
 
 import { and, eq } from "drizzle-orm";
 import {
+  isQualifiedPath,
   hasUsableNotes,
   isConverted,
   isSp5,
@@ -16,6 +17,7 @@ import {
   type ContactChannel,
 } from "@biolinx/core";
 import { createDb, schema, type Db } from "@biolinx/db";
+import { pathOf, ratesById } from "./qualification.js";
 import { draftMessage, type DraftRequest, type LlmClient } from "@biolinx/drafting";
 import type { LintContext } from "@biolinx/compliance";
 import { maxTouchesFor, nextFollowUpDateAfterSend, type Motion } from "./cadence-dates.js";
@@ -36,6 +38,7 @@ export interface CandidateLead {
   personalizationNotes: string | null;
   /** Sourced leads: pending | accepted | rejected. Null for everyone else. */
   sourcingReview: string | null;
+  competitorId: number | null;
 }
 
 /** Sourced leads are invisible to outreach and research until a human accepts them. */
@@ -49,9 +52,11 @@ export type CandidateVerdict = "ok" | "unenriched" | "ineligible";
  *  fine, it just has no talking points yet. */
 export function isDispatchCandidate(
   l: CandidateLead,
-  o: { channel: "email" | "dm"; today: Date; openReplyLeadIds: Set<number> },
+  o: { channel: "email" | "dm"; today: Date; openReplyLeadIds: Set<number>; competitorRates: Map<number, number | null> },
 ): CandidateVerdict {
   if (!isReviewable(l)) return "ineligible";
+  // The outreach flow: only competitor affiliates whose rate is at or under ours get messages.
+  if (!isQualifiedPath(pathOf(l, o.competitorRates))) return "ineligible";
   if (l.isDead || isSp5(l.subProfile) || isConverted(l.affiliationStatus)) return "ineligible";
   if (TERMINAL_STATUSES.includes(l.status ?? "")) return "ineligible";
   if (o.channel === "email" && !l.email) return "ineligible";
@@ -129,7 +134,7 @@ export async function runOutreachDispatch(opts: DispatchOptions, db: Db = create
     );
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const verdictOpts = { channel: opts.channel, today, openReplyLeadIds };
+    const verdictOpts = { channel: opts.channel, today, openReplyLeadIds, competitorRates: ratesById(await db.select().from(schema.competitors)) };
     const candidates = all
       .filter((l) => {
         const v = isDispatchCandidate(l, verdictOpts);

@@ -2,7 +2,7 @@
 // of their scoring spec (AFFILIATE-PRIORITY-SCHEMA.md, 2026-09-11). Unknown
 // values say so ("NOT FOUND", "not checked") instead of guessing.
 
-import { brandFitForNiche, normalizeNiche } from "@biolinx/core";
+import { OUTREACH_PATH_LABEL, brandFitForNiche, normalizeNiche, type OutreachPath } from "@biolinx/core";
 import type { SourcedDetails } from "./sourced-details.js";
 
 export interface ExportLead {
@@ -32,6 +32,9 @@ export interface ExportLead {
   sourcingRejectedReason: string | null;
   geoCountry: string | null;
   dateAdded: Date | string | null;
+  /** The linked competitor's commission rate from the Competitors table (not the lead's discount code). */
+  competitorRatePct?: number | null;
+  outreachPath?: OutreachPath | null;
 }
 
 export const EXPORT_COLUMNS = [
@@ -50,6 +53,7 @@ export const EXPORT_COLUMNS = [
   "Competitor code",
   "Competitor evidence (exact words)",
   "Commission comparison",
+  "Outreach path",
   "Audience size",
   "Avg views (recent posts)",
   "Engagement rate",
@@ -85,8 +89,10 @@ export function exportRow(l: ExportLead, now: Date, activityDays = 30, d: Source
   const niche = normalizeNiche(l.niche);
   const brand = (l.brandFit ?? (niche ? brandFitForNiche(niche) : null)) === "both" ? "Both" : "Biolinx only";
   const competitor = l.affiliationStatus === "Signed elsewhere" || !!l.otherCreatorCompany;
-  const pct = l.currentOffer ? Number(l.currentOffer.replace(/[^0-9.]/g, "")) : NaN;
-  const commission = !competitor ? "n/a (no competitor deal found)" : Number.isFinite(pct) ? (pct < 25 ? `lower (${pct}% vs our 25% lifetime)` : `same or higher (${pct}%)`) : "unknown (competitor rate not on file)";
+  // The competitor's commission from the Competitors table. currentOffer is the lead's discount or
+  // code ("DISCOUNT30 (30%)"), which says nothing about what the affiliate earns.
+  const pct = l.competitorRatePct;
+  const commission = !competitor ? "n/a (no competitor deal found)" : pct != null ? (pct < 25 ? `lower (${pct}% vs our 25% lifetime)` : pct === 25 ? "same (25%)" : `higher (${pct}%)`) : "unknown (competitor rate not on file)";
   let activity = "NOT FOUND";
   if (l.lastPostAt) {
     const days = (now.getTime() - new Date(l.lastPostAt).getTime()) / 86_400_000;
@@ -112,6 +118,7 @@ export function exportRow(l: ExportLead, now: Date, activityDays = 30, d: Source
     l.affiliateCode ?? "",
     d?.evidence ? `${d.evidence.quote}${d.evidence.url ? ` (${d.evidence.url})` : ""}` : "",
     commission,
+    l.outreachPath ? OUTREACH_PATH_LABEL[l.outreachPath] : "",
     l.totalReach != null ? String(l.totalReach) : "NOT FOUND",
     n(d?.avgViews),
     engagement,

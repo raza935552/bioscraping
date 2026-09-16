@@ -13,6 +13,7 @@
 // SP5 leads ARE ranked (they're excluded at the outreach-queue layer, L4).
 
 import { NICHE_PRIORITY, normalizeNiche, type AffiliationStatus, type EntryTier } from "./enums.js";
+import { OUTREACH_PATH_ORDER, type OutreachPath } from "./outreach-path.js";
 
 export interface RankInput {
   id: string;
@@ -22,6 +23,9 @@ export interface RankInput {
   niche: string | null; // raw label; normalized against NICHE_PRIORITY
   /** Divisor for brand/team accounts. Defaults to 1 (individual creator). */
   personCount?: number;
+  /** The outreach flow's path (outreach-path.ts). When given it sorts first: qualified
+   *  competitor affiliates before everyone else, whatever their band. */
+  path?: OutreachPath;
 }
 
 export type Band = "1" | "2" | "3" | "3b" | "4" | "5";
@@ -83,6 +87,8 @@ export function rankAll(leads: RankInput[]): RankResult[] {
   }));
 
   decorated.sort((a, b) => {
+    const path = (a.lead.path ? OUTREACH_PATH_ORDER[a.lead.path] : 0) - (b.lead.path ? OUTREACH_PATH_ORDER[b.lead.path] : 0);
+    if (path !== 0) return path;
     const band = BAND_ORDER[a.band] - BAND_ORDER[b.band];
     if (band !== 0) return band;
     if (a.rpp !== b.rpp) return b.rpp - a.rpp;

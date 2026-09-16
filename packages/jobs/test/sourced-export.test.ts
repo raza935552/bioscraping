@@ -29,10 +29,12 @@ describe("sourced leads export", () => {
   });
 
   it("competitor, commission, missing reach, dormant, Biolinx-only", () => {
-    const r = exportRow({ ...base, niche: "Biohacker", affiliationStatus: "Signed elsewhere", otherCreatorCompany: "Amino Club", affiliateCode: "JACOB", currentOffer: "20%", totalReach: null, lastPostAt: "2026-06-01T00:00:00Z" }, now);
+    const r = exportRow({ ...base, niche: "Biohacker", affiliationStatus: "Signed elsewhere", otherCreatorCompany: "Amino Club", affiliateCode: "JACOB", currentOffer: "DISCOUNT30 (30%)", competitorRatePct: 20, outreachPath: "offer1", totalReach: null, lastPostAt: "2026-06-01T00:00:00Z" }, now);
+    // The commission comes from the competitor's rate, never from the lead's discount code.
     expect(col(r, "Brand tag")).toBe("Biolinx only");
     expect(col(r, "Affiliate type")).toBe("competitor affiliate");
     expect(col(r, "Commission comparison")).toBe("lower (20% vs our 25% lifetime)");
+    expect(col(r, "Outreach path")).toBe("Offer 1 · their rate is under our 25%");
     expect(col(r, "Audience size")).toBe("NOT FOUND");
     expect(col(r, "Posting activity")).toBe("dormant (107d ago)");
     expect(col(exportRow({ ...base, otherCreatorCompany: "Swiss Chems", affiliationStatus: "Signed elsewhere" }, now), "Commission comparison")).toBe("unknown (competitor rate not on file)");

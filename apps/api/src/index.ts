@@ -27,6 +27,8 @@ import {
 import {
   hasUsableNotes,
   isConverted,
+  OUTREACH_PATH_LABEL,
+  isQualifiedPath,
   isSp5,
   suggestClassification,
   BLACK_FRIDAY,
@@ -57,6 +59,9 @@ import {
   declineAndRegenerate,
   redoSwipeImage,
   runSwipeSearch,
+  pathOf,
+  ratesById,
+  blockUnqualifiedDrafts,
   unusedSwipeSources,
   recentSwipeSearches,
   biolinxMakesImages,
@@ -452,8 +457,14 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
     country?: string;
     audience?: string;
     competitorName?: string;
+    /** Outreach flow path: qualified (Offer 1 or 2), one path, or all. */
+    path?: string;
   };
   const rows = await db.select().from(schema.leads);
+  const competitorRows = await db.select().from(schema.competitors);
+  const competitorById = new Map(competitorRows.map((c) => [c.id, c]));
+  const rates = ratesById(competitorRows);
+  const paths = new Map(rows.map((l) => [l.id, pathOf(l, rates)]));
   const sourcedView = q.view === "sourced";
   // Derived details for every lead (engagement, activity, bio, surfaced post) from its latest
   // profile read: the sourcing read, or a research run's read for imported leads.
@@ -515,6 +526,15 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       return true;
     });
   }
+
+  // Outreach flow paths across the view before the path filter, so the counts explain the queue.
+  const pathCounts: Record<string, number> = {};
+  for (const l of filtered) {
+    const p = paths.get(l.id)!;
+    pathCounts[p] = (pathCounts[p] ?? 0) + 1;
+  }
+  if (q.path === "qualified") filtered = filtered.filter((l) => isQualifiedPath(paths.get(l.id)!));
+  else if (q.path && q.path !== "all") filtered = filtered.filter((l) => paths.get(l.id) === q.path);
 
   // Analytics over the FILTERED set (before pagination).
   const analytics = {
@@ -582,6 +602,7 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
 
   return {
     analytics,
+    pathCounts,
     facets,
     page,
     pageSize,
@@ -620,6 +641,9 @@ app.get("/api/leads", { preHandler: requireAuth }, async (req) => {
       currentOffer: l.currentOffer,
       rejectedReason: l.sourcingRejectedReason,
       email: l.email,
+      outreachPath: paths.get(l.id)!,
+      competitorLinked: l.competitorId != null ? competitorById.get(l.competitorId)?.name ?? null : null,
+      competitorRatePct: l.competitorId != null ? competitorById.get(l.competitorId)?.commissionPct ?? null : null,
       details: details.get(l.id) ?? null,
     })),
   };
@@ -669,9 +693,12 @@ async function latestReadBundles(): Promise<Map<number, DetailBundle>> {
 app.get("/api/leads/sourced.csv", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
   const review = String((req.query as { review?: string } | undefined)?.review ?? "pending");
   if (!["pending", "accepted", "rejected", "all"].includes(review)) return reply.code(400).send({ error: "review must be pending, accepted, rejected or all" });
+  const competitorRows = await db.select().from(schema.competitors);
+  const rates = ratesById(competitorRows);
   const rows = (await db.select().from(schema.leads).where(eq(schema.leads.source, "sourcing")))
     .filter((l) => review === "all" || l.sourcingReview === review)
-    .sort((a, b) => (b.sourcingScore ?? 0) - (a.sourcingScore ?? 0));
+    .sort((a, b) => (b.sourcingScore ?? 0) - (a.sourcingScore ?? 0))
+    .map((l) => ({ ...l, competitorRatePct: l.competitorId != null ? rates.get(l.competitorId) ?? null : null, outreachPath: pathOf(l, rates) }));
   await audit(req, "leads.sourced.export", "leads", null, { review, count: rows.length });
   const bundles = await latestReadBundles();
   const now = new Date();
@@ -1009,6 +1036,15 @@ app.post("/api/messages/:id/approve", { preHandler: requireRole("admin", "ops", 
   const { body, subject } = (req.body ?? {}) as { body?: string; subject?: string };
   const msg = await db.query.messages.findFirst({ where: eq(schema.messages.id, id) });
   if (!msg) return reply.code(404).send({ error: "not found" });
+  // The outreach flow: only competitor affiliates at or under our 25% are contacted.
+  {
+    const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, msg.leadId) });
+    const path = lead ? pathOf(lead, ratesById(await db.select().from(schema.competitors))) : "unsigned";
+    if (!isQualifiedPath(path)) {
+      await blockUnqualifiedDrafts(db);
+      return reply.code(409).send({ error: `This lead doesn't qualify for outreach (${OUTREACH_PATH_LABEL[path]}). The draft was blocked.` });
+    }
+  }
   if (body != null || subject != null) {
     await db
       .update(schema.messages)

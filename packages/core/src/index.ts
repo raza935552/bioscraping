@@ -7,3 +7,4 @@ export * from "./roster.js";
 export * from "./crypto.js";
 export * from "./settings-registry.js";
 export * from "./notes.js";
+export * from "./outreach-path.js";

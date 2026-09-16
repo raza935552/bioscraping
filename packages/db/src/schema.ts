@@ -100,6 +100,7 @@ export const leads = mysqlTable("leads", {
   sourcingScore: int("sourcing_score"),
   sourcingRejectedReason: varchar("sourcing_rejected_reason", { length: 120 }),
   affiliateCode: varchar("affiliate_code", { length: 64 }), // strongest dedupe key
+  competitorId: int("competitor_id"), // the competitor they're signed with; its rate picks the offer
   lastPostAt: datetime("last_post_at"),
   doesLive: boolean("does_live"), // null = not observed; never inferred false
   promoTrackRecord: boolean("promo_track_record"),

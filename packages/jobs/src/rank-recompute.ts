@@ -4,6 +4,7 @@
 
 import { eq } from "drizzle-orm";
 import { isSp5, rankAll, type AffiliationStatus, type EntryTier, type RankInput } from "@biolinx/core";
+import { blockUnqualifiedDrafts, linkLeadCompetitors, pathOf, ratesById } from "./qualification.js";
 import { createDb, schema, type Db } from "@biolinx/db";
 
 export interface RankSummary {
@@ -13,6 +14,10 @@ export interface RankSummary {
   sp5Excluded: number;
   /** Sourced leads left out because they are pending review or rejected. */
   notReviewed: number;
+  /** Signed leads newly linked to a competitor this run. */
+  competitorsLinked?: number;
+  /** Unsent drafts blocked because their lead doesn't qualify under the outreach flow. */
+  draftsBlocked?: number;
 }
 
 /** Sourced leads are ranked only once a human accepts them. Pending and rejected ones
@@ -29,6 +34,9 @@ export async function runRankRecompute(db: Db = createDb()): Promise<RankSummary
     .$returningId();
 
   try {
+    // Link signed leads to a competitor first: its commission rate decides their outreach path.
+    const linking = await linkLeadCompetitors(db);
+    const rates = ratesById(await db.select().from(schema.competitors));
     const all = await db.select().from(schema.leads);
     const leads = all.filter(isRankable);
     let unranked = 0;
@@ -44,6 +52,7 @@ export async function runRankRecompute(db: Db = createDb()): Promise<RankSummary
       entryTier: (l.entryTier as EntryTier) ?? null,
       niche: l.niche ?? null,
       ...(l.personCount ? { personCount: l.personCount } : {}),
+      path: pathOf(l, rates),
     }));
 
     const results = rankAll(inputs);
@@ -65,7 +74,8 @@ export async function runRankRecompute(db: Db = createDb()): Promise<RankSummary
       }
     }
 
-    const summary: RankSummary = { total: results.length, changed: changed + unranked, triage, sp5Excluded: sp5, notReviewed: all.length - leads.length };
+    const drafts = await blockUnqualifiedDrafts(db);
+    const summary: RankSummary = { total: results.length, changed: changed + unranked, triage, sp5Excluded: sp5, notReviewed: all.length - leads.length, competitorsLinked: linking.linked, draftsBlocked: drafts.blocked.length };
     await db
       .update(schema.syncRuns)
       .set({ status: "ok", finishedAt: new Date(), detail: summary })
