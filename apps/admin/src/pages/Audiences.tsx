@@ -112,9 +112,11 @@ export function Audiences() {
       )}
       <h2 style={{ marginTop: 32 }}>Competitor programs</h2>
       <p className="muted">
-        Creators who post a competitor's code are the top target. Their code prefix or link domain is how the engine
-        spots them, and every competitor name is also searched as a keyword.
+        Creators who post a competitor's code are the only leads the outreach flow contacts. Each active competitor is searched
+        on TikTok three ways ("name code", "name discount", its domain), and its names and domains are how the engine spots
+        an affiliate.
       </p>
+      <CompetitorSuggestions onChanged={load} />
       {data && <CompetitorTable rows={data.competitors} onChanged={load} />}
     </>
   );
@@ -524,5 +526,80 @@ function CompetitorTable({ rows, onChanged }: { rows: Competitor[]; onChanged: (
         </div>
       </div>
     </>
+  );
+}
+
+function CompetitorSuggestions({ onChanged }: { onChanged: () => Promise<void> }) {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof api.competitorSuggestions>>["suggestions"]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = async () => {
+    try {
+      setRows((await api.competitorSuggestions()).suggestions);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+  if (rows.length === 0 && !err) return null;
+  const act = async (key: string, action: "add" | "dismiss") => {
+    setBusy(key);
+    setErr("");
+    try {
+      await api.actOnSuggestion(key, action, names[key]);
+      await load();
+      if (action === "add") await onChanged();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="settings-card" style={{ marginBottom: 16 }}>
+      <h3 style={{ marginTop: 0 }}>Suggested competitors ({rows.length})</h3>
+      <p className="muted" style={{ fontSize: 12.5 }}>
+        Vendors creators named next to a code or as a store link during sourcing. Add the real peptide vendors (they're searched
+        from the next run); dismiss the rest.
+      </p>
+      {err && <div className="error">{err}</div>}
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Seen</th>
+              <th>Examples</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td>
+                  <input value={names[r.key] ?? r.name} onChange={(e) => setNames({ ...names, [r.key]: e.target.value })} style={{ maxWidth: 220 }} />
+                  {r.domain && <div className="muted" style={{ fontSize: 11 }}>{r.domain}</div>}
+                </td>
+                <td>{r.count}×</td>
+                <td>
+                  {r.examples.map((u, i) => (
+                    <a key={u} href={u} target="_blank" rel="noreferrer" style={{ marginRight: 8 }}>
+                      post {i + 1} ↗
+                    </a>
+                  ))}
+                </td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  <button className="primary" disabled={busy === r.key} onClick={() => void act(r.key, "add")}>Add as competitor</button>{" "}
+                  <button disabled={busy === r.key} onClick={() => void act(r.key, "dismiss")}>Dismiss</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

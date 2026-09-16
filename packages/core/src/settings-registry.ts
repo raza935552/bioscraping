@@ -86,6 +86,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
         help: "Sourcing stops adding leads once this many are waiting for review, and continues as they are accepted or rejected. Blank = no limit.",
         placeholder: "50",
       },
+      {
+        key: "SOURCING_COMPETITOR_ONLY",
+        label: "Competitor affiliates only",
+        kind: "bool",
+        help: "ON (and blank) = only competitor searches run (\"<competitor> code\", \"discount\", their domain) and only people who name a competitor are saved, since the outreach flow contacts no one else. OFF = audience hashtag searches run too.",
+      },
     ],
   },
   {

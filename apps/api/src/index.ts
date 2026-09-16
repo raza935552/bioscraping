@@ -60,6 +60,8 @@ import {
   declineAndRegenerate,
   redoSwipeImage,
   runSwipeSearch,
+  SUGGESTIONS_CONFIG_KEY,
+  type CompetitorSuggestions,
   conversationView,
   recordFlowSent,
   recordFlowReply,
@@ -998,6 +1000,39 @@ app.put("/api/competitors/:id", { preHandler: requireRole("admin", "ops") }, asy
   await audit(req, "competitor.update", "competitors", id, { name: parsed.row.name });
   return { ok: true };
 });
+// Vendors creators named during sourcing that aren't competitors yet (lead-ingest records them).
+app.get("/api/competitors/suggestions", { preHandler: requireRole("admin", "ops") }, async () => {
+  const row = await db.query.config.findFirst({ where: eq(schema.config.key, SUGGESTIONS_CONFIG_KEY) });
+  const all = (row?.value as CompetitorSuggestions | undefined) ?? {};
+  return {
+    suggestions: Object.entries(all)
+      .filter(([, v]) => !v.dismissed)
+      .map(([key, v]) => ({ key, ...v, examples: v.examples.filter((u) => /^https?:\/\//.test(u)) }))
+      .sort((a, b) => b.count - a.count),
+  };
+});
+app.post("/api/competitors/suggestions/:key", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const key = String((req.params as { key: string }).key);
+  const action = String((req.body as { action?: string } | undefined)?.action ?? "");
+  const row = await db.query.config.findFirst({ where: eq(schema.config.key, SUGGESTIONS_CONFIG_KEY) });
+  const all = { ...((row?.value as CompetitorSuggestions | undefined) ?? {}) };
+  const s = all[key];
+  if (!s) return reply.code(404).send({ error: "suggestion not found" });
+  let competitorId: number | null = null;
+  if (action === "add") {
+    const name = String((req.body as { name?: string } | undefined)?.name ?? s.name).trim().slice(0, 120);
+    if (name.length < 2) return reply.code(400).send({ error: "name is required" });
+    const domains = [...new Set([s.domain, name.toLowerCase()].filter((d): d is string => !!d))];
+    const [ins] = await db.insert(schema.competitors).values({ name, domains, active: true, notes: `Suggested by sourcing: named ${s.count} time(s), e.g. ${s.examples[0] ?? "no link"}` }).$returningId();
+    competitorId = ins!.id;
+    await audit(req, "competitor.create", "competitors", competitorId, { name, fromSuggestion: key });
+  } else if (action !== "dismiss") return reply.code(400).send({ error: "action must be add or dismiss" });
+  all[key] = { ...s, dismissed: true };
+  await db.update(schema.config).set({ value: all }).where(eq(schema.config.key, SUGGESTIONS_CONFIG_KEY));
+  if (action === "dismiss") await audit(req, "competitor.suggestion.dismiss", "config", null, { key, name: s.name });
+  return { ok: true, competitorId };
+});
+
 app.delete("/api/competitors/:id", { preHandler: requireRole("admin", "ops") }, async (req) => {
   const id = Number((req.params as { id: string }).id);
   await db.delete(schema.competitors).where(eq(schema.competitors.id, id));
@@ -1006,6 +1041,43 @@ app.delete("/api/competitors/:id", { preHandler: requireRole("admin", "ops") }, 
 });
 
 // ── Sourced-lead review ─────────────────────────────────────────────────
+
+/** Accept or reject many sourced leads at once. Accept sets "Signed elsewhere" when a competitor was
+ *  found and "Unsigned" otherwise, keeps each lead's niche, and applies one sub-profile to all. */
+app.post("/api/leads/review-bulk", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const b = (req.body ?? {}) as { ids?: unknown; decision?: string; subProfile?: string; reason?: string };
+  const ids = Array.isArray(b.ids) ? [...new Set(b.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 200) : [];
+  if (ids.length === 0) return reply.code(400).send({ error: "select at least one lead" });
+  const leads = (await db.select().from(schema.leads).where(inArray(schema.leads.id, ids))).filter((l) => l.sourcingReview === "pending");
+  if (b.decision === "reject") {
+    const reason = String(b.reason ?? "").trim().slice(0, 120) || null;
+    for (const l of leads) await db.update(schema.leads).set({ sourcingReview: "rejected", sourcingRejectedReason: reason }).where(eq(schema.leads.id, l.id));
+    await audit(req, "lead.sourcing.reject_bulk", "leads", null, { ids: leads.map((l) => l.id), reason });
+    return { ok: true, changed: leads.length, skipped: ids.length - leads.length };
+  }
+  if (b.decision !== "accept") return reply.code(400).send({ error: "decision must be accept or reject" });
+  const sp = String(b.subProfile ?? "").toUpperCase();
+  if (!["SP1", "SP2", "SP3", "SP4"].includes(sp)) return reply.code(400).send({ error: "sub-profile must be SP1-SP4 (reject goodwill advocates instead)" });
+  let changed = 0;
+  const noNiche: number[] = [];
+  for (const l of leads) {
+    const niche = normalizeNiche(l.niche ?? "");
+    if (!niche) {
+      noNiche.push(l.id);
+      continue;
+    }
+    const affiliation = l.otherCreatorCompany || l.competitorId != null ? "Signed elsewhere" : "Unsigned";
+    await db
+      .update(schema.leads)
+      .set({ sourcingReview: "accepted", affiliationStatus: affiliation, subProfile: sp, subProfileConfidence: "human", niche, brandFit: l.brandFit ?? brandFitForNiche(niche), enrichmentStatus: "pending" })
+      .where(eq(schema.leads.id, l.id));
+    changed++;
+  }
+  await audit(req, "lead.sourcing.accept_bulk", "leads", null, { ids: leads.map((l) => l.id).filter((id) => !noNiche.includes(id)), subProfile: sp });
+  const withEmail = leads.filter((l) => l.email && !noNiche.includes(l.id)).map((l) => l.id);
+  if (withEmail.length) void runCustomerioSync(db, undefined, { leadIds: withEmail }).catch(() => {});
+  return { ok: true, changed, skipped: ids.length - leads.length, noNiche };
+});
 
 app.post("/api/leads/:id/review", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
   const id = Number((req.params as { id: string }).id);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compact, findTerm, looksLikeStore, looksNonEnglish, qualityGate, deadWithoutRead, reachCheck } from "../src/quality.js";
 import { emailFromText } from "../src/contact.js";
+import { suggestCompetitors } from "../src/competitor-suggest.js";
 import { findAffiliateCode, scoreHit } from "../src/score.js";
 import type { DiscoveryHit } from "../src/discovery/types.js";
 
@@ -169,5 +170,18 @@ describe("email from the bio", () => {
     expect(emailFromText("logo@2x.png and your@email.com")).toBeNull();
     expect(emailFromText("no contact here @handle")).toBeNull();
     expect(emailFromText(null)).toBeNull();
+  });
+});
+
+describe("competitor suggestions", () => {
+  const known = [{ name: "Amino Club", domains: ["aminoclub.com", "amino club"] }, { name: "Peptira", domains: ["peptira"] }];
+  it("finds vendors named next to a code or as a store domain, skipping known competitors and non-vendors", () => {
+    expect(suggestCompetitors("use code JAMIE at Nova Peptides for 20% off", known)).toEqual([{ name: "Nova Peptides", domain: null }]);
+    expect(suggestCompetitors("shop novalabs.com/?ref=jamie", known)).toEqual([{ name: "novalabs", domain: "novalabs.com" }]);
+    expect(suggestCompetitors("code CLAY @petratidescience", known)).toEqual([{ name: "petratidescience", domain: null }]);
+    expect(suggestCompetitors("use code JAMIE222 at Amino Club, also peptira.com", known)).toEqual([]);
+    expect(suggestCompetitors("use code SAVE10 at checkout, link in bio", known)).toEqual([]);
+    expect(suggestCompetitors("my site biolinxlabs.com and tiktok.com", known)).toEqual([]);
+    expect(suggestCompetitors("code DDT10 at Gymshark", known)).toEqual([]);
   });
 });

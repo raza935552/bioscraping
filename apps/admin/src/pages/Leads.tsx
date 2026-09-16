@@ -330,6 +330,7 @@ export function Leads({ me }: { me: Me }) {
           }}
           onReject={(l, reason) => void reject(l, reason)}
           confirmReject={confirmReject}
+          onBulkDone={load}
         />
       ) : (
       <div className="tablewrap">
@@ -761,6 +762,7 @@ interface SourcedTableProps {
   onAccept: (l: LeadRow) => void;
   onReject: (l: LeadRow, reason?: string) => void;
   confirmReject: number | null;
+  onBulkDone: () => Promise<void>;
 }
 
 const SOURCED_COLUMNS: Array<[string | null, string, string?]> = [
@@ -782,12 +784,54 @@ const SOURCED_COLUMNS: Array<[string | null, string, string?]> = [
   [null, "Decision"],
 ];
 
-function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept, onReject, confirmReject }: SourcedTableProps) {
+function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept, onReject, confirmReject, onBulkDone }: SourcedTableProps) {
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [bulkSp, setBulkSp] = useState("SP2");
+  const [bulkReason, setBulkReason] = useState("");
+  const [bulkMsg, setBulkMsg] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  useEffect(() => setPicked(new Set()), [rows]);
+  const toggle = (id: number) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const allPicked = rows.length > 0 && rows.every((r) => picked.has(r.id));
+  const bulk = async (decision: "accept" | "reject") => {
+    setBulkBusy(true);
+    setBulkMsg("");
+    try {
+      const r = await api.reviewBulk({ ids: [...picked], decision, ...(decision === "accept" ? { subProfile: bulkSp } : { reason: bulkReason }) });
+      setBulkMsg(`${decision === "accept" ? "Accepted" : "Rejected"} ${r.changed}.${r.noNiche?.length ? ` ${r.noNiche.length} had no niche; open them to accept one by one.` : ""}`);
+      setPicked(new Set());
+      await onBulkDone();
+    } catch (e) {
+      setBulkMsg((e as Error).message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
   return (
+    <>
+    {canRun && (
+      <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
+        <span className="muted">{picked.size} selected</span>
+        <select value={bulkSp} onChange={(e) => setBulkSp(e.target.value)} style={{ width: 90 }} title="Sub-profile for every accepted lead">
+          {["SP1", "SP2", "SP3", "SP4"].map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <button className="primary" disabled={bulkBusy || picked.size === 0} onClick={() => void bulk("accept")} title="Accept all selected: competitor found → Signed elsewhere, niche kept">
+          Accept selected
+        </button>
+        <input value={bulkReason} onChange={(e) => setBulkReason(e.target.value)} placeholder="reject reason" style={{ maxWidth: 180 }} />
+        <button disabled={bulkBusy || picked.size === 0} onClick={() => void bulk("reject")}>Reject selected</button>
+        {bulkMsg && <span className="muted">{bulkMsg}</span>}
+      </div>
+    )}
     <div className="tablewrap">
       <table className="sourced">
         <thead>
           <tr>
+            {canRun && (
+              <th onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" checked={allPicked} onChange={() => setPicked(allPicked ? new Set() : new Set(rows.map((r) => r.id)))} title="Select all on this page" />
+              </th>
+            )}
             {SOURCED_COLUMNS.map(([col, label, help]) =>
               col ? (
                 <th key={label} className={`sortable ${sort === col ? "active" : ""}`} onClick={() => onSort(col)} title={help}>
@@ -803,7 +847,7 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={SOURCED_COLUMNS.length} className="muted">
+              <td colSpan={SOURCED_COLUMNS.length + (canRun ? 1 : 0)} className="muted">
                 Nothing matches. Clear the filters, or run an audience from the Audiences page to find new people.
               </td>
             </tr>
@@ -813,6 +857,11 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
             const s = d?.surfaced;
             return (
               <tr key={l.id} className={open === l.id ? "selected" : ""} style={{ cursor: "pointer" }} onClick={() => onOpen(l.id)}>
+                {canRun && (
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={picked.has(l.id)} onChange={() => toggle(l.id)} />
+                  </td>
+                )}
                 <td>
                   <strong>{l.sourcingScore ?? 0}</strong>
                   <div className="muted" style={{ fontSize: 11 }}>{l.scoreReasons.length} reasons</div>
@@ -898,6 +947,7 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 

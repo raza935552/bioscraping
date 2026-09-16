@@ -23,6 +23,7 @@ import {
   urlsInText,
   qualityGate,
   emailFromText,
+  suggestCompetitors,
   findAffiliateCode,
   deadWithoutRead,
   countryFromText,
@@ -277,8 +278,11 @@ export async function planProfile(
   known: KnownPeople,
   verify: VerifyFn,
   now: Date,
+  /** Save only people whose bio or posts name a competitor (the outreach flow can't contact anyone else). */
+  opts: { requireCompetitor?: boolean } = {},
 ): Promise<{ candidates: Candidate[]; summary: ProfileRunSummary }> {
   const summary: ProfileRunSummary = emptyRunSummary(profile);
+  const requireCompetitor = !!opts.requireCompetitor;
   const spendCap = Number(profile.spendCapUsd);
 
   // Merge by platform:handle; discovery cost is what we already paid for.
@@ -315,7 +319,7 @@ export async function planProfile(
   }
   summary.rejected = rejected;
 
-  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0 };
+  const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0, no_competitor: 0 };
   const allowedCountries = (profile.countries ?? []).map((c) => c.toUpperCase());
   const outsideCountries = (c: string | null) => c != null && allowedCountries.length > 0 && !allowedCountries.includes(c);
   const gated: Array<{ key: string; reason: QualityReason }> = [];
@@ -389,7 +393,9 @@ export async function planProfile(
     const readFailed = !v && h.platform !== "skool";
     const reason: QualityReason | null = readFailed
       ? "no_read"
-      : outOfRange
+      : requireCompetitor && !s.competitor
+        ? "no_competitor"
+        : outOfRange
         ? "followers"
         : outsideCountries(country)
           ? "country"
@@ -512,6 +518,32 @@ export function applyTermOutcome(stats: TermStats, outcome: Record<string, { che
   return next;
 }
 
+export const SUGGESTIONS_CONFIG_KEY = "competitor_suggestions";
+export type CompetitorSuggestions = Record<string, { name: string; domain: string | null; count: number; examples: string[]; firstSeen: string; lastSeen: string; dismissed?: boolean }>;
+
+/** Adds this run's vendor mentions to the stored suggestions (config `competitor_suggestions`). */
+export function recordSuggestions(
+  stored: CompetitorSuggestions,
+  texts: Array<{ text: string; url: string | null }>,
+  known: Array<{ name: string; domains?: unknown }>,
+  now: Date,
+): CompetitorSuggestions {
+  const next: CompetitorSuggestions = { ...stored };
+  const knownRows = known.map((c) => ({ name: c.name, domains: Array.isArray(c.domains) ? (c.domains as string[]) : [] }));
+  for (const { text, url } of texts) {
+    for (const sug of suggestCompetitors(text, knownRows)) {
+      const key = compactName(sug.domain ?? sug.name);
+      const prev = next[key];
+      const examples = [...(prev?.examples ?? [])];
+      if (url && /^https?:\/\//.test(url) && !examples.includes(url) && examples.length < 3) examples.push(url);
+      next[key] = { name: prev?.name ?? sug.name, domain: prev?.domain ?? sug.domain, count: (prev?.count ?? 0) + 1, examples, firstSeen: prev?.firstSeen ?? now.toISOString(), lastSeen: now.toISOString(), ...(prev?.dismissed ? { dismissed: true } : {}) };
+    }
+  }
+  return next;
+}
+
+const compactName = (s: string) => s.toLowerCase().replace(/\.[a-z]{2,}$/, "").replace(/[^a-z0-9]/g, "");
+
 /** People rejected after a paid profile read are not read again for this long. */
 export const GATED_MEMORY_DAYS = 90;
 const GATED_CONFIG_KEY = "sourcing_gated_handles";
@@ -619,7 +651,9 @@ function discoveryOptsFor(profile: ProfileRow, platform: DiscoveryPlatform): Dis
 
 /** Platforms whose discoverer can search a competitor's name. Reddit reads a
  *  subreddit by name, so "Peptide Sciences" would be a subreddit that doesn't exist. */
-const COMPETITOR_NAME_PLATFORMS = new Set<DiscoveryPlatform>(["tiktok", "instagram", "youtube", "skool"]);
+/** YouTube was dropped on 2026-09-16: its channel search returns titles, and codes live in video
+ *  descriptions (0 to 5 mentions per 20 channels in the test). */
+const COMPETITOR_NAME_PLATFORMS = new Set<DiscoveryPlatform>(["tiktok", "instagram", "skool"]);
 
 /** Competitor affiliates are mostly small accounts: in the 2026-09-16 test, 34 of the code posters
  *  found had under 5K followers, some with viral code posts (64 followers, 178,700 views). For a hit
@@ -648,10 +682,23 @@ export function competitorQuery(platform: DiscoveryPlatform, name: string): stri
   return platform === "tiktok" || platform === "youtube" ? `${name.trim()} code` : name.trim();
 }
 
+/** Every search for one competitor on a platform. TikTok gets three ways affiliates word it:
+ *  "Amino Club code", "Amino Club discount", and the store's domain ("aminoclub.com"). */
+export function competitorQueries(platform: DiscoveryPlatform, c: { name: string; domains?: string[] | null }): string[] {
+  if (platform !== "tiktok") return [competitorQuery(platform, c.name)];
+  const domain = (c.domains ?? []).find((d) => /^[a-z0-9-]+\.[a-z]{2,}$/i.test(d.trim()));
+  return [`${c.name.trim()} code`, `${c.name.trim()} discount`, ...(domain ? [domain.trim().toLowerCase()] : [])];
+}
+
 /** The competitor a search was for, when the term is a competitor search. */
-export function competitorOfTerm(term: string, competitors: Pick<CompetitorRule, "name">[]): string | null {
+export function competitorOfTerm(term: string, competitors: Array<{ name: string; domains?: string[] | null }>): string | null {
   const t = term.trim().toLowerCase();
-  return competitors.find((c) => t === c.name.toLowerCase() || t === `${c.name.toLowerCase()} code`)?.name ?? null;
+  return (
+    competitors.find((c) => {
+      const n = c.name.toLowerCase();
+      return t === n || t === `${n} code` || t === `${n} discount` || (c.domains ?? []).some((d) => /\./.test(d) && d.trim().toLowerCase() === t);
+    })?.name ?? null
+  );
 }
 
 export interface PlannedSearch {
@@ -680,12 +727,15 @@ export function verifyReserveUsd(profile: Pick<ProfileRow, "dailyCap" | "spendCa
  *  Nothing runs before this: the spend cap gates searching, not only verification. */
 export function planSearches(
   profile: Pick<ProfileRow, "platforms" | "terms" | "dailyCap" | "spendCapUsd">,
-  competitors: Pick<CompetitorRule, "name">[],
+  competitors: Array<{ name: string; domains?: string[] | null }>,
   perTerm: number,
   rotation = 0,
   resting: (platform: DiscoveryPlatform, term: string) => boolean = () => false,
   /** termStatKey()s another audience already searched in this run: skipped, not paid for twice. */
   alreadySearched: ReadonlySet<string> = new Set(),
+  /** Only competitor searches: the outreach flow contacts competitor affiliates only, and audience
+   *  hashtags found none of them in 76 sourced leads (2026-09-16). */
+  opts: { competitorOnly?: boolean } = {},
 ): { run: PlannedSearch[]; skipped: PlannedSearch[]; resting: PlannedSearch[]; budgetUsd: number } {
   const restingOut: PlannedSearch[] = [];
   const budgetUsd = round4(Math.max(0, Number(profile.spendCapUsd) - verifyReserveUsd(profile)));
@@ -693,14 +743,18 @@ export function planSearches(
   // Advance by as many competitors as one day's budget covers, so tomorrow starts
   // where today stopped instead of repeating most of today's searches.
   const priceOf = (p: DiscoveryPlatform) => round4(searchUnitPrice(p, competitorQuery(p, "x")) * perTerm);
-  const audienceCost = Math.min(
-    profile.platforms.reduce((a, p) => a + (profile.terms[p]?.length ?? 0) * priceOf(p), 0),
-    n > 0 ? budgetUsd * AUDIENCE_SHARE : Infinity,
-  );
+  const competitorOnly = !!opts.competitorOnly;
+  const audienceCost = competitorOnly
+    ? 0
+    : Math.min(
+        profile.platforms.reduce((a, p) => a + (profile.terms[p]?.length ?? 0) * priceOf(p), 0),
+        n > 0 ? budgetUsd * AUDIENCE_SHARE : Infinity,
+      );
+  // The rotation steps through competitors by their first phrasing ("<name> code"), which runs first.
   const perCompetitor = profile.platforms.filter((p) => COMPETITOR_NAME_PLATFORMS.has(p)).reduce((a, p) => a + priceOf(p), 0);
   const perDay = perCompetitor > 0 ? Math.min(Math.max(n, 1), Math.max(1, Math.floor(Math.max(0, budgetUsd - audienceCost) / perCompetitor))) : 1;
   const shift = n > 0 ? (((rotation * perDay) % n) + n) % n : 0;
-  const rotated = [...competitors.slice(shift), ...competitors.slice(0, shift)].map((c) => c.name);
+  const rotated = [...competitors.slice(shift), ...competitors.slice(0, shift)];
   const seen = new Map<DiscoveryPlatform, Set<string>>();
   const make = (platform: DiscoveryPlatform, raw: string): PlannedSearch | null => {
     const term = raw.trim();
@@ -729,8 +783,17 @@ export function planSearches(
     }
     return out;
   };
-  const audience = roundRobin((p) => profile.terms[p] ?? []);
-  const named = roundRobin((p) => (COMPETITOR_NAME_PLATFORMS.has(p) ? rotated.map((name) => competitorQuery(p, name)) : []));
+  const audience = competitorOnly ? [] : roundRobin((p) => profile.terms[p] ?? []);
+  // Every competitor's "code" search first, then "discount", then domains: a tight budget covers
+  // more competitors with the phrasing that finds the most affiliates.
+  const byPhrasing = (p: DiscoveryPlatform) => {
+    const lists = rotated.map((c) => competitorQueries(p, c));
+    const longest = Math.max(0, ...lists.map((l) => l.length));
+    const out: string[] = [];
+    for (let i = 0; i < longest; i++) for (const l of lists) if (i < l.length) out.push(l[i]!);
+    return out;
+  };
+  const named = roundRobin((p) => (COMPETITOR_NAME_PLATFORMS.has(p) ? byPhrasing(p) : []));
   // Competitor-name searches are how tier-one affiliates are found, so audience terms may use
   // at most AUDIENCE_SHARE of the search budget when there are competitors to search. On
   // 2026-09-14 hashtags used every dollar and not one of 47 leads was a competitor affiliate.
@@ -782,6 +845,13 @@ export function startOfBusinessDay(now: Date, tz = process.env.BUSINESS_TZ ?? "A
 export async function dailyLimitUsd(db: Db, env = process.env): Promise<number> {
   const row = await db.query.appSettings.findFirst({ where: eq(schema.appSettings.key, "SOURCING_DAILY_SPEND_USD") });
   return parseDailyLimit(row?.value ?? env.SOURCING_DAILY_SPEND_USD);
+}
+
+/** Admin setting SOURCING_COMPETITOR_ONLY: on unless set to false. On = only competitor searches
+ *  run and only people who name a competitor are saved. */
+export async function competitorOnlySourcing(db: Db, env = process.env): Promise<boolean> {
+  const row = await db.query.appSettings.findFirst({ where: eq(schema.appSettings.key, "SOURCING_COMPETITOR_ONLY") });
+  return String(row?.value ?? env.SOURCING_COMPETITOR_ONLY ?? "").trim().toLowerCase() !== "false";
 }
 
 export function parseDailyLimit(raw: string | null | undefined): number {
@@ -892,7 +962,10 @@ export async function runLeadIngest(
     const all = (await db.select().from(schema.sourcingProfiles)) as unknown as ProfileRow[];
     const now0 = deps.now();
     const profiles = all.filter((p) => (opts.profileId ? p.id === opts.profileId : p.active && (opts.allActive || !ranToday(p, now0))));
-    const competitors = competitorRules(await db.select().from(schema.competitors));
+    const allCompetitorRows = await db.select().from(schema.competitors);
+    const competitors = competitorRules(allCompetitorRows);
+    const suggestionsRow = await db.query.config.findFirst({ where: eq(schema.config.key, SUGGESTIONS_CONFIG_KEY) });
+    let suggestions = (suggestionsRow?.value as CompetitorSuggestions | undefined) ?? {};
     const known = await loadKnownPeople(db);
     // People dropped after a paid read in the last 90 days count as known: don't pay to read them again.
     const gatedRow = await db.query.config.findFirst({ where: eq(schema.config.key, GATED_CONFIG_KEY) });
@@ -903,6 +976,7 @@ export async function runLeadIngest(
     const verify = makeVerify(deps);
     const now = deps.now();
     const limit = await dailyLimitUsd(db);
+    const competitorOnly = await competitorOnlySourcing(db);
     const spentEarlier = await spentTodayUsd(db, now, run!.id);
     summary.dailyLimitUsd = limit;
     summary.spentEarlierTodayUsd = spentEarlier;
@@ -933,7 +1007,7 @@ export async function runLeadIngest(
       const dayNumber = Math.floor(startOfBusinessDay(now).getTime() / 86_400_000);
       const statsRow = await db.query.config.findFirst({ where: eq(schema.config.key, termStatsConfigKey(profile.id)) });
       let stats = (statsRow?.value as TermStats | undefined) ?? {};
-      const searches = planSearches(profile, competitors, PER_TERM, dayNumber + profile.id, (p, t) => isResting(stats, p, t, now), searchedThisRun);
+      const searches = planSearches(profile, competitors, PER_TERM, dayNumber + profile.id, (p, t) => isResting(stats, p, t, now), searchedThisRun, { competitorOnly });
       for (const s of searches.run) searchedThisRun.add(termStatKey(s.platform, s.term));
       const termYield: Array<{ search: string; hits: number; fresh: number }> = [];
       for (const { platform, term } of searches.run) {
@@ -948,7 +1022,12 @@ export async function runLeadIngest(
           termErrors.push(`${platform} ${term}: ${(err as Error).message}`);
         }
       }
-      const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now);
+      const { candidates, summary: ps } = await planProfile(profile, competitors, hitsByTerm, known, verify, now, { requireCompetitor: competitorOnly });
+      // Vendors creators name that aren't competitors yet, for a person to approve.
+      const texts: Array<{ text: string; url: string | null }> = [];
+      for (const hits of hitsByTerm.values()) for (const h of hits) texts.push({ text: `${h.bio ?? ""}\n${h.postText ?? ""}`, url: h.postUrl });
+      for (const c of candidates) for (const i of (c.enrichment?.bundle as { items?: Array<{ text?: string; url?: string }> } | undefined)?.items ?? []) texts.push({ text: i.text ?? "", url: i.url ?? null });
+      suggestions = recordSuggestions(suggestions, texts, allCompetitorRows, now);
       stats = applyTermOutcome(stats, ps.termOutcome ?? {}, now);
       await db
         .insert(schema.config)
@@ -983,6 +1062,10 @@ export async function runLeadIngest(
       await db.update(schema.syncRuns).set({ detail: summary }).where(eq(schema.syncRuns.id, run!.id));
     }
 
+    await db
+      .insert(schema.config)
+      .values({ key: SUGGESTIONS_CONFIG_KEY, value: suggestions })
+      .onDuplicateKeyUpdate({ set: { value: suggestions } });
     await db.update(schema.syncRuns).set({ status: "ok", finishedAt: new Date(), detail: summary }).where(eq(schema.syncRuns.id, run!.id));
     console.log(`[lead-ingest] ok — inserted=${summary.inserted} cost≈$${summary.estimatedCostUsd}`);
     return summary;

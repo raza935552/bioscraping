@@ -90,7 +90,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 316 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 322 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -113,7 +113,17 @@ implemented and where the engine differs.
     review-queue limit (`SOURCING_MAX_PENDING`, currently 50: no new leads
     while that many wait) all gate spend. Real per-platform read prices in
     `VERIFY_PRICE`.
-  - Search planning: audience terms round-robin across platforms, then
+  - **Competitor affiliates only** (`SOURCING_COMPETITOR_ONLY`, on unless
+    set to false, 2026-09-16): no audience hashtag searches run, and a read
+    that names no competitor isn't saved (`no_competitor`, remembered 90
+    days). TikTok searches each active competitor three ways, "code" for
+    every competitor first, then "discount", then its domain; YouTube
+    competitor searches were dropped (titles carry no codes). Vendors that
+    creators name next to a code or as a store link are collected in config
+    `competitor_suggestions` and shown on Audiences for a person to add or
+    dismiss. The Sourced view has select-all + Accept/Reject selected
+    (`POST /api/leads/review-bulk`).
+  - Search planning when competitor-only is off: audience terms round-robin across platforms, then
     competitor searches (40% of the search budget is reserved for them):
     `"<competitor> code"` as a TikTok keyword search (`clockworks/tiktok-scraper`,
     $0.003/result, config key `discover:tiktok-search`) and a YouTube search;

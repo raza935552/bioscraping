@@ -320,6 +320,12 @@ export const api = {
   saveCompetitor: (id: number | null, body: Record<string, unknown>) =>
     request<{ ok: true; id?: number }>(id ? `/api/competitors/${id}` : "/api/competitors", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
   deleteCompetitor: (id: number) => request<{ ok: true }>(`/api/competitors/${id}`, { method: "DELETE" }),
+  reviewBulk: (body: { ids: number[]; decision: "accept" | "reject"; subProfile?: string; reason?: string }) =>
+    request<{ ok: true; changed: number; skipped: number; noNiche?: number[] }>("/api/leads/review-bulk", { method: "POST", body: JSON.stringify(body) }),
+  competitorSuggestions: () =>
+    request<{ suggestions: Array<{ key: string; name: string; domain: string | null; count: number; examples: string[]; firstSeen: string; lastSeen: string }> }>("/api/competitors/suggestions"),
+  actOnSuggestion: (key: string, action: "add" | "dismiss", name?: string) =>
+    request<{ ok: true; competitorId: number | null }>(`/api/competitors/suggestions/${encodeURIComponent(key)}`, { method: "POST", body: JSON.stringify({ action, name }) }),
   reviewLead: (id: number, body: Record<string, unknown>) => request<{ ok: true }>(`/api/leads/${id}/review`, { method: "POST", body: JSON.stringify(body) }),
   swipe: (status: string) => request<SwipePayload>(`/api/swipe?status=${encodeURIComponent(status)}`),
   swipeGenerate: (count: number) => request<{ ok: true; result: { considered: number; created: number; failed: Array<{ source: string; reason: string }> } }>("/api/swipe/generate", { method: "POST", body: JSON.stringify({ count }) }),
