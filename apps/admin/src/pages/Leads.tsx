@@ -3,7 +3,7 @@ import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type Sampl
 import { Modal, PageInfo, Pagination } from "../components.js";
 import { LeadBubbleCell } from "../leadBubble.js";
 import { OutreachPanel } from "../outreachPanel.js";
-import { PATH_LABEL, BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
+import { CREATOR_TYPES, PATH_LABEL, BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
 
 const VIEWS: Array<[string, string]> = [
   ["queue", "Queue"],
@@ -23,7 +23,7 @@ const SORTS: Array<[string, string, string?]> = [
   ["posts30", "Posts 30d", "Posts in the last 30 days, out of the posts read"],
   ["competitor", "Competitor"],
   ["status", "Status"],
-  ["sp", "Sub-profile"],
+  ["sp", "Creator type"],
   ["lastTouch", "Last touch"],
 ];
 
@@ -287,8 +287,8 @@ export function Leads({ me }: { me: Me }) {
         </select>
         {view !== "sourced" && (
         <select value={sp} onChange={(e) => setSp(e.target.value)} style={{ maxWidth: 150 }}>
-          <option value="">All sub-profiles</option>
-          {filters?.subProfiles.map((s) => <option key={s} value={s}>{s.slice(0, 24)}</option>)}
+          <option value="">All creator types</option>
+          {filters?.subProfiles.map((s) => <option key={s} value={s}>{subProfileLabel(s).text}</option>)}
         </select>
         )}
         {view === "sourced" && canRun && (
@@ -786,7 +786,7 @@ const SOURCED_COLUMNS: Array<[string | null, string, string?]> = [
 
 function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept, onReject, confirmReject, onBulkDone }: SourcedTableProps) {
   const [picked, setPicked] = useState<Set<number>>(new Set());
-  const [bulkSp, setBulkSp] = useState("SP2");
+  const [bulkSp, setBulkSp] = useState("SP1");
   const [bulkReason, setBulkReason] = useState("");
   const [bulkMsg, setBulkMsg] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -812,9 +812,12 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
     {canRun && (
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
         <span className="muted">{picked.size} selected</span>
-        <select value={bulkSp} onChange={(e) => setBulkSp(e.target.value)} style={{ width: 90 }} title="Sub-profile for every accepted lead">
-          {["SP1", "SP2", "SP3", "SP4"].map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <label className="muted" style={{ fontSize: 12.5 }}>
+          Type of creator{" "}
+          <select value={bulkSp} onChange={(e) => setBulkSp(e.target.value)} style={{ width: "auto" }} title="Most competitor affiliates are Experts">
+            {CREATOR_TYPES.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+          </select>
+        </label>
         <button className="primary" disabled={bulkBusy || picked.size === 0} onClick={() => void bulk("accept")} title="Accept all selected: competitor found → Signed elsewhere, niche kept">
           Accept selected
         </button>
@@ -953,7 +956,7 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
 
 function ReviewForm({ lead, onClose, onDone }: { lead: LeadRow; onClose: () => void; onDone: () => Promise<void> }) {
   const [affiliation, setAffiliation] = useState(lead.competitor ? "Signed elsewhere" : "Unsigned");
-  const [sp, setSp] = useState("SP2");
+  const [sp, setSp] = useState("SP1");
   const [niche, setNiche] = useState(lead.niche && NICHES.includes(lead.niche) ? lead.niche : NICHES[0] ?? "");
   const [brandFit, setBrandFit] = useState(lead.brandFit ?? NICHE_BRAND[niche] ?? "biolinx");
   const [doesLive, setDoesLive] = useState(false);
@@ -1003,15 +1006,15 @@ function ReviewForm({ lead, onClose, onDone }: { lead: LeadRow; onClose: () => v
           {lead.competitor && <span className="fh">Seen promoting {lead.competitor}.</span>}
         </label>
         <label className="settings-field">
-          <span className="fl">Sub-profile</span>
+          <span className="fl">Type of creator</span>
           <select value={sp} onChange={(e) => setSp(e.target.value)}>
-            {["SP1", "SP2", "SP3", "SP4"].map((code) => (
-              <option key={code} value={code}>
-                {code} · {subProfileLabel(code).text}
+            {CREATOR_TYPES.map((t) => (
+              <option key={t.code} value={t.code}>
+                {t.label}
               </option>
             ))}
           </select>
-          <span className="fh">Goodwill advocates are rejected, not accepted as SP5.</span>
+          <span className="fh">Most competitor affiliates are Experts. If they're already a Biolinx fan, reject them instead: fans are never messaged.</span>
         </label>
         <label className="settings-field">
           <span className="fl">Niche</span>

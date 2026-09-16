@@ -20,20 +20,28 @@ export const BAND_HELP: Record<string, string> = {
   "5": "The record is missing something the ranking needs. A human decides.",
 };
 
+/** The accept choices, in plain words. SP5 isn't a choice: goodwill advocates are rejected. */
+export const CREATOR_TYPES: Array<{ code: string; label: string }> = [
+  { code: "SP1", label: "Expert: knows peptides well, posts codes or reviews" },
+  { code: "SP2", label: "Beginner: interested, still learning" },
+  { code: "SP3", label: "Community leader: runs a group, forum or Skool" },
+  { code: "SP4", label: "Website owner: health blog or review site" },
+];
+
 /** Sub-profile codes → what they mean to a rep. SP5 is never contacted. */
 export function subProfileLabel(sp: string | null | undefined): { text: string; danger: boolean; help: string } {
   const code = (sp ?? "").trim().toUpperCase().slice(0, 3);
   switch (code) {
     case "SP1":
-      return { text: "Veteran", danger: false, help: "Self-verifying veteran: already uses and explains this category." };
+      return { text: "Expert", danger: false, help: "Knows peptides well: posts codes, reviews or explainers." };
     case "SP2":
-      return { text: "Curious", danger: false, help: "Interested but not yet an authority." };
+      return { text: "Beginner", danger: false, help: "Interested, still learning." };
     case "SP3":
-      return { text: "Community voice", danger: false, help: "Respected inside a community or forum." };
+      return { text: "Community leader", danger: false, help: "Runs or leads a group, forum or Skool." };
     case "SP4":
-      return { text: "Health SEO", danger: false, help: "Runs a health site that ranks and reviews products." };
+      return { text: "Website owner", danger: false, help: "Runs a health blog or review site." };
     case "SP5":
-      return { text: "Do not contact", danger: true, help: "Goodwill advocate. Never cold-contacted, by rule." };
+      return { text: "Fan: never message", danger: true, help: "Already a Biolinx fan. Never contacted, by rule." };
     default:
       return { text: sp ? sp.slice(0, 14) : "Unsorted", danger: false, help: sp ?? "No sub-profile assigned yet." };
   }
