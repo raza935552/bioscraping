@@ -23,6 +23,7 @@ import {
   urlsInText,
   qualityGate,
   emailFromText,
+  findAffiliateCode,
   deadWithoutRead,
   countryFromText,
   resolveCountry,
@@ -291,7 +292,27 @@ export async function planProfile(
     }
   }
 
-  const { kept, rejected } = applyFilters([...merged.values()], audienceRules(profile));
+  // Filters run per follower minimum: competitor affiliates who name the competitor get a lower one.
+  const names = (h: DiscoveryHit) => !!findAffiliateCode(`${h.bio ?? ""}\n${h.postText ?? ""}`, competitors);
+  const groups = new Map<string, DiscoveryHit[]>();
+  for (const h of merged.values()) {
+    const min = followerMinFor(profile, h, names(h), competitors);
+    const k = min == null ? "none" : String(min);
+    groups.set(k, [...(groups.get(k) ?? []), h]);
+  }
+  const kept: DiscoveryHit[] = [];
+  const rejected: ProfileRunSummary["rejected"] = { excluded_handle: 0, excluded_term: 0, followers_low: 0, followers_high: 0, country: 0 };
+  for (const [k, hs] of groups) {
+    const base = audienceRules(profile);
+    const rules = { ...base, followerMin: { ...base.followerMin } };
+    for (const h of hs) {
+      if (k === "none") delete rules.followerMin[h.platform];
+      else rules.followerMin[h.platform] = Number(k);
+    }
+    const out = applyFilters(hs, rules);
+    kept.push(...out.kept);
+    for (const r of Object.keys(rejected) as Array<keyof typeof rejected>) rejected[r] += out.rejected[r];
+  }
   summary.rejected = rejected;
 
   const quality: Record<QualityReason, number> = { non_english: 0, dead: 0, off_niche: 0, followers: 0, country: 0, no_read: 0, weak_reach: 0, no_mention: 0 };
@@ -360,7 +381,7 @@ export async function planProfile(
     }
 
     const s = scoreHit({ hit: h, verified: v, rules: rulesFor(profile, h), competitors, now });
-    const fMin = profile.followerMin?.[h.platform];
+    const fMin = followerMinFor(profile, h, !!s.competitor, competitors);
     const fMax = profile.followerMax?.[h.platform];
     const outOfRange = v?.followers != null && ((fMin != null && v.followers < fMin) || (fMax != null && v.followers > fMax));
     const country = h.country ?? v?.country ?? countryFromText(h.bio);
@@ -600,6 +621,26 @@ function discoveryOptsFor(profile: ProfileRow, platform: DiscoveryPlatform): Dis
  *  subreddit by name, so "Peptide Sciences" would be a subreddit that doesn't exist. */
 const COMPETITOR_NAME_PLATFORMS = new Set<DiscoveryPlatform>(["tiktok", "instagram", "youtube", "skool"]);
 
+/** Competitor affiliates are mostly small accounts: in the 2026-09-16 test, 34 of the code posters
+ *  found had under 5K followers, some with viral code posts (64 followers, 178,700 views). For a hit
+ *  from a competitor search that names a competitor, 1K followers is enough, and a post with this
+ *  many views passes whatever the account size. Audience searches keep the audience's minimum. */
+export const COMPETITOR_FOLLOWER_MIN = 1000;
+export const COMPETITOR_VIRAL_VIEWS = 10_000;
+
+/** The follower minimum that applies to this hit. */
+export function followerMinFor(
+  profile: Pick<ProfileRow, "followerMin">,
+  h: Pick<DiscoveryHit, "platform" | "term" | "views">,
+  namesCompetitor: boolean,
+  competitors: Pick<CompetitorRule, "name">[],
+): number | undefined {
+  const min = profile.followerMin?.[h.platform] ?? undefined;
+  if (!namesCompetitor || !competitorOfTerm(h.term, competitors)) return min;
+  if ((h.views ?? 0) >= COMPETITOR_VIRAL_VIEWS) return undefined;
+  return min == null ? COMPETITOR_FOLLOWER_MIN : Math.min(min, COMPETITOR_FOLLOWER_MIN);
+}
+
 /** What a competitor search looks for. Affiliates announce codes ("use code JAMIE222 at Amino Club"),
  *  and that is how the 411 hand-researched leads were found; searching the bare name as a hashtag
  *  found nobody who mentioned the competitor. Skool searches communities, so it keeps the name. */
@@ -789,6 +830,41 @@ export function effectiveSpendCap(profileCapUsd: number, dailyLimit: number, spe
   return left < profileCapUsd ? { capUsd: left, limitedByDaily: true } : { capUsd: profileCapUsd, limitedByDaily: false };
 }
 
+/** Writes each candidate in its own transaction. The unique index on lead_handles is the last
+ *  line against duplicates: if the handle already belongs to a lead (another process, a race,
+ *  a key the in-memory set missed), nothing is written for that person. */
+export async function saveCandidates(db: Db, candidates: Candidate[], now: Date): Promise<{ inserted: number[]; duplicates: number }> {
+  const inserted: number[] = [];
+  let duplicates = 0;
+  for (const c of candidates) {
+    try {
+      await db.transaction(async (tx) => {
+        const [ins] = await tx.insert(schema.leads).values(c.lead).$returningId();
+        const leadId = ins!.id;
+        for (const h of c.handles) {
+          await tx.insert(schema.leadHandles).values({ leadId, handleKey: h.key, profileUrl: h.url, ...(h.verified ? { verifiedAt: now } : {}) });
+        }
+        if (c.enrichment) {
+          await tx.insert(schema.leadEnrichments).values({
+            leadId,
+            platform: c.enrichment.platform,
+            sourceUrl: c.enrichment.sourceUrl,
+            bundle: c.enrichment.bundle,
+            notes: null,
+            status: c.enrichment.status,
+            error: null,
+          });
+        }
+        inserted.push(leadId);
+      });
+    } catch (err) {
+      if (!isDuplicateKey(err)) throw err;
+      duplicates++;
+    }
+  }
+  return { inserted, duplicates };
+}
+
 export function isDuplicateKey(err: unknown): boolean {
   for (let e = err as { code?: string; errno?: number; cause?: unknown } | undefined; e; e = e.cause as typeof e) {
     if (e.code === "ER_DUP_ENTRY" || e.errno === 1062) return true;
@@ -892,35 +968,9 @@ export async function runLeadIngest(
       ps.termsSkipped = searches.skipped.map((s) => `${s.platform} ${s.term}`);
       if (ps.termsSkipped.length > 0 && ps.stoppedBy === "exhausted") ps.stoppedBy = "spend";
       if (limitedByDaily && ps.stoppedBy === "spend") ps.stoppedBy = "daily_limit";
-      for (const c of candidates) {
-        // One transaction per person. The unique index on lead_handles is the last
-        // line against duplicates: if the handle already belongs to a lead (another
-        // process, a race, a key the in-memory set missed), nothing is written.
-        try {
-          await db.transaction(async (tx) => {
-            const [ins] = await tx.insert(schema.leads).values(c.lead).$returningId();
-            const leadId = ins!.id;
-            for (const h of c.handles) {
-              await tx.insert(schema.leadHandles).values({ leadId, handleKey: h.key, profileUrl: h.url, ...(h.verified ? { verifiedAt: now } : {}) });
-            }
-            if (c.enrichment) {
-              await tx.insert(schema.leadEnrichments).values({
-                leadId,
-                platform: c.enrichment.platform,
-                sourceUrl: c.enrichment.sourceUrl,
-                bundle: c.enrichment.bundle,
-                notes: null,
-                status: c.enrichment.status,
-                error: null,
-              });
-            }
-          });
-        } catch (err) {
-          if (!isDuplicateKey(err)) throw err;
-          ps.inserted--;
-          ps.alreadyKnown++;
-        }
-      }
+      const saved = await saveCandidates(db, candidates, now);
+      ps.inserted -= saved.duplicates;
+      ps.alreadyKnown += saved.duplicates;
       pendingNow += ps.inserted;
       if (room.limited && ps.stoppedBy === "cap") ps.stoppedBy = "review_full";
       await db.update(schema.sourcingProfiles).set({ lastRunAt: now, lastRunSummary: ps }).where(eq(schema.sourcingProfiles.id, profile.id));

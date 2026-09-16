@@ -83,7 +83,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 294 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 295 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -117,8 +117,12 @@ implemented and where the engine differs.
     "cod3", and referral links (`?ref=X`). Test on 2026-09-16 (Amino Club,
     Ameano, Peptira; about $0.40): TikTok keyword search returned real code
     posts (17 of 24 for Amino Club), but most code posters have under 5K
-    followers (34 dropped by the minimum), so the follower minimum for
-    competitor affiliates is a decision for Jakob. YouTube titles rarely carry
+    followers (34 dropped by the minimum). Raza's decision (2026-09-16): a
+    competitor-search hit that names the competitor needs only 1K followers,
+    and none at all when the post has 10K+ views (`followerMinFor`); audience
+    searches keep the audience minimum. The 5 test leads (#524-528: Amino
+    Club, Peptira x2, Ameano x2, codes SOYYLAPRI, THATGEEK, CHASITY) were added
+    to the queue on request. YouTube titles rarely carry
     codes (0-5 of about 20 channels). Daily
     rotation through competitors, a search already run by another audience
     this run is skipped, searches that stop finding new people rest (term

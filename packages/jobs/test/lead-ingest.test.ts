@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryHit } from "@biolinx/scraping";
 import { emptyKnown } from "@biolinx/scraping";
-import { competitorOfTerm, competitorQuery, parseMaxPending, reviewRoom, byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
+import { COMPETITOR_FOLLOWER_MIN, followerMinFor, competitorOfTerm, competitorQuery, parseMaxPending, reviewRoom, byNichePriority, activeGated, applyTermOutcome, interleaveByPlatform, countFresh, effectiveSpendCap, ingestDepsFromEnv, ranToday, isDuplicateKey, isResting, parseDailyLimit, planProfile, planSearches, recordTermRun, restUntilAfterRun, startOfBusinessDay, verifyReserveUsd, type ProfileRow, type VerifyFn } from "../src/lead-ingest.js";
 
 const profile: ProfileRow = {
   id: 1,
@@ -317,6 +317,32 @@ describe("quality in planProfile (first live run lessons)", () => {
     expect(candidates.map((c) => [c.hit.handle, c.lead.otherCreatorCompany, c.lead.affiliateCode])).toEqual([["jamie", "Amino Club", "JAMIE222"]]);
     expect(reads).toBe(1);
     expect(summary.quality.no_mention).toBe(1);
+  });
+
+  it("competitor affiliates who name the competitor get a 1K follower minimum, or none with a 10K-view post", async () => {
+    const comps = [{ name: "Amino Club" }];
+    const p = { followerMin: { tiktok: 5000 } };
+    const h = (views: number | undefined, term = "Amino Club code") => ({ platform: "tiktok" as const, term, views });
+    expect(followerMinFor(p, h(500), true, comps)).toBe(COMPETITOR_FOLLOWER_MIN);
+    expect(followerMinFor(p, h(178_700), true, comps)).toBeUndefined();
+    expect(followerMinFor(p, h(178_700), false, comps)).toBe(5000); // doesn't name the competitor
+    expect(followerMinFor(p, h(178_700, "#peptidetok"), true, comps)).toBe(5000); // audience search
+    expect(followerMinFor({ followerMin: { tiktok: 500 } }, h(10), true, comps)).toBe(500); // never raises a lower minimum
+
+    let reads = 0;
+    const v: VerifyFn = async (x) => { reads++; return { followers: x.followers, bio: null, lastPostAt: "2026-09-12T00:00:00Z", isRepostRatio: null, profileUrl: x.profileUrl, items: [{ url: x.profileUrl + "/v", text: english }] }; };
+    const club = { id: 1, name: "Amino Club", domains: ["amino club"], codePattern: null, codePrefix: null, commissionPct: null };
+    const say = "Use code REVIVE at Amino Club for 35% off, weight loss research";
+    const hits = new Map([["t", [
+      hit("viral", { term: "Amino Club code", followers: 64, views: 178_700, postText: say }),
+      hit("small", { term: "Amino Club code", followers: 2843, views: 2461, postText: say }),
+      hit("tiny", { term: "Amino Club code", followers: 400, views: 900, postText: say }),
+      hit("plain", { term: "#weightloss", followers: 2843, views: 2461, postText: english }),
+    ]]]);
+    const { candidates, summary } = await planProfile(wl, [club], hits, emptyKnown(), v, now);
+    expect(candidates.map((c) => c.hit.handle).sort()).toEqual(["small", "viral"]);
+    expect(summary.rejected.followers_low).toBe(2);
+    expect(reads).toBe(2);
   });
 
   it("a dead account after the read is not saved, does not use a slot, and is remembered", async () => {
