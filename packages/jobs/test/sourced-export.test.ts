@@ -34,7 +34,7 @@ describe("sourced leads export", () => {
     expect(col(r, "Brand tag")).toBe("Biolinx only");
     expect(col(r, "Affiliate type")).toBe("competitor affiliate");
     expect(col(r, "Commission comparison")).toBe("lower (20% vs our 25% lifetime)");
-    expect(col(r, "Outreach path")).toBe("Offer 1 · their rate is under our 25%");
+    expect(col(r, "Outreach path")).toBe("Offer 1 · pitch our 25% for life");
     expect(col(r, "Audience size")).toBe("NOT FOUND");
     expect(col(r, "Posting activity")).toBe("dormant (107d ago)");
     expect(col(exportRow({ ...base, otherCreatorCompany: "Swiss Chems", affiliationStatus: "Signed elsewhere" }, now), "Commission comparison")).toBe("unknown (competitor rate not on file)");

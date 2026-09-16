@@ -29,14 +29,17 @@ export function nextStep(l: LeadRow): NextStep {
       return { tone: "stop", title: "Don't message", detail: "Not signed with a competitor. The outreach flow only contacts competitor affiliates." };
     case "competitor_unnamed":
       return { tone: "wait", title: "Find their competitor first", detail: `They promote a brand, but which one isn't identified${l.competitor ? ` ("${l.competitor}")` : ""}. Check the proof, then link the brand so the right offer can be chosen.` };
-    case "rate_unknown":
-      return { tone: "wait", title: `Waiting for ${brand}'s rate`, detail: `Don't message yet. The offer depends on what ${brand} pays them. Add ${brand}'s commission rate on Audiences → Competitors and the offer appears here.` };
     case "higher":
       return { tone: "stop", title: "Don't message", detail: `${brand} pays ${l.competitorRatePct}%, more than our 25%. The flow has no offer for them.` };
     case "offer1":
     case "offer2": {
       const offer = l.outreachPath === "offer1" ? "Offer 1" : "Offer 2";
-      const why = l.outreachPath === "offer1" ? `${brand} pays ${l.competitorRatePct}%, under our 25% for life.` : `${brand} already pays 25%: match it and lead with the perks.`;
+      const why =
+        l.outreachPath === "offer2"
+          ? `${brand} already pays 25%: match it and lead with the perks.`
+          : l.competitorRatePct != null
+            ? `${brand} pays ${l.competitorRatePct}%, under our 25% for life.`
+            : `They promote ${brand}. Pitch our 25% for life.`;
       if (status === "Not contacted") return { tone: "go", title: `Send ${offer} · ${channel}`, detail: `${why} Use the ${offer} message (soft or direct).${l.affiliateCode ? ` Their code with ${brand} is ${l.affiliateCode}.` : ""}` };
       if (status === "Contacted") return { tone: "wait", title: "Waiting for their reply", detail: `Messaged ${l.lastReachedOut?.slice(0, 10) ?? ""} (touch ${l.followUpsSent}). When they answer, log it: yes → sign-up details, tell me more → program details, no → the next offer.` };
       return { tone: "go", title: "Continue the conversation", detail: `Status: ${status}. Follow the reply flow for ${offer}.` };

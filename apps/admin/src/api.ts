@@ -296,7 +296,7 @@ export interface SettingsSection {
   fields: SettingsField[];
 }
 
-export type OutreachPath = "offer1" | "offer2" | "higher" | "rate_unknown" | "competitor_unnamed" | "unsigned" | "converted";
+export type OutreachPath = "offer1" | "offer2" | "higher" | "competitor_unnamed" | "unsigned" | "converted";
 
 export interface LeadsPage {
   pathCounts?: Partial<Record<OutreachPath, number>>;

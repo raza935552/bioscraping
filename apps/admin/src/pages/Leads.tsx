@@ -258,7 +258,7 @@ export function Leads({ me }: { me: Me }) {
           <button className={path === "qualified" ? "primary" : ""} onClick={() => setPath("qualified")} title="Offer 1 or Offer 2: the only leads that get messages">
             Qualified ({(data.pathCounts.offer1 ?? 0) + (data.pathCounts.offer2 ?? 0)})
           </button>
-          {(["offer1", "offer2", "rate_unknown", "competitor_unnamed", "higher", "unsigned"] as const).map((k) => (
+          {(["offer1", "offer2", "competitor_unnamed", "higher", "unsigned"] as const).map((k) => (
             <button key={k} className={path === k ? "primary" : ""} onClick={() => setPath(k)} title={PATH_LABEL[k]!.help}>
               {PATH_LABEL[k]!.short} ({data.pathCounts?.[k] ?? 0})
             </button>

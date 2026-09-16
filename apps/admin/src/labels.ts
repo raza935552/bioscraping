@@ -157,9 +157,8 @@ export function describeRun(job: string, detail: unknown): string {
 
 /** The outreach flow chart's paths (packages/core/src/outreach-path.ts). */
 export const PATH_LABEL: Record<string, { short: string; tone: "ok" | "wait" | "bad"; help: string }> = {
-  offer1: { short: "Offer 1", tone: "ok", help: "Signed with a competitor paying under our 25%: pitch our 25% (soft or direct)." },
+  offer1: { short: "Offer 1", tone: "ok", help: "Signed with a competitor: pitch our 25% for life (soft or direct). Used whenever the competitor's rate isn't known or is under 25%." },
   offer2: { short: "Offer 2", tone: "ok", help: "Signed with a competitor paying the same 25%: pitch the small-business offer (lifetime reorders, catalogue, assets, Telegram, monthly payout)." },
-  rate_unknown: { short: "Waiting for rate", tone: "wait", help: "Signed with a competitor whose commission rate isn't on file. Add it on Audiences → Competitors." },
   competitor_unnamed: { short: "Competitor unknown", tone: "wait", help: "Marked signed elsewhere, but the competitor isn't identified. Find the brand, then set it." },
   higher: { short: "Rate over 25%", tone: "bad", help: "Their competitor pays more than our 25%. The flow has no offer for them: not contacted." },
   unsigned: { short: "Not qualified", tone: "bad", help: "Not signed with a competitor. The outreach flow only contacts competitor affiliates." },

@@ -17,7 +17,7 @@ const lead = {
   sourcingReview: null as string | null,
 };
 const today = new Date("2026-09-08T00:00:00Z");
-// Competitor 7 pays 20% (under our 25%): Offer 1. Competitor 8 pays 30%. Competitor 9 has no rate on file.
+// Competitor 7 pays 20% (under our 25%): Offer 1. Competitor 8 pays 30%. Competitor 9 has no rate on file (still Offer 1).
 const competitorRates = new Map<number, number | null>([[7, 20], [8, 30], [9, null]]);
 
 describe("isDispatchCandidate", () => {
@@ -26,7 +26,7 @@ describe("isDispatchCandidate", () => {
     expect(isDispatchCandidate(lead, o)).toBe("ok");
     expect(isDispatchCandidate({ ...lead, affiliationStatus: "Unsigned", competitorId: null }, o)).toBe("ineligible");
     expect(isDispatchCandidate({ ...lead, competitorId: 8 }, o)).toBe("ineligible");
-    expect(isDispatchCandidate({ ...lead, competitorId: 9 }, o)).toBe("ineligible");
+    expect(isDispatchCandidate({ ...lead, competitorId: 9 }, o)).toBe("ok");
     expect(isDispatchCandidate({ ...lead, competitorId: null }, o)).toBe("ineligible");
   });
   it("accepts a ranked, alive, noted, uncontacted lead", () => {
