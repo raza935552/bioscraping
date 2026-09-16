@@ -96,7 +96,7 @@ implemented and where the engine differs.
   check against real leads are not shipped (a "likely US by post times" hint
   was built and dropped: it labeled a UK account US).
 
-## What is built (2026-09-15, all on `main`, 322 tests, 0 type errors)
+## What is built (2026-09-15, all on `main`, 342 tests, 0 type errors)
 
 - **Core:** rank engine (bands 1/2/3/3b/4/5), cadence (cold A: touches at
   4/8/12 days, max 4; warm B: max 12), compliance linter, settings registry,
@@ -234,6 +234,30 @@ implemented and where the engine differs.
   company" on each rank run; 48 competitors, 32 added 2026-09-16; 42 active for sourcing, 6 with
   generic names like "Simple Peptide" inactive so captions don't false-match). The Leads table's "Found · next step" bubble shows the channel,
   proof, contact and the flow's next step.
+- **Outreach page** (`/outreach`, role `operator` sees only Outreach and
+  Signups; operators can't read `/api/leads`): one lead at a time. Work queue
+  (`outreachWorkQueue`): replies to answer, check-ins due, then new leads
+  (those with a profile link first). Each card: copy (edited text re-checked
+  by `/api/outreach/check` with the same approved-copy rule as sending), open
+  their profile (`dmTargetFor`: any handle from sourcing, `lead_handles`, or a
+  TikTok post link; otherwise a name search; never their website), "I sent
+  it → next lead", paste a reply (keywords then optional AI via
+  `OUTREACH_REPLY_AI` suggest the button), sign-up form prefilled from the
+  reply. A lead handed out is held 15 minutes for that person (in memory).
+- **Review pass 2026-09-16** (three reviewers + rolled-back end-to-end tests
+  against the live DB): one `assertContactable` gate on send/reply/sign-up;
+  "I sent it" records once (conditional `follow_ups_sent` update, key
+  `flow:<lead>:<touch>`) and only the flow's next message; events recorded
+  after the previous one (whole-second columns); a DM sent through Send
+  messages counts as the first message and dispatch skips flow leads; one
+  sign-up per lead; a deleted competitor nulls `competitor_id`. Code
+  detection takes only "code X", "use X for N%", "discount: X", skips stop
+  words, uses the nearest code to any mention and referral links only on the
+  competitor's domain (bad codes like FOR/THEM had blocked real affiliates as
+  already known). Search cost is counted as billed; brand pages are
+  name+company word; competitor-search rest memory is shared
+  (`sourcing_term_stats:competitors`); auto-accept needs a code; niche comes
+  from the lead's own words; earnings figures need "historical".
 - **Customer.io:** every lead with an email is mirrored as a person hourly and
   on accept. Suppressed addresses go as unsubscribed only. No campaigns are
   triggered by us.
