@@ -119,7 +119,7 @@ implemented and where the engine differs.
     posts (17 of 24 for Amino Club), but most code posters have under 5K
     followers (34 dropped by the minimum), so the follower minimum for
     competitor affiliates is a decision for Jakob. YouTube titles rarely carry
-    codes (0-5 of about 20 channels). daily
+    codes (0-5 of about 20 channels). Daily
     rotation through competitors, a search already run by another audience
     this run is skipped, searches that stop finding new people rest (term
     memory in config `sourcing_term_stats:<id>`).
