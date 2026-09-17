@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader, scrollPageTop } from "../components.js";
+import { toast, toastError } from "../toast.js";
 import { api, type Me, type OutreachWork, type ReplySuggestion } from "../api.js";
 import { REPLY_OPTIONS, channelFor, compact, copyText, splitName, suggestCode, type ReplyKind } from "../outreachShared.js";
 
@@ -51,6 +52,7 @@ export function Outreach({ me }: { me: Me }) {
     const skip = opts.skip != null ? [...skipped, opts.skip] : skipped;
     if (opts.skip != null) setSkipped(skip);
     setNote(opts.message ?? "");
+    if (opts.message) toast(opts.message);
     await load(skip);
     scrollPageTop();
   };
@@ -197,6 +199,7 @@ function LeadCard({
       await fn();
     } catch (e) {
       setErr((e as Error).message);
+      toastError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -269,7 +272,7 @@ function LeadCard({
             )}
           </div>
           {copied === "failed" && <div className="error">Couldn't copy automatically. The text is selected: press Ctrl+C (or long-press → Copy on a phone).</div>}
-          <div className="outreach-actions">
+          <div className="outreach-actions sticky">
             <button
               className="primary big"
               disabled={busy || busyLoading || check.blocked}
@@ -307,7 +310,7 @@ function LeadCard({
               </label>
             ))}
           </div>
-          <div className="outreach-actions">
+          <div className="outreach-actions sticky">
             <button
               className="primary big"
               disabled={busy || busyLoading}
@@ -434,6 +437,7 @@ export function ReplyBox({ leadId, lastLabel, onSaved }: { leadId: number; lastL
             await onSaved(kind!, suggestion?.details ?? null);
           } catch (e) {
             setErr((e as Error).message);
+            toastError((e as Error).message);
           } finally {
             setBusy(false);
           }

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Conversation, type LeadRow } from "./api.js";
 import { PATH_LABEL } from "./labels.js";
 import { REPLY_LABEL, channelFor, copyText, splitName, suggestCode } from "./outreachShared.js";
+import { toast, toastError } from "./toast.js";
 import { ReplyBox } from "./pages/Outreach.js";
 
 export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSend: boolean; onChanged: () => void }) {
@@ -61,12 +62,15 @@ export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSe
     setErr("");
     setMsg("");
     try {
-      setMsg(await fn());
+      const done = await fn();
+      setMsg(done);
+      toast(done);
       setPick(0);
       await load();
       onChanged();
     } catch (e) {
       setErr((e as Error).message);
+      toastError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -190,6 +194,7 @@ export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSe
             onSaved={async (_kind, d) => {
               if (d) setSignup((s) => ({ firstName: d.firstName ?? s.firstName, lastName: d.lastName ?? s.lastName, email: d.email ?? s.email, code: d.code ?? s.code }));
               setMsg("Reply saved. The next message is above.");
+              toast("Reply saved. The next message is above.");
               await load();
               onChanged();
             }}

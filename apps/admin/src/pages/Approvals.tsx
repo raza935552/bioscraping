@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageInfo, PageHeader } from "../components.js";
+import { toastError } from "../toast.js";
 import { api, type Me, type MessageRow } from "../api.js";
 
 // Plain-language names for the message states.
@@ -52,6 +53,7 @@ export function Approvals({ me }: { me: Me }) {
       await load();
     } catch (err) {
       setError((err as Error).message);
+      toastError((err as Error).message);
     } finally {
       setBusy(false);
     }

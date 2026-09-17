@@ -413,20 +413,62 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
 .page-header { margin-bottom: 14px; }
 .page-header h1 { font-size: 24px; }
 
+/* Confirmations, top-right, above everything, click to dismiss. */
+.toasts { position: fixed; top: 16px; right: 16px; z-index: 2000; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
+.toast {
+  display: flex; align-items: flex-start; gap: 9px; text-align: left;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-left: 3px solid var(--good);
+  border-radius: 10px; padding: 11px 14px; font-size: 13px; line-height: 1.4;
+  box-shadow: var(--shadow-lift); cursor: pointer;
+  animation: toast-in 0.16s ease-out;
+}
+.toast:hover { background: var(--surface-2); }
+.toast.error { border-left-color: var(--bad); }
+.toast-icon { color: var(--good); font-weight: 700; }
+.toast.error .toast-icon { color: var(--bad); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
 /* Readable active chips in dark mode. */
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip-button.active { color: #0d1417; } }
 :root[data-theme="dark"] .chip-button.active { color: #0d1417; }
 
-/* Phones: the side nav becomes a top bar and the page keeps its width. */
+/* Phones: the side nav becomes one scrollable row of tabs and the page keeps its width. The outreach
+   person works from a phone with the DM app in the other hand, so that page gets thumb-sized
+   controls and keeps its action button on screen. */
 @media (max-width: 700px) {
   .layout { flex-direction: column; height: auto; min-height: 100dvh; overflow: visible; }
   .main, .main.table-page { overflow: visible; display: block; }
   .main.table-page > .tablewrap { max-height: 70vh; }
-  .nav { width: auto; height: auto; position: static; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .nav .brand { width: 100%; margin: 0 0 4px; }
-  .nav a { padding: 6px 8px; }
+  .nav {
+    width: auto; height: auto; position: sticky; top: 0; z-index: 30;
+    flex-direction: row; flex-wrap: nowrap; overflow-x: auto; align-items: center; gap: 4px;
+    padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--line);
+    scrollbar-width: none;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a { padding: 8px 10px; white-space: nowrap; flex: none; }
+  .nav a.active::before { display: none; }
+  .nav .brand { padding: 6px 8px; margin: 0; width: auto; flex: none; font-size: 14px; }
   .nav .spacer { display: none; }
-  .nav .whoami { padding: 4px 6px; }
+  .nav .whoami { padding: 4px 8px; white-space: nowrap; flex: none; font-size: 11.5px; }
+  .nav > button { flex: none; white-space: nowrap; }
   .main { padding: 14px 12px; }
-  .outreach-actions .big { flex: 1 1 100%; }
+  /* 16px stops iOS zooming the page in when a field is focused. */
+  input, select, textarea { font-size: 16px; }
+  button, .btn-link { min-height: 40px; }
+  .chip-button { min-height: 34px; font-size: 13px; padding: 6px 12px; }
+  .outreach-page { max-width: none; }
+  .outreach-counts { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .outreach-counts > div { padding: 7px 9px; font-size: 11.5px; }
+  .outreach-counts strong { font-size: 17px; display: inline; margin-right: 5px; }
+  .outreach-card { padding: 14px 14px 0; }
+  .outreach-actions .big { flex: 1 1 100%; min-height: 50px; font-size: 16px; }
+  /* "I sent it" stays reachable however long the message is. */
+  .outreach-actions.sticky {
+    position: sticky; bottom: 0; z-index: 6;
+    margin: 10px -14px 0; padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: var(--surface); border-top: 1px solid var(--line);
+  }
 }

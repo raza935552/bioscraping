@@ -16,6 +16,7 @@ import { Swipe } from "./pages/Swipe.js";
 import { Templates } from "./pages/Templates.js";
 import { Outreach } from "./pages/Outreach.js";
 import { Team } from "./pages/Team.js";
+import { ToastHost } from "./toast.js";
 
 const WIDE_ROUTES = new Set(["/leads", "/swipe"]);
 /** Pages whose table scrolls on its own, under filters that stay put. */
@@ -39,18 +40,27 @@ const NAV_TITLE: Record<string, string> = {
   "/settings": "Settings",
 };
 
-function useHashRoute(): string {
-  const [route, setRoute] = useState(window.location.hash.slice(1) || "/dashboard");
+/** The hash is "#/leads?view=sourced&competitor=amino-club": the path picks the page, the query is
+ *  that page's state, so a view can be bookmarked or pasted to someone else. A page writing its own
+ *  state back with history.replaceState doesn't fire hashchange, so this only reacts to real
+ *  navigation (a link, the back button, a pasted URL). */
+function useHashRoute(): { route: string; search: string } {
+  const read = () => {
+    const raw = window.location.hash.slice(1) || "/dashboard";
+    const i = raw.indexOf("?");
+    return i < 0 ? { route: raw, search: "" } : { route: raw.slice(0, i), search: raw.slice(i + 1) };
+  };
+  const [state, setState] = useState(read);
   useEffect(() => {
-    const onChange = () => setRoute(window.location.hash.slice(1) || "/dashboard");
+    const onChange = () => setState(read());
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
-  return route;
+  return state;
 }
 
 export function App() {
-  const route = useHashRoute();
+  const { route, search } = useHashRoute();
   const [me, setMe] = useState<Me | null>(null);
   const [checked, setChecked] = useState(false);
   // How much work is waiting behind each page, so nobody has to open them to find out.
@@ -119,7 +129,7 @@ export function App() {
     if (!allowed) return <Outreach me={me} />;
     switch (route) {
       case "/leads":
-        return <Leads me={me} />;
+        return <Leads key={search} me={me} initialQuery={search} />;
       case "/audiences":
         return <Audiences />;
       case "/outreach":
@@ -173,6 +183,7 @@ export function App() {
         </button>
       </nav>
       {/* Data-heavy pages use the full width; the rest keep a readable column. */}
+      <ToastHost />
       <main className={`main${WIDE_ROUTES.has(route) ? " wide" : ""}${allowed && TABLE_ROUTES.has(route) ? " table-page" : ""}`}>{page()}</main>
     </div>
   );

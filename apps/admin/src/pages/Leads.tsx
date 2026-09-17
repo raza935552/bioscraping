@@ -3,6 +3,8 @@ import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type Sampl
 import { Modal, PageInfo, Pagination } from "../components.js";
 import { LeadBubbleCell } from "../leadBubble.js";
 import { OutreachPanel } from "../outreachPanel.js";
+import { toast, toastError } from "../toast.js";
+import { copyText } from "../outreachShared.js";
 import { CREATOR_TYPES, PATH_LABEL, BAND_HELP, BAND_LABEL, BRAND_LABEL, ENRICH_LABEL, MESSAGE_STATE_LABEL, NICHE_BRAND, describeRun, subProfileLabel } from "../labels.js";
 
 const VIEWS: Array<[string, string]> = [
@@ -34,9 +36,12 @@ const compact = (n: number | null | undefined): string =>
   n == null ? "—" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}K` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 const isHttp = (u: string | null | undefined): u is string => !!u && /^https?:\/\//i.test(u);
 
-export function Leads({ me }: { me: Me }) {
-  const [view, setView] = useState("queue");
-  const [page, setPage] = useState(1);
+export function Leads({ me, initialQuery = "" }: { me: Me; initialQuery?: string }) {
+  // The view lives in the URL (#/leads?view=sourced&competitor=…) so it can be bookmarked or shared.
+  const q0 = useMemo(() => new URLSearchParams(initialQuery), [initialQuery]);
+  const q = (k: string, fallback = "") => q0.get(k) ?? fallback;
+  const [view, setView] = useState(() => q("view", "queue"));
+  const [page, setPage] = useState(() => Math.max(1, Number(q("page", "1")) || 1));
   const [pageSize, setPageSize] = useState(() => {
     try {
       return localStorage.getItem("leads.pageSize") ?? "100";
@@ -44,12 +49,12 @@ export function Leads({ me }: { me: Me }) {
       return "100";
     }
   });
-  const [sort, setSort] = useState("rank");
-  const [dir, setDir] = useState<"asc" | "desc" | "">("");
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
-  const [platform, setPlatform] = useState("");
-  const [sp, setSp] = useState("");
+  const [sort, setSort] = useState(() => q("sort", q("view", "queue") === "sourced" ? "score" : "rank"));
+  const [dir, setDir] = useState<"asc" | "desc" | "">(() => (["asc", "desc"].includes(q("dir")) ? (q("dir") as "asc" | "desc") : ""));
+  const [search, setSearch] = useState(() => q("search"));
+  const [status, setStatus] = useState(() => q("status"));
+  const [platform, setPlatform] = useState(() => q("platform"));
+  const [sp, setSp] = useState(() => q("sp"));
   const [data, setData] = useState<LeadsPage | null>(null);
   const [filters, setFilters] = useState<{ statuses: string[]; platforms: string[]; subProfiles: string[] } | null>(null);
   const [open, setOpen] = useState<number | null>(null);
@@ -67,19 +72,19 @@ export function Leads({ me }: { me: Me }) {
   const [reviewing, setReviewing] = useState<LeadRow | null>(null);
   const [confirmReject, setConfirmReject] = useState<number | null>(null);
   // Sourced view filters
-  const [review, setReview] = useState("pending");
-  const [niche, setNiche] = useState("");
-  const [competitor, setCompetitor] = useState("");
-  const [store, setStore] = useState("");
-  const [active, setActive] = useState("");
-  const [minReach, setMinReach] = useState("");
-  const [minScore, setMinScore] = useState("");
-  const [minEngagement, setMinEngagement] = useState("");
-  const [country, setCountry] = useState("");
-  const [audience, setAudience] = useState("");
-  const [competitorName, setCompetitorName] = useState("");
+  const [review, setReview] = useState(() => q("review", "pending"));
+  const [niche, setNiche] = useState(() => q("niche"));
+  const [competitor, setCompetitor] = useState(() => q("competitor"));
+  const [store, setStore] = useState(() => q("store"));
+  const [active, setActive] = useState(() => q("active"));
+  const [minReach, setMinReach] = useState(() => q("minReach"));
+  const [minScore, setMinScore] = useState(() => q("minScore"));
+  const [minEngagement, setMinEngagement] = useState(() => q("minEngagement"));
+  const [country, setCountry] = useState(() => q("country"));
+  const [audience, setAudience] = useState(() => q("audience"));
+  const [competitorName, setCompetitorName] = useState(() => q("competitorName"));
   // Outreach flow path. The queue shows qualified leads (Offer 1 or 2) unless another path is picked.
-  const [path, setPath] = useState(view === "queue" ? "qualified" : "");
+  const [path, setPath] = useState(() => q("path", q("view", "queue") === "queue" ? "qualified" : ""));
   const sourcedFilters = { review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName };
   // Filters fold away so the rows start near the top; anything switched on keeps them open.
   const [showFilters, setShowFilters] = useState(false);
@@ -150,15 +155,55 @@ export function Leads({ me }: { me: Me }) {
     document.querySelector(".main.table-page > .tablewrap")?.scrollTo({ top: 0 });
   }, [page, view, sort, dir, search, path, review]);
 
-  // Reset to page 1 when filters/sort change.
-  useEffect(() => setPage(1), [pageSize, view, sort, dir, search, status, platform, sp, path, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
+  // Reset to page 1 when filters/sort change — but not on the first render, where they came from the URL.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current) setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageSize, view, sort, dir, search, status, platform, sp, path, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
   // The Sourced view ranks by score; the other views by conversion rank.
   useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return; // the first render already has the URL's view, sort and path
+    }
     if (view === "sourced" && !SOURCED_SORTS.has(sort)) { setSort("score"); setDir(""); }
     if (view !== "sourced" && SOURCED_ONLY_SORTS.has(sort)) { setSort("rank"); setDir(""); }
     setPath(view === "queue" ? "qualified" : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
+
+  // …and put the current view back in the address bar. replaceState keeps the back button meaningful
+  // (it steps between pages, not between every filter change) and doesn't fire hashchange.
+  useEffect(() => {
+    const u = new URLSearchParams();
+    const put = (k: string, v: string, dflt = "") => {
+      if (v && v !== dflt) u.set(k, v);
+    };
+    put("view", view, "queue");
+    put("path", path, view === "queue" ? "qualified" : "");
+    put("search", search);
+    put("status", status);
+    put("platform", platform);
+    put("sp", sp);
+    if (view === "sourced") {
+      put("review", review, "pending");
+      put("minScore", minScore);
+      put("audience", audience);
+    }
+    put("niche", niche);
+    put("competitor", competitor);
+    put("competitorName", competitorName);
+    put("store", store);
+    put("active", active);
+    put("minReach", minReach);
+    put("minEngagement", minEngagement);
+    put("sort", sort, view === "sourced" ? "score" : "rank");
+    put("dir", dir);
+    if (page > 1) u.set("page", String(page));
+    const qs = u.toString();
+    window.history.replaceState(null, "", `#/leads${qs ? `?${qs}` : ""}`);
+  }, [view, path, search, status, platform, sp, review, minScore, audience, niche, competitor, competitorName, store, active, minReach, minEngagement, sort, dir, page]);
 
   const clickSort = (col: string) => {
     if (sort === col) setDir((d) => (d === "desc" ? "asc" : d === "asc" ? "" : "desc"));
@@ -179,9 +224,11 @@ export function Leads({ me }: { me: Me }) {
     setConfirmReject(null);
     try {
       await api.reviewLead(l.id, { decision: "reject", reason });
+      toast(`Rejected ${l.name}${reason ? `: ${reason}` : ""}.`);
       await load();
     } catch (e) {
       setError((e as Error).message);
+      toastError((e as Error).message);
     }
   };
 
@@ -214,9 +261,10 @@ export function Leads({ me }: { me: Me }) {
                 .runJob("rank-recompute")
                 .then((r) => {
                   setRankMsg(describeRun("rank-recompute", r.result));
+                  toast(describeRun("rank-recompute", r.result));
                   return load();
                 })
-                .catch((e) => setError((e as Error).message))
+                .catch((e) => { setError((e as Error).message); toastError((e as Error).message); })
                 .finally(() => setBusy(false));
             }}
           >
@@ -233,9 +281,10 @@ export function Leads({ me }: { me: Me }) {
                 .runJob("enrich-personalize")
                 .then((r) => {
                   setRankMsg(describeRun("enrich-personalize", r.result));
+                  toast(describeRun("enrich-personalize", r.result));
                   return load();
                 })
-                .catch((e) => setError((e as Error).message))
+                .catch((e) => { setError((e as Error).message); toastError((e as Error).message); })
                 .finally(() => setBusy(false));
             }}
           >
@@ -251,8 +300,8 @@ export function Leads({ me }: { me: Me }) {
               setRankMsg("");
               void api
                 .runJob("customerio-sync")
-                .then((r) => setRankMsg(describeRun("customerio-sync", r.result)))
-                .catch((e) => setError((e as Error).message))
+                .then((r) => { setRankMsg(describeRun("customerio-sync", r.result)); toast(describeRun("customerio-sync", r.result)); })
+                .catch((e) => { setError((e as Error).message); toastError((e as Error).message); })
                 .finally(() => setBusy(false));
             }}
           >
@@ -322,6 +371,13 @@ export function Leads({ me }: { me: Me }) {
         <span className="muted" style={{ fontSize: 12, minWidth: 116 }}>
           {loading ? "Loading…" : data ? `${data.analytics.total.toLocaleString()} leads shown` : ""}
         </span>
+        <button
+          type="button"
+          title="Copy a link that opens exactly this view — same tab, filters, sort and page"
+          onClick={() => void copyText(window.location.href).then((ok) => (ok ? toast("Link to this view copied.") : toastError("Couldn't copy the link.")))}
+        >
+          🔗 Copy link
+        </button>
         {view === "sourced" && canRun && (
           <>
             <div className="grow" />
@@ -857,11 +913,14 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
     setBulkMsg("");
     try {
       const r = await api.reviewBulk({ ids: [...picked], decision, ...(decision === "accept" ? { subProfile: bulkSp } : { reason: bulkReason }) });
-      setBulkMsg(`${decision === "accept" ? "Accepted" : "Rejected"} ${r.changed}.${r.noNiche?.length ? ` ${r.noNiche.length} had no niche; open them to accept one by one.` : ""}`);
+      const said = `${decision === "accept" ? "Accepted" : "Rejected"} ${r.changed}.${r.noNiche?.length ? ` ${r.noNiche.length} had no niche; open them to accept one by one.` : ""}`;
+      setBulkMsg(said);
+      toast(said);
       setPicked(new Set());
       await onBulkDone();
     } catch (e) {
       setBulkMsg((e as Error).message);
+      toastError((e as Error).message);
     } finally {
       setBulkBusy(false);
     }
