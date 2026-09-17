@@ -372,7 +372,11 @@ export function stepSummary(step: FlowStep): { kind: FlowStep["kind"]; templateI
 export type WorkBucket = "answer" | "checkin" | "new";
 
 export interface WorkQueue {
-  counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number };
+  counts: {
+    answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number;
+    /** The same three buckets counting only leads the engine sourced, not the imported research board. */
+    sourced: { answer: number; checkin: number; new: number };
+  };
   /** The next lead to work on, or null when everything is done. */
   next: { leadId: number; bucket: WorkBucket } | null;
   waiting: Array<{ leadId: number; name: string; handle: string | null; platform: string | null; dmUrl: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
@@ -457,6 +461,8 @@ export async function outreachWorkQueue(
     (await db.select({ leadId: schema.messages.leadId }).from(schema.messages).where(inArray(schema.messages.state, ["drafted", "linted", "approved"]))).map((m) => m.leadId),
   );
   const buckets: Record<WorkBucket, Array<{ leadId: number; sortKey: number }>> = { answer: [], checkin: [], new: [] };
+  // Leads this engine sourced (the imported research board has no sourcing profile).
+  const sourcedIds = new Set(eligible.filter((l) => l.sourcingProfileId != null).map((l) => l.id));
   const waiting: WorkQueue["waiting"] = [];
   for (const l of eligible) {
     if (legacy.has(l.id)) continue;
@@ -498,7 +504,19 @@ export async function outreachWorkQueue(
       .where(and(eq(schema.messages.state, "sent"), gte(schema.messages.sentAt, opts.dayStart)))
   ).filter((m) => (m.report as { flowTemplate?: string } | null)?.flowTemplate);
   return {
-    counts: { answer: buckets.answer.length, checkin: buckets.checkin.length, new: buckets.new.length, waiting: waiting.length, sentToday: today.length, sentTodayByMe: today.filter((m) => m.by === opts.userId).length },
+    counts: {
+      answer: buckets.answer.length,
+      checkin: buckets.checkin.length,
+      new: buckets.new.length,
+      waiting: waiting.length,
+      sentToday: today.length,
+      sentTodayByMe: today.filter((m) => m.by === opts.userId).length,
+      sourced: {
+        answer: buckets.answer.filter((x) => sourcedIds.has(x.leadId)).length,
+        checkin: buckets.checkin.filter((x) => sourcedIds.has(x.leadId)).length,
+        new: buckets.new.filter((x) => sourcedIds.has(x.leadId)).length,
+      },
+    },
     next,
     waiting,
   };

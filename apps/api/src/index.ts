@@ -792,14 +792,16 @@ const outreachClaims = new Map<number, { userId: number; until: number }>();
 
 // ── Nav counts (the badges in the sidebar: where the work is) ───────────
 
-/** The work queue scans every lead, so the badge shares one result for a few seconds. */
-let navWork: { at: number; counts: { answer: number; checkin: number; new: number } } | null = null;
+/** The work queue scans every lead, so the badge shares one result for a few seconds. New leads are
+ *  counted only when the engine sourced them (the imported research board is 214 of the queue and
+ *  nobody is working through it); a reply to answer or a check-in due is real work on any lead. */
+let navWork: { at: number; n: number } | null = null;
 async function outreachWaiting(userId: number, now: Date): Promise<number> {
   if (!navWork || now.getTime() - navWork.at > 20_000) {
-    const w = await outreachWorkQueue(db, { userId, now, dayStart: startOfBusinessDay(now) });
-    navWork = { at: now.getTime(), counts: w.counts };
+    const c = (await outreachWorkQueue(db, { userId, now, dayStart: startOfBusinessDay(now) })).counts;
+    navWork = { at: now.getTime(), n: c.answer + c.checkin + c.sourced.new };
   }
-  return navWork.counts.answer + navWork.counts.checkin + navWork.counts.new;
+  return navWork.n;
 }
 
 app.get("/api/nav-counts", { preHandler: requireAuth }, async (req) => {
