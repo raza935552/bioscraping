@@ -463,12 +463,12 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
   .outreach-counts { grid-template-columns: repeat(2, 1fr); gap: 6px; }
   .outreach-counts > div { padding: 7px 9px; font-size: 11.5px; }
   .outreach-counts strong { font-size: 17px; display: inline; margin-right: 5px; }
-  .outreach-card { padding: 14px 14px 0; }
+  .outreach-card { padding: 14px; }
   .outreach-actions .big { flex: 1 1 100%; min-height: 50px; font-size: 16px; }
   /* "I sent it" stays reachable however long the message is. */
   .outreach-actions.sticky {
     position: sticky; bottom: 0; z-index: 6;
-    margin: 10px -14px 0; padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    margin: 10px -14px -14px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
     background: var(--surface); border-top: 1px solid var(--line);
   }
 }
