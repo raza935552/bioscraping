@@ -247,6 +247,8 @@ function LeadCard({
                 <>Send it where you can reach them{lead.email ? <> (email: <strong>{lead.email}</strong>)</> : null}</>
               ) : lead.dmKind === "search" ? (
                 <>We don't have their handle: search <strong>{lead.name}</strong> on {lead.platform}, check it's them, and paste it in a DM</>
+              ) : lead.dmKind === "message" ? (
+                <>Tap <strong>Message {handleLabel}</strong>: the chat opens straight away. Paste and send</>
               ) : (
                 <>Open <strong>{handleLabel}</strong> on {lead.platform} and paste it in a DM</>
               )}
@@ -264,9 +266,16 @@ function LeadCard({
               {copied === "yes" ? "✓ Copied" : "📋 Copy message"}
             </button>
             {lead.dmUrl ? (
-              <a className="btn-link big" href={lead.dmUrl} target="_blank" rel="noreferrer">
-                {lead.dmKind === "search" ? `Search "${lead.name}" on ${lead.platform} ↗` : `Open ${handleLabel} on ${lead.platform} ↗`}
-              </a>
+              <>
+                <a className="btn-link big" href={lead.dmUrl} target="_blank" rel="noreferrer">
+                  {lead.dmKind === "search" ? `Search "${lead.name}" on ${lead.platform} ↗` : lead.dmKind === "message" ? `💬 Message ${handleLabel} ↗` : `Open ${handleLabel} on ${lead.platform} ↗`}
+                </a>
+                {lead.dmKind === "message" && lead.dmProfileUrl && (
+                  <a className="muted" style={{ alignSelf: "center", fontSize: 12.5 }} href={lead.dmProfileUrl} target="_blank" rel="noreferrer" title="Open their profile first if you want to check it's the right person">
+                    view profile first ↗
+                  </a>
+                )}
+              </>
             ) : (
               <span className="muted" style={{ alignSelf: "center" }}>{lead.platform ?? "This platform"} has no DMs{lead.email ? ": email them instead" : ""}.</span>
             )}

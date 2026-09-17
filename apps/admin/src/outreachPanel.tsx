@@ -143,7 +143,8 @@ export function OutreachPanel({ row, canSend, onChanged }: { row: LeadRow; canSe
             <button type="button" disabled={blocked} onClick={() => void copyText(text, textRef.current).then((ok) => { setCopied(ok); if (!ok) setErr("Couldn't copy automatically: the text is selected, press Ctrl+C."); })}>
               {copied ? "✓ Copied" : "📋 Copy message"}
             </button>
-            {row.dmUrl && <a className="btn-link" href={row.dmUrl} target="_blank" rel="noreferrer">{row.dmKind === "search" ? `Search "${row.name}" ↗` : `Open ${handleLabel} ↗`}</a>}
+            {row.dmUrl && <a className="btn-link" href={row.dmUrl} target="_blank" rel="noreferrer">{row.dmKind === "search" ? `Search "${row.name}" ↗` : row.dmKind === "message" ? `💬 Message ${handleLabel} ↗` : `Open ${handleLabel} ↗`}</a>}
+            {row.dmKind === "message" && row.dmProfileUrl && <a className="muted" style={{ fontSize: 12.5 }} href={row.dmProfileUrl} target="_blank" rel="noreferrer">profile ↗</a>}
             <div className="grow" />
             <select value={channel} onChange={(e) => setChannel(e.target.value)} style={{ width: 150 }} title="Where you sent it">
               {conv.channels.map((c) => <option key={c} value={c}>{c}</option>)}

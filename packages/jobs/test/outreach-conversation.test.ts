@@ -50,4 +50,18 @@ describe("where to reach a lead", () => {
     expect(dmTargetFor({ ...base, primaryPlatform: "Instagram", firstName: "Aaron 'Jaws'" })).toMatchObject({ kind: "search", url: expect.stringContaining("instagram.com/explore/search") });
     expect(dmTargetFor({ ...base, primaryPlatform: "YouTube" })).toBeNull();
   });
+
+  it("opens an Instagram chat directly and keeps the profile to check it's them", async () => {
+    const { dmTargetFor, messageLinkFor } = await import("../src/outreach-conversation.js");
+    expect(dmTargetFor({ ...base, primaryPlatform: "Instagram", socialProfiles: "Instagram @drnadolsky" })).toEqual({
+      url: "https://ig.me/m/drnadolsky",
+      kind: "message",
+      handle: "drnadolsky",
+      profileUrl: "https://www.instagram.com/drnadolsky/",
+    });
+    // Only Instagram has a message link; a name Instagram couldn't have falls back to the profile.
+    expect(messageLinkFor("TikTok", "jaws")).toBeNull();
+    expect(messageLinkFor("Instagram", "bad-name")).toBeNull();
+    expect(dmTargetFor({ ...base, primaryPlatform: "Instagram", socialProfiles: "Instagram @bad-name" })).toMatchObject({ kind: "profile", url: "https://www.instagram.com/bad-name/" });
+  });
 });

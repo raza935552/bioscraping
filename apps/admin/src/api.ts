@@ -126,7 +126,9 @@ export interface OutreachWork {
   waiting: Array<{ leadId: number; name: string; handle: string | null; platform: string | null; dmUrl: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
   lead: {
     dmUrl: string | null;
-    dmKind: "profile" | "search" | null;
+    dmKind: "message" | "profile" | "search" | null;
+    /** Their profile, when dmUrl opens a chat instead (Instagram), to check it's them. */
+    dmProfileUrl?: string | null;
     id: number;
     name: string;
     handle: string | null;
@@ -157,7 +159,8 @@ export interface Conversation {
 export interface LeadRow {
   id: number;
   dmUrl?: string | null;
-  dmKind?: "profile" | "search" | null;
+  dmKind?: "message" | "profile" | "search" | null;
+  dmProfileUrl?: string | null;
   flowStep?: { kind: "send" | "wait" | "signup" | "done"; templateId: string | null; label: string; dueAt: string | null; outcome: string | null };
   outreachPath?: OutreachPath;
   competitorLinked?: string | null;

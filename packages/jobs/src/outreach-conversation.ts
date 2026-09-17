@@ -384,9 +384,12 @@ export interface WorkQueue {
 
 export interface DmTarget {
   url: string;
-  /** "profile": their account, where the DM button is. "search": no handle on file, a search for their name. */
-  kind: "profile" | "search";
+  /** "message": straight into a message thread with them (Instagram's ig.me link). "profile": their
+   *  account, where the DM button is. "search": no handle on file, a search for their name. */
+  kind: "message" | "profile" | "search";
   handle: string | null;
+  /** Their profile, to check it's the right person before sending: set when `url` isn't the profile. */
+  profileUrl?: string;
 }
 
 /** Where to reach a lead: their profile from any handle we have (sourcing, the research board's handles,
@@ -406,7 +409,9 @@ export function dmTargetFor(
   if (fromPost && key === "tiktok") candidates.push(fromPost);
   for (const h of candidates) {
     const url = dmLinkFor(lead.primaryPlatform, h);
-    if (url) return { url, kind: "profile", handle: h };
+    if (!url) continue;
+    const message = messageLinkFor(lead.primaryPlatform, h);
+    return message ? { url: message, kind: "message", handle: h, profileUrl: url } : { url, kind: "profile", handle: h };
   }
   const name = [lead.firstName, lead.lastName].filter(Boolean).join(" ").replace(/\(([^)]*)\)/g, " $1 ").replace(/\s+/g, " ").trim();
   if (!name || !key) return null;
@@ -430,6 +435,16 @@ export function dmLinkFor(platform: string | null, handle: string | null): strin
   if (p.includes("reddit")) return `https://www.reddit.com/user/${h}/`;
   if (p === "x" || p.includes("twitter")) return `https://x.com/${h}`;
   return null;
+}
+
+/** A link that opens a message thread with the creator directly, skipping their profile. Only Instagram
+ *  has one: ig.me/m/<username> (Meta's own short link) opens the chat in the app on a phone. TikTok,
+ *  Reddit and X have no equivalent, so they keep the profile link. Instagram usernames are letters,
+ *  numbers, periods and underscores, at most 30. */
+export function messageLinkFor(platform: string | null, handle: string | null): string | null {
+  const h = (handle ?? "").replace(/^@/, "").trim();
+  if (!(platform ?? "").toLowerCase().includes("instagram") || !/^[A-Za-z0-9._]{1,30}$/.test(h)) return null;
+  return `https://ig.me/m/${h}`;
 }
 
 const CLOSED_STATUSES = ["Signed", "Passed", "No", "Signed up"];

@@ -675,7 +675,7 @@ app.get("/api/leads", { preHandler: requireRole("admin", "ops", "rep") }, async 
       outreachPath: paths.get(l.id)!,
       ...(() => {
         const t = dmTargetFor(l, handleKeysByLead.get(l.id));
-        return { dmUrl: t?.url ?? null, dmKind: t?.kind ?? null };
+        return { dmUrl: t?.url ?? null, dmKind: t?.kind ?? null, dmProfileUrl: t?.profileUrl ?? null };
       })(),
       competitorLinked: l.competitorId != null ? competitorById.get(l.competitorId)?.name ?? null : null,
       competitorRatePct: l.competitorId != null ? competitorById.get(l.competitorId)?.commissionPct ?? null : null,
@@ -856,7 +856,7 @@ app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operato
       profileUrl: profileUrlFor(l),
       ...(() => {
         const t = dmTargetFor(l, handleKeysFor);
-        return { dmUrl: t?.url ?? null, dmKind: t?.kind ?? null, handle: t?.handle ?? d.handle };
+        return { dmUrl: t?.url ?? null, dmKind: t?.kind ?? null, dmProfileUrl: t?.profileUrl ?? null, handle: t?.handle ?? d.handle };
       })(),
       followers: l.totalReach,
       competitor: conversation?.brand ?? l.otherCreatorCompany,

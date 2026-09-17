@@ -180,8 +180,14 @@ export function LeadBubbleCell({ l }: { l: LeadRow }) {
                 <>
                   {" · "}
                   <a href={l.dmUrl!} target="_blank" rel="noreferrer">
-                    {l.dmKind === "search" ? "search their name ↗" : "profile ↗"}
+                    {l.dmKind === "search" ? "search their name ↗" : l.dmKind === "message" ? "message them ↗" : "profile ↗"}
                   </a>
+                  {l.dmKind === "message" && isHttp(l.dmProfileUrl) && (
+                    <>
+                      {" · "}
+                      <a href={l.dmProfileUrl!} target="_blank" rel="noreferrer">profile ↗</a>
+                    </>
+                  )}
                 </>
               )}
               {l.country ? ` · ${l.country}` : " · location unknown"}
