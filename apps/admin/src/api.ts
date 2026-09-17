@@ -121,7 +121,7 @@ export interface ReplySuggestion {
 }
 
 export interface OutreachWork {
-  counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number };
+  counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number; importedNew: number };
   next: { leadId: number; bucket: "answer" | "checkin" | "new" } | null;
   waiting: Array<{ leadId: number; name: string; handle: string | null; platform: string | null; dmUrl: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
   lead: {

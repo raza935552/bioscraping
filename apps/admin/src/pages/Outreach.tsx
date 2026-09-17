@@ -67,6 +67,13 @@ export function Outreach({ me }: { me: Me }) {
         <div><strong>{c?.new ?? 0}</strong> new leads</div>
       </div>
 
+      {(c?.importedNew ?? 0) > 0 && me.role !== "operator" && (
+        <p className="muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
+          {c!.importedNew} older leads from the imported research board aren't in this queue. They're on the Leads page if
+          anyone wants to work through them.
+        </p>
+      )}
+
       <PageHeader title="Outreach">
         <button className={tab === "next" ? "primary" : ""} onClick={() => setTab("next")}>Next up</button>
         <button className={tab === "waiting" ? "primary" : ""} onClick={() => setTab("waiting")}>Waiting for reply ({c?.waiting ?? 0})</button>

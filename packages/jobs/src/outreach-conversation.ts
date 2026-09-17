@@ -374,8 +374,8 @@ export type WorkBucket = "answer" | "checkin" | "new";
 export interface WorkQueue {
   counts: {
     answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number;
-    /** The same three buckets counting only leads the engine sourced, not the imported research board. */
-    sourced: { answer: number; checkin: number; new: number };
+    /** First messages left out because the lead came from the imported research board, not sourcing. */
+    importedNew: number;
   };
   /** The next lead to work on, or null when everything is done. */
   next: { leadId: number; bucket: WorkBucket } | null;
@@ -461,9 +461,12 @@ export async function outreachWorkQueue(
     (await db.select({ leadId: schema.messages.leadId }).from(schema.messages).where(inArray(schema.messages.state, ["drafted", "linted", "approved"]))).map((m) => m.leadId),
   );
   const buckets: Record<WorkBucket, Array<{ leadId: number; sortKey: number }>> = { answer: [], checkin: [], new: [] };
-  // Leads this engine sourced (the imported research board has no sourcing profile).
-  const sourcedIds = new Set(eligible.filter((l) => l.sourcingProfileId != null).map((l) => l.id));
   const waiting: WorkQueue["waiting"] = [];
+  // The queue hands out first messages to leads this engine sourced. The imported research board
+  // (no sourcing profile) is a different kind of list — older, unverified, and nobody is working
+  // through it — so it isn't mixed in here; those leads are still reachable from the Leads page,
+  // and a conversation already under way counts wherever the lead came from (Raza, 2026-09-17).
+  let importedNew = 0;
   for (const l of eligible) {
     if (legacy.has(l.id)) continue;
     const events = flows.get(l.id)?.events ?? [];
@@ -478,7 +481,8 @@ export async function outreachWorkQueue(
     if (last?.type === "reply") buckets.answer.push({ leadId: l.id, sortKey: last.at.getTime() });
     else if (last?.type === "sent") buckets.checkin.push({ leadId: l.id, sortKey: last.at.getTime() });
     // New leads we can open straight on their profile come before the ones that need a name search.
-    else buckets.new.push({ leadId: l.id, sortKey: (dmTargetFor(l, handleKeys.get(l.id)) ?.kind === "profile" ? 0 : 1e7) + (l.conversionRank ?? 1e6) });
+    else if (l.sourcingProfileId != null || l.id === opts.forceLeadId) buckets.new.push({ leadId: l.id, sortKey: (dmTargetFor(l, handleKeys.get(l.id)) ?.kind === "profile" ? 0 : 1e7) + (l.conversionRank ?? 1e6) });
+    else importedNew++;
   }
   for (const b of Object.values(buckets)) b.sort((a, c) => a.sortKey - c.sortKey);
   waiting.sort((a, b) => a.dueAt.localeCompare(b.dueAt));
@@ -511,11 +515,7 @@ export async function outreachWorkQueue(
       waiting: waiting.length,
       sentToday: today.length,
       sentTodayByMe: today.filter((m) => m.by === opts.userId).length,
-      sourced: {
-        answer: buckets.answer.filter((x) => sourcedIds.has(x.leadId)).length,
-        checkin: buckets.checkin.filter((x) => sourcedIds.has(x.leadId)).length,
-        new: buckets.new.filter((x) => sourcedIds.has(x.leadId)).length,
-      },
+      importedNew,
     },
     next,
     waiting,
