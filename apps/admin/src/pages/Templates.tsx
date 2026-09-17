@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type OutreachSettings, type RenderedMessage, type TemplateDef } from "../api.js";
-import { PageInfo } from "../components.js";
+import { PageInfo, PageHeader } from "../components.js";
 
 const ORDER = [
   "offer1_soft", "offer1_direct", "offer2_soft", "offer2_direct", "reply1_signup", "reply2_details", "reply3_referral",
@@ -72,6 +72,8 @@ export function Templates() {
         <code className="inline">[aro commission]</code>, <code className="inline">[aro cookie]</code>. Anything else in brackets stays as
         written. Every message is checked by the compliance linter before it can be marked sent.
       </PageInfo>
+
+      <PageHeader title="Message templates" />
 
       <div className="settings-card">
         <h3 style={{ marginTop: 0 }}>Links, Aro details and timing</h3>

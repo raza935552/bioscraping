@@ -133,7 +133,7 @@ export function Email() {
       ))}
 
       <h2>Recent dispatch activity (ours)</h2>
-      <div className="tablewrap">
+      <div className="tablewrap scroll">
         <table>
           <thead>
             <tr>

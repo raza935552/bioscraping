@@ -19,7 +19,25 @@ import { Team } from "./pages/Team.js";
 
 const WIDE_ROUTES = new Set(["/leads", "/swipe"]);
 /** Pages whose table scrolls on its own, under filters that stay put. */
-const TABLE_ROUTES = new Set(["/leads"]);
+const TABLE_ROUTES = new Set(["/leads", "/replies", "/signups", "/affiliates"]);
+
+/** Page names for the browser tab. */
+const NAV_TITLE: Record<string, string> = {
+  "/dashboard": "Dashboard",
+  "/outreach": "Outreach",
+  "/leads": "Leads",
+  "/audiences": "Audiences",
+  "/templates": "Message templates",
+  "/swipe": "Swipe file",
+  "/approvals": "Send messages",
+  "/email": "Email ops",
+  "/replies": "Replies",
+  "/signups": "Signups",
+  "/affiliates": "Affiliates",
+  "/activity": "Activity",
+  "/team": "Team",
+  "/settings": "Settings",
+};
 
 function useHashRoute(): string {
   const [route, setRoute] = useState(window.location.hash.slice(1) || "/dashboard");
@@ -51,6 +69,13 @@ export function App() {
   useEffect(() => {
     void refreshMe();
   }, [refreshMe]);
+
+  // The browser tab says which page this is and how much is waiting on it.
+  useEffect(() => {
+    const label = NAV_TITLE[route] ?? "BiolinX Engine";
+    const n = counts[route] ?? 0;
+    document.title = `${n > 0 ? `(${n}) ` : ""}${label} · BiolinX Engine`;
+  }, [route, counts]);
 
   useEffect(() => {
     if (!me) return;

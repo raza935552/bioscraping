@@ -425,7 +425,7 @@ function CompetitorTable({ rows, onChanged }: { rows: Competitor[]; onChanged: (
 
   return (
     <>
-      <div className="tablewrap">
+      <div className="tablewrap scroll">
         <table>
           <thead>
             <tr>
@@ -566,7 +566,7 @@ function CompetitorSuggestions({ onChanged }: { onChanged: () => Promise<void> }
         from the next run); dismiss the rest.
       </p>
       {err && <div className="error">{err}</div>}
-      <div className="tablewrap">
+      <div className="tablewrap scroll">
         <table>
           <thead>
             <tr>

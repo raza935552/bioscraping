@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Me, type SwipePayload, type SwipePost } from "../api.js";
-import { Modal, PageInfo } from "../components.js";
+import { Modal, PageInfo, PageHeader } from "../components.js";
 
 const TABS: Array<[string, string]> = [
   ["draft", "Drafts"],
@@ -92,6 +92,8 @@ export function Swipe({ me }: { me: Me }) {
         Nothing is sent without Approve. Sent posts arrive at Biolinx as drafts and reach affiliates only after Publish on
         its Assets tab.
       </PageInfo>
+
+      <PageHeader title="Swipe file" />
 
       <div className="settings-card" style={{ marginBottom: 16 }}>
         <div className="toolbar" style={{ margin: 0, flexWrap: "wrap", gap: 10 }}>

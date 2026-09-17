@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { PageInfo } from "../components.js";
+import { Empty, PageHeader, PageInfo } from "../components.js";
 import { api, type ReplyRow } from "../api.js";
 
 const CLASS_CHIP: Record<string, string> = {
@@ -34,11 +34,14 @@ export function Replies() {
   return (
     <>
       <PageInfo title="Replies — every inbound, classified">Every reply from a prospect, auto-classified (interested, opt-out, question, etc). Opt-outs are suppressed instantly. Questions about money route to Diana, agencies to Jakob, product/dosing to support. Anything the classifier is unsure about is flagged for a human.</PageInfo>
-      <h1>Replies</h1>
+      <PageHeader title="Replies" />
       {error && <div className="error">{error}</div>}
       {rows.length === 0 && (
-        <p className="muted">No replies yet. Email replies arrive here automatically from Instantly. Replies to DMs are logged by whoever checks the inbox.</p>
+        <Empty emoji="💬">
+          No replies yet. Email replies arrive here automatically from Instantly; replies to DMs are logged by whoever checks the inbox.
+        </Empty>
       )}
+      {rows.length > 0 && (
       <div className="tablewrap">
         <table>
           <thead>
@@ -67,6 +70,7 @@ export function Replies() {
           </tbody>
         </table>
       </div>
+      )}
     </>
   );
 }

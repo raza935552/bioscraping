@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { PageInfo } from "../components.js";
+import { Empty, PageHeader, PageInfo } from "../components.js";
 import { api, type Me, type SignupRow } from "../api.js";
 import { SAGA_LABEL } from "../labels.js";
 
@@ -37,9 +37,10 @@ export function Signups({ me }: { me: Me }) {
   return (
     <>
       <PageInfo title="Signups — people who said yes">Each signup is checked (required fields, not already an affiliate, recruiter name matches a real account), then waits for Diana to confirm the 21+ and quality gate before the iDev account and coupon are created. The "Where it is" column shows the exact step.</PageInfo>
-      <h1>Signups</h1>
+      <PageHeader title="Signups" />
       {error && <div className="error">{error}</div>}
-      {rows.length === 0 && <p className="muted">No signups yet.</p>}
+      {rows.length === 0 && <Empty emoji="✍️">No sign-ups yet. They appear here the moment someone sends their four details.</Empty>}
+      {rows.length > 0 && (
       <div className="tablewrap">
         <table>
           <thead>
@@ -92,6 +93,7 @@ export function Signups({ me }: { me: Me }) {
           </tbody>
         </table>
       </div>
+      )}
     </>
   );
 }

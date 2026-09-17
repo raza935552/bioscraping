@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { PageInfo } from "../components.js";
+import { PageInfo, PageHeader } from "../components.js";
 import { api, type Me, type MessageRow } from "../api.js";
 
 // Plain-language names for the message states.
@@ -70,6 +70,8 @@ export function Approvals({ me }: { me: Me }) {
         send themselves. For DMs, you copy the message and send it from the @biolinx account, then tap <strong>I sent
         it</strong>. Nothing goes out without you here.
       </PageInfo>
+
+      <PageHeader title="Send messages" />
 
       <div className="toolbar">
         {TABS.map(([t, label]) => (

@@ -98,16 +98,49 @@ export function Pagination({
   );
 }
 
+/** The window itself never scrolls (see .layout in styles.css): each page scrolls inside <main>. */
+export function pageScroller(): HTMLElement | null {
+  return document.querySelector("main.main");
+}
+
+/** Back to the top of the page — what window.scrollTo used to do. */
+export function scrollPageTop(): void {
+  pageScroller()?.scrollTo({ top: 0 });
+}
+
+/** The title row every page starts with: name of the page on the left, its buttons on the right. */
+export function PageHeader({ title, children }: { title: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="toolbar page-header">
+      <h1 style={{ margin: 0 }}>{title}</h1>
+      <div className="grow" />
+      {children}
+    </div>
+  );
+}
+
+/** Nothing to show yet, said in a friendly way instead of a bare line of grey text. */
+export function Empty({ emoji = "📭", children }: { emoji?: string; children: ReactNode }) {
+  return (
+    <div className="empty">
+      <div className="empty-emoji">{emoji}</div>
+      <p>{children}</p>
+    </div>
+  );
+}
+
 /** A dialog over the page. Closes on Esc, the close button, or a click on the backdrop. */
 export function Modal({ title, subtitle, onClose, children, wide = true }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    // The page behind the dialog holds still while it's open.
+    const page = pageScroller();
+    const prev = page?.style.overflow ?? "";
+    if (page) page.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
+      if (page) page.style.overflow = prev;
     };
   }, [onClose]);
   return (

@@ -3,6 +3,7 @@
 // lead gets its own card (keyed by lead id), so nothing typed for one lead can carry over to the next.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PageHeader, scrollPageTop } from "../components.js";
 import { api, type Me, type OutreachWork, type ReplySuggestion } from "../api.js";
 import { REPLY_OPTIONS, channelFor, compact, copyText, splitName, suggestCode, type ReplyKind } from "../outreachShared.js";
 
@@ -51,7 +52,7 @@ export function Outreach({ me }: { me: Me }) {
     if (opts.skip != null) setSkipped(skip);
     setNote(opts.message ?? "");
     await load(skip);
-    window.scrollTo({ top: 0 });
+    scrollPageTop();
   };
 
   const c = work?.counts;
@@ -66,13 +67,13 @@ export function Outreach({ me }: { me: Me }) {
         <div><strong>{c?.new ?? 0}</strong> new leads</div>
       </div>
 
-      <div className="toolbar" style={{ gap: 6, flexWrap: "wrap" }}>
+      <PageHeader title="Outreach">
         <button className={tab === "next" ? "primary" : ""} onClick={() => setTab("next")}>Next up</button>
         <button className={tab === "waiting" ? "primary" : ""} onClick={() => setTab("waiting")}>Waiting for reply ({c?.waiting ?? 0})</button>
         {skipped.length > 0 && (
           <button onClick={() => { setSkipped([]); void load([]); }} title="Bring back the leads you skipped">Show skipped again ({skipped.length})</button>
         )}
-      </div>
+      </PageHeader>
 
       {err && <div className="error">{err}</div>}
       {note && !err && <div className="notice">{note}</div>}

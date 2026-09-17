@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { PageInfo } from "../components.js";
+import { PageHeader, PageInfo } from "../components.js";
 import { api, type ActivityLog } from "../api.js";
 import { describeRun, jobLabel } from "../labels.js";
 
@@ -28,10 +28,10 @@ export function Activity() {
   return (
     <>
       <PageInfo title="Activity & logs — everything the system did">Every scheduled job run (with status and timing) and every human action (the audit trail). If you want to know what happened and when, it is here. Failed runs show in red.</PageInfo>
-      <h1>Activity &amp; logs</h1>
+      <PageHeader title="Activity & logs" />
 
       <h2>Job runs</h2>
-      <div className="tablewrap">
+      <div className="tablewrap scroll">
         <table>
           <thead>
             <tr>
@@ -69,7 +69,7 @@ export function Activity() {
       </div>
 
       <h2>Audit trail</h2>
-      <div className="tablewrap">
+      <div className="tablewrap scroll">
         <table>
           <thead>
             <tr>
