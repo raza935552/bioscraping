@@ -170,6 +170,11 @@ describe("email from the bio", () => {
     expect(emailFromText("logo@2x.png and your@email.com")).toBeNull();
     expect(emailFromText("no contact here @handle")).toBeNull();
     expect(emailFromText(null)).toBeNull();
+    // A handle beside a word ending in a dot looked like an address on 2026-09-17 (@socal_399's bio).
+    expect(emailFromText("pepdeals.@glacier.aminosofficial")).toBeNull();
+    expect(emailFromText("dm me @peptide.guy.official")).toBeNull();
+    expect(emailFromText("work: jo@peptidecoach.fitness")).toBe("jo@peptidecoach.fitness");
+    expect(emailFromText("hi@my-brand.co.uk")).toBe("hi@my-brand.co.uk");
   });
 });
 

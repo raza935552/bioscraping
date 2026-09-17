@@ -912,14 +912,49 @@ export async function autoAcceptSourcing(db: Db, env = process.env): Promise<boo
   return String(row?.value ?? env.SOURCING_AUTO_ACCEPT ?? "").trim().toLowerCase() !== "false";
 }
 
-/** A competitor's own brand page, not an affiliate: "@atomiklabzofficial" for Atomik Labz (2026-09-16). */
-const OWN_ACCOUNT_SUFFIXES = new Set(["", "official", "officialpage", "labs", "lab", "shop", "store", "co", "hq", "us", "usa", "llc", "inc", "team", "support", "research", "peptides"]);
+/** Words a brand adds around its own name on a social handle: "@atomiklabzofficial" for Atomik
+ *  Labz, "@aurumlabsfulfillment" for Aurum Peptide Labs (both seen live, 2026-09-16/17). */
+const COMPANY_WORDS = new Set([
+  "official", "officialpage", "page", "labs", "lab", "labz", "shop", "store", "co", "hq", "us", "usa", "llc", "inc",
+  "team", "support", "research", "peptide", "peptides", "aminos", "amino", "chems", "chem", "fulfillment", "fulfilment",
+  "shipping", "orders", "order", "sales", "deals", "supply", "supplies", "global", "group", "brand", "direct", "backup", "real",
+]);
+
+/** True when what follows the brand name is only company words and numbers: "official", "labs001", "" . */
+function brandTail(rest: string): boolean {
+  let r = rest;
+  for (let guard = 0; r.length > 0 && guard < 6; guard++) {
+    const digits = /^\d{1,4}/.exec(r);
+    if (digits) {
+      r = r.slice(digits[0].length);
+      continue;
+    }
+    // Longest word first, so "usa" isn't read as "us" + "a".
+    const word = [...COMPANY_WORDS].filter((w) => r.startsWith(w)).sort((a, b) => b.length - a.length)[0];
+    if (!word) return false;
+    r = r.slice(word.length);
+  }
+  return r.length === 0;
+}
+
+/** A competitor's own brand page, not an affiliate: "@atomiklabzofficial" for Atomik Labz (2026-09-16).
+ *  The handle must start with the brand's name (or the name with its company words dropped, so
+ *  "Aurum Peptide Labs" also covers "@aurumlabsfulfillment"), and everything after it must be
+ *  company words or numbers: "@passionpeptides" is not Ion Peptide's page. */
 export function isCompetitorOwnAccount(handle: string, competitor: { name: string; domains?: string[] | null }): boolean {
   const h = handle.toLowerCase().replace(/[^a-z0-9]/g, "");
-  // The brand's name, then nothing or a company word: "atomiklabzofficial" yes, "passionpeptides" (Ion Peptide) no.
-  return [competitor.name, ...(competitor.domains ?? [])]
-    .map((n) => n.toLowerCase().replace(/\.[a-z]{2,}$/, "").replace(/[^a-z0-9]/g, ""))
-    .some((n) => n.length >= 5 && h.startsWith(n) && OWN_ACCOUNT_SUFFIXES.has(h.slice(n.length)));
+  const prefixes = new Set<string>();
+  for (const raw of [competitor.name, ...(competitor.domains ?? [])]) {
+    const bare = raw.toLowerCase().replace(/\.[a-z]{2,}$/, "");
+    const full = bare.replace(/[^a-z0-9]/g, "");
+    if (full.length >= 5) prefixes.add(full);
+    const words = bare.split(/[^a-z0-9]+/).filter(Boolean);
+    while (words.length > 1 && COMPANY_WORDS.has(words[words.length - 1]!)) words.pop();
+    const core = words.join("");
+    // A one-word core ("aurum") is only used when it is long enough to be the brand itself.
+    if (core.length >= 5) prefixes.add(core);
+  }
+  return [...prefixes].some((n) => h.startsWith(n) && brandTail(h.slice(n.length)));
 }
 
 /** Admin setting SOURCING_COMPETITOR_ONLY: on unless set to false. On = only competitor searches

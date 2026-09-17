@@ -546,6 +546,19 @@ describe("review fixes (2026-09-16)", () => {
     expect(isCompetitorOwnAccount("champion_peptides", ion)).toBe(false);
   });
 
+  it("a brand page keeps its name behind numbers and extra company words (2026-09-17 batch)", () => {
+    // Both were saved as leads by the 50-lead run: @biolongevitylabs001 and @aurumlabsfulfillment.
+    const bio = { name: "BioLongevity Labs", domains: ["biolongevity labs", "biolongevity"] };
+    expect(isCompetitorOwnAccount("biolongevitylabs001", bio)).toBe(true);
+    expect(isCompetitorOwnAccount("biolongevityfan", bio)).toBe(false);
+    const aurum = { name: "Aurum Peptide Labs", domains: ["aurum peptide labs"] };
+    expect(isCompetitorOwnAccount("aurumlabsfulfillment", aurum)).toBe(true);
+    expect(isCompetitorOwnAccount("aurumpeptidelabs", aurum)).toBe(true);
+    expect(isCompetitorOwnAccount("aurumfitcoach", aurum)).toBe(false);
+    // A short brand word is never a prefix on its own: Ion Peptide keeps needing the whole name.
+    expect(isCompetitorOwnAccount("ionlabs", { name: "Ion Peptide", domains: ["ionpeptide", "ion peptide"] })).toBe(false);
+  });
+
   it("countFresh uses the competitor follower minimum, so productive code searches don't rest", () => {
     const club = { id: 1, name: "Amino Club", domains: ["amino club"], codePattern: null, codePrefix: null, commissionPct: null };
     const profile = { followerMin: { tiktok: 5000 }, followerMax: {}, countries: ["US"], language: "en", excludeTerms: [], excludeHandles: [] } as unknown as ProfileRow;
