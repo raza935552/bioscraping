@@ -286,6 +286,7 @@ export interface LeadDetail {
 
 export const api = {
   me: () => request<Me>("/api/auth/me"),
+  navCounts: () => request<Record<string, number>>("/api/nav-counts"),
   login: (email: string, password: string) =>
     request<{ ok: true; user: Me }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   acceptInvite: (token: string, password: string) =>

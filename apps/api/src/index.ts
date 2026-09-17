@@ -790,6 +790,40 @@ app.post("/api/outreach/preview", { preHandler: requireRole("admin", "ops") }, a
 // people working at once don't message the same creator.
 const outreachClaims = new Map<number, { userId: number; until: number }>();
 
+// ── Nav counts (the badges in the sidebar: where the work is) ───────────
+
+/** The work queue scans every lead, so the badge shares one result for a few seconds. */
+let navWork: { at: number; counts: { answer: number; checkin: number; new: number } } | null = null;
+async function outreachWaiting(userId: number, now: Date): Promise<number> {
+  if (!navWork || now.getTime() - navWork.at > 20_000) {
+    const w = await outreachWorkQueue(db, { userId, now, dayStart: startOfBusinessDay(now) });
+    navWork = { at: now.getTime(), counts: w.counts };
+  }
+  return navWork.counts.answer + navWork.counts.checkin + navWork.counts.new;
+}
+
+app.get("/api/nav-counts", { preHandler: requireAuth }, async (req) => {
+  const me = req.user!;
+  const now = new Date();
+  const rows = <T extends { length: number }>(r: T) => r.length;
+  const [leads, messages, replies, signups, swipe] = await Promise.all([
+    db.select({ id: schema.leads.id }).from(schema.leads).where(eq(schema.leads.sourcingReview, "pending")),
+    db.select({ id: schema.messages.id }).from(schema.messages).where(inArray(schema.messages.state, ["drafted", "linted", "approved"])),
+    db.select({ id: schema.replies.id, handledAt: schema.replies.handledAt }).from(schema.replies),
+    db.select({ id: schema.signups.id, status: schema.signups.status }).from(schema.signups),
+    me.role === "admin" || me.role === "ops" ? db.select({ id: schema.swipePosts.id }).from(schema.swipePosts).where(eq(schema.swipePosts.status, "draft")) : Promise.resolve([]),
+  ]);
+  const canOutreach = ["admin", "ops", "operator"].includes(me.role);
+  return {
+    "/leads": rows(leads),
+    "/outreach": canOutreach ? await outreachWaiting(me.id, now) : 0,
+    "/approvals": rows(messages),
+    "/replies": replies.filter((r) => r.handledAt == null).length,
+    "/signups": signups.filter((s) => s.status !== "confirmed").length,
+    "/swipe": rows(swipe),
+  } as Record<string, number>;
+});
+
 app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operator") }, async (req) => {
   const q = (req.query ?? {}) as { skip?: string; lead?: string };
   const me = req.user!;

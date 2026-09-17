@@ -3,7 +3,7 @@
 // classification (DB values stay internal/external/unresolved; people see
 // these words instead).
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 export type Classification = "internal" | "external" | "unresolved";
 
@@ -28,15 +28,40 @@ export function ClassChip({ value }: { value: string }) {
   );
 }
 
+/** The "what is this page for" banner. It folds away once you know the page, and stays folded
+ *  (per page, in this browser) so the work is the first thing on screen. */
 export function PageInfo({ title, children }: { title: string; children: React.ReactNode }) {
+  const key = `pageinfo.${title.split(" —")[0]!.trim().toLowerCase().replace(/\s+/g, "-")}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(key) !== "closed";
+    } catch {
+      return true; // private window: just show it
+    }
+  });
+  const toggle = () => {
+    setOpen((o) => {
+      try {
+        localStorage.setItem(key, o ? "closed" : "open");
+      } catch {
+        /* nothing to remember it with */
+      }
+      return !o;
+    });
+  };
   return (
-    <div className="pageinfo">
+    <div className={`pageinfo${open ? "" : " closed"}`}>
       <div className="pageinfo-icon">ⓘ</div>
-      <div>
-        <strong>{title}</strong>
-        <div className="muted" style={{ marginTop: 2 }}>
-          {children}
-        </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <button type="button" className="pageinfo-toggle" onClick={toggle} aria-expanded={open}>
+          <strong>{title}</strong>
+          <span className="muted">{open ? "Hide ▲" : "What is this page? ▼"}</span>
+        </button>
+        {open && (
+          <div className="muted" style={{ marginTop: 2 }}>
+            {children}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LeadDetail, type LeadRow, type LeadsPage, type Me, type SamplePost, type SourcedFacets } from "../api.js";
 import { Modal, PageInfo, Pagination } from "../components.js";
 import { LeadBubbleCell } from "../leadBubble.js";
@@ -81,9 +81,28 @@ export function Leads({ me }: { me: Me }) {
   // Outreach flow path. The queue shows qualified leads (Offer 1 or 2) unless another path is picked.
   const [path, setPath] = useState(view === "queue" ? "qualified" : "");
   const sourcedFilters = { review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName };
+  // Filters fold away so the rows start near the top; anything switched on keeps them open.
+  const [showFilters, setShowFilters] = useState(false);
+  const activeFilters = [status, platform, sp, niche, competitor, store, active, minReach, minEngagement, country, competitorName, ...(view === "sourced" ? [minScore, audience] : [])].filter(Boolean).length;
+  const filtersOpen = showFilters || activeFilters > 0;
+  const searchRef = useRef<HTMLInputElement>(null);
   const clearSourcedFilters = () => {
     setNiche(""); setCompetitor(""); setStore(""); setActive(""); setMinReach(""); setMinScore(""); setMinEngagement(""); setCountry(""); setAudience(""); setCompetitorName("");
   };
+
+  // "/" jumps to the search box from anywhere on the page.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.key !== "/" || e.metaKey || e.ctrlKey) return;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ view, page: String(page), pageSize, sort });
@@ -102,12 +121,16 @@ export function Leads({ me }: { me: Me }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, page, sort, dir, search, status, platform, sp, path, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName, pageSize]);
 
+  const [loading, setLoading] = useState(false);
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       setData(await api.leadsPage(params));
       setError("");
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setLoading(false);
     }
   }, [params]);
 
@@ -121,6 +144,11 @@ export function Leads({ me }: { me: Me }) {
     if (open == null) return setDetail(null);
     void api.lead(open).then(setDetail).catch((err) => setError((err as Error).message));
   }, [open]);
+
+  // A new page of rows starts at the top of the table, not where the last page was left.
+  useEffect(() => {
+    document.querySelector(".main.table-page > .tablewrap")?.scrollTo({ top: 0 });
+  }, [page, view, sort, dir, search, path, review]);
 
   // Reset to page 1 when filters/sort change.
   useEffect(() => setPage(1), [pageSize, view, sort, dir, search, status, platform, sp, path, review, niche, competitor, store, active, minReach, minScore, minEngagement, country, audience, competitorName]);
@@ -277,27 +305,23 @@ export function Leads({ me }: { me: Me }) {
 
       <div className="toolbar">
         <input
-          placeholder="Search name, email, platform, niche…"
+          ref={searchRef}
+          placeholder='Search name, email, platform, niche…  (press "/")'
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ maxWidth: 280 }}
+          style={{ maxWidth: 300 }}
         />
-        {view !== "sourced" && (
-        <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ maxWidth: 150 }}>
-          <option value="">All statuses</option>
-          {filters?.statuses.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        )}
-        <select value={platform} onChange={(e) => setPlatform(e.target.value)} style={{ maxWidth: 150 }}>
-          <option value="">All platforms</option>
-          {filters?.platforms.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
-        {view !== "sourced" && (
-        <select value={sp} onChange={(e) => setSp(e.target.value)} style={{ maxWidth: 150 }}>
-          <option value="">All creator types</option>
-          {filters?.subProfiles.map((s) => <option key={s} value={s}>{subProfileLabel(s).text}</option>)}
-        </select>
-        )}
+        <button
+          type="button"
+          className={`filter-toggle${activeFilters > 0 ? " on" : ""}`}
+          onClick={() => setShowFilters((s) => !s)}
+          title={activeFilters > 0 ? "Filters are on: clear them to fold this away" : "Narrow the list down"}
+        >
+          {filtersOpen ? "Filters ▲" : "Filters ▼"}{activeFilters > 0 ? ` (${activeFilters})` : ""}
+        </button>
+        <span className="muted" style={{ fontSize: 12, minWidth: 116 }}>
+          {loading ? "Loading…" : data ? `${data.analytics.total.toLocaleString()} leads shown` : ""}
+        </span>
         {view === "sourced" && canRun && (
           <>
             <div className="grow" />
@@ -311,14 +335,42 @@ export function Leads({ me }: { me: Me }) {
         )}
       </div>
 
-      <SourcedFilterBar
-        sourced={view === "sourced"}
-        facets={data?.facets ?? null}
-        values={sourcedFilters}
-        set={{ setReview, setNiche, setCompetitor, setStore, setActive, setMinReach, setMinScore, setMinEngagement, setCountry, setAudience, setCompetitorName }}
-        onClear={clearSourcedFilters}
-        shown={data?.analytics.total ?? 0}
-      />
+      {filtersOpen && (
+        <div className="toolbar filterbar">
+          {view !== "sourced" && (
+            <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ maxWidth: 150 }}>
+              <option value="">All statuses</option>
+              {filters?.statuses.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          <select value={platform} onChange={(e) => setPlatform(e.target.value)} style={{ maxWidth: 150 }}>
+            <option value="">All platforms</option>
+            {filters?.platforms.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          {view !== "sourced" && (
+            <select value={sp} onChange={(e) => setSp(e.target.value)} style={{ maxWidth: 150 }}>
+              <option value="">All creator types</option>
+              {filters?.subProfiles.map((s) => <option key={s} value={s}>{subProfileLabel(s).text}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+
+      {(filtersOpen || view === "sourced") && (
+        <SourcedFilterBar
+          sourced={view === "sourced"}
+          facets={data?.facets ?? null}
+          values={sourcedFilters}
+          set={{ setReview, setNiche, setCompetitor, setStore, setActive, setMinReach, setMinScore, setMinEngagement, setCountry, setAudience, setCompetitorName }}
+          onClear={() => {
+            clearSourcedFilters();
+            setStatus("");
+            setPlatform("");
+            setSp("");
+          }}
+          shown={data?.analytics.total ?? 0}
+        />
+      )}
 
       {error && <div className="error">{error}</div>}
 

@@ -110,7 +110,9 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 ::placeholder { color: var(--muted); opacity: 0.7; }
-.layout { display: flex; min-height: 100vh; }
+/* One scroll area: the window never scrolls, the nav is always there, and each page scrolls inside
+   .main. Tables then keep their own scrollbox with the header pinned to the top of the window. */
+.layout { display: flex; height: 100dvh; overflow: hidden; }
 .nav {
   width: 216px;
   background: var(--surface);
@@ -121,7 +123,8 @@ input:focus, select:focus, textarea:focus {
   gap: 3px;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100%;
+  overflow-y: auto;
 }
 .nav .brand {
   font-weight: 800; padding: 6px 10px 18px; letter-spacing: -0.01em; font-size: 15px;
@@ -143,9 +146,17 @@ input:focus, select:focus, textarea:focus {
   content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px;
   background: var(--accent); border-radius: 0 3px 3px 0;
 }
+.nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* How much work waits behind a page, without opening it. */
+.nav-badge {
+  flex: none; min-width: 20px; padding: 1px 6px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums;
+}
+.nav a.active .nav-badge { background: var(--accent); color: #fff; }
 .nav .spacer { flex: 1; }
 .nav .whoami { padding: 8px 10px; color: var(--muted); font-size: 12.5px; }
-.main { flex: 1; padding: 32px 36px; max-width: 1120px; width: 100%; min-width: 0; }
+.main { flex: 1; padding: 32px 36px; max-width: 1120px; width: 100%; min-width: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .main.wide { max-width: none; padding: 24px 24px; }
 h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 20px; }
 h2 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; margin: 28px 0 10px; }
@@ -188,6 +199,15 @@ code.inline { background: var(--accent-soft); color: var(--accent); padding: 1px
 .card .v, .stat .n, .analytics .stat .n { font-family: var(--ui); }
 .pageinfo { display: flex; gap: 11px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 13px 16px; margin: 0 0 20px; font-size: 13px; box-shadow: var(--shadow); }
 .pageinfo-icon { color: var(--accent); font-weight: 700; font-size: 15px; }
+.pageinfo.closed { padding: 8px 16px; margin-bottom: 12px; }
+.pageinfo-toggle {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.pageinfo-toggle:hover { background: none; }
+.pageinfo-toggle .muted { font-size: 12px; white-space: nowrap; }
+/* Filters fold away until they're needed; the count says how many are on. */
+.filter-toggle.on { border-color: var(--accent); color: var(--accent); }
 .pagination { display: flex; gap: 8px; align-items: center; margin: 16px 0; justify-content: center; }
 .pagination button { padding: 6px 12px; }
 .pagination .muted { font-variant-numeric: tabular-nums; }
@@ -377,10 +397,15 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
 .waiting-row .reply-box { flex: 1 1 100%; }
 .reply-box { margin-top: 6px; }
 
-/* Leads tables: scroll inside the window with the header pinned, so the sideways scrollbar is always
-   reachable without scrolling to the bottom of a long page. */
-.main.wide .tablewrap { max-height: calc(100vh - 150px); overflow: auto; }
-.main.wide .tablewrap thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
+/* Table pages: the filters stay put and only the rows scroll, so the column headers and the sideways
+   scrollbar are always in reach and the page can be scrolled from the top at any time. */
+/* overflow-y: auto, not hidden: on a short window the filters can still be scrolled past
+   instead of being cut off, and the table keeps a usable minimum height either way. */
+.main.table-page { display: flex; flex-direction: column; overflow-y: auto; }
+.main.table-page > * { flex: none; }
+.main.table-page > .tablewrap { flex: 1 1 auto; min-height: 260px; overflow: auto; }
+.main.table-page thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); box-shadow: inset 0 -1px 0 var(--line); }
+.main.table-page > .toolbar:last-of-type { margin-bottom: 0; }
 
 /* Readable active chips in dark mode. */
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip-button.active { color: #0d1417; } }
@@ -388,7 +413,9 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
 
 /* Phones: the side nav becomes a top bar and the page keeps its width. */
 @media (max-width: 700px) {
-  .layout { flex-direction: column; }
+  .layout { flex-direction: column; height: auto; min-height: 100dvh; overflow: visible; }
+  .main, .main.table-page { overflow: visible; display: block; }
+  .main.table-page > .tablewrap { max-height: 70vh; }
   .nav { width: auto; height: auto; position: static; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--line); }
   .nav .brand { width: 100%; margin: 0 0 4px; }
   .nav a { padding: 6px 8px; }

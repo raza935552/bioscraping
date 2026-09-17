@@ -18,6 +18,8 @@ import { Outreach } from "./pages/Outreach.js";
 import { Team } from "./pages/Team.js";
 
 const WIDE_ROUTES = new Set(["/leads", "/swipe"]);
+/** Pages whose table scrolls on its own, under filters that stay put. */
+const TABLE_ROUTES = new Set(["/leads"]);
 
 function useHashRoute(): string {
   const [route, setRoute] = useState(window.location.hash.slice(1) || "/dashboard");
@@ -33,6 +35,8 @@ export function App() {
   const route = useHashRoute();
   const [me, setMe] = useState<Me | null>(null);
   const [checked, setChecked] = useState(false);
+  // How much work is waiting behind each page, so nobody has to open them to find out.
+  const [counts, setCounts] = useState<Record<string, number>>({});
 
   const refreshMe = useCallback(async () => {
     try {
@@ -47,6 +51,21 @@ export function App() {
   useEffect(() => {
     void refreshMe();
   }, [refreshMe]);
+
+  useEffect(() => {
+    if (!me) return;
+    let stop = false;
+    const tick = () => void api.navCounts().then((c) => !stop && setCounts(c)).catch(() => {});
+    tick();
+    // Refresh while the tab is in front; leaving it open overnight shouldn't poll.
+    const timer = window.setInterval(() => document.visibilityState === "visible" && tick(), 60_000);
+    window.addEventListener("focus", tick);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", tick);
+    };
+  }, [me, route]);
 
   if (route.startsWith("/accept-invite/")) {
     return <AcceptInvite token={route.split("/")[2] ?? ""} onDone={refreshMe} />;
@@ -112,7 +131,8 @@ export function App() {
         {nav.map(([path, label, ico]) => (
           <a key={path} href={`#${path}`} className={route === path ? "active" : ""}>
             <span className="ico">{ico}</span>
-            {label}
+            <span className="nav-label">{label}</span>
+            {counts[path] ? <span className="nav-badge" title={`${counts[path]} waiting`}>{counts[path] > 99 ? "99+" : counts[path]}</span> : null}
           </a>
         ))}
         <div className="spacer" />
@@ -128,7 +148,7 @@ export function App() {
         </button>
       </nav>
       {/* Data-heavy pages use the full width; the rest keep a readable column. */}
-      <main className={`main${WIDE_ROUTES.has(route) ? " wide" : ""}`}>{page()}</main>
+      <main className={`main${WIDE_ROUTES.has(route) ? " wide" : ""}${allowed && TABLE_ROUTES.has(route) ? " table-page" : ""}`}>{page()}</main>
     </div>
   );
 }
