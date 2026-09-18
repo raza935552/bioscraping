@@ -313,7 +313,7 @@ export const api = {
   leads: (view: string) => request<LeadRow[]>(`/api/leads?view=${encodeURIComponent(view)}`),
   lead: (id: number) => request<LeadDetail>(`/api/leads/${id}`),
   outreach: (id: number, gap?: number | null) => request<Conversation>(`/api/leads/${id}/outreach${gap != null ? `?gap=${gap}` : ""}`),
-  outreachSent: (id: number, body: { templateId: string; body: string; channel: string; gapIndex: number | null }) =>
+  outreachSent: (id: number, body: { templateId: string; body: string; channel: string; gapIndex: number | null; warmUp?: { followed: boolean; liked: boolean; commented: boolean } }) =>
     request<{ ok: true }>(`/api/leads/${id}/outreach/sent`, { method: "POST", body: JSON.stringify(body) }),
   outreachReply: (id: number, body: { kind: string; body: string; channel: string }) =>
     request<{ ok: true }>(`/api/leads/${id}/outreach/reply`, { method: "POST", body: JSON.stringify(body) }),

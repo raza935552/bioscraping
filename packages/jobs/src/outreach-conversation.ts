@@ -244,7 +244,7 @@ export function eventTime(now: Date, events: FlowEvent[]): Date {
 /** A person sent a flow message by hand. Checks the lead, the flow's next step, the linter and suppression, then records it once. */
 export async function recordFlowSent(
   db: Db,
-  input: { leadId: number; templateId: TemplateId; body: string; channel: ContactChannel; gapIndex: number | null; userId: number; recruiterName?: string },
+  input: { leadId: number; templateId: TemplateId; body: string; channel: ContactChannel; gapIndex: number | null; userId: number; recruiterName?: string; warmUp?: WarmUp },
   now = new Date(),
 ): Promise<{ messageId: number }> {
   const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, input.leadId) });
@@ -303,7 +303,7 @@ export async function recordFlowSent(
         state: "sent",
         draftVariant: input.templateId.slice(0, 24),
         body,
-        lintReport: { flowTemplate: input.templateId, gapIndex: input.gapIndex, contactChannel: input.channel, approvedCopy: approved, violations },
+        lintReport: { flowTemplate: input.templateId, gapIndex: input.gapIndex, contactChannel: input.channel, approvedCopy: approved, violations, warmUp: warmUpOf(input.warmUp) },
         approvedByUserId: input.userId,
         approvedAt: at,
         sentAt: at,
@@ -313,6 +313,28 @@ export async function recordFlowSent(
     messageId = ins!.id;
   });
   return { messageId };
+}
+
+/** Genuine engagement before the first message: the person is on the creator's profile anyway, and a DM
+ *  from an account they just saw in their notifications gets opened instead of ignored in Requests
+ *  (Josh + Raza, 2026-09-18, in place of automated seeding). Recorded, never required. */
+export interface WarmUp {
+  followed: boolean;
+  liked: boolean;
+  commented: boolean;
+}
+
+export const WARM_UP_STEPS: Array<{ key: keyof WarmUp; label: string; help: string }> = [
+  { key: "followed", label: "Followed them", help: "They see the follow in their notifications" },
+  { key: "liked", label: "Liked 2 posts", help: "Recent ones, so it shows up next to the follow" },
+  { key: "commented", label: "Left a real comment", help: "One line about the actual post, never an emoji only" },
+];
+
+/** Only the three flags, so nothing else can be written into the message's report. */
+export function warmUpOf(w: WarmUp | null | undefined): WarmUp | null {
+  if (!w || typeof w !== "object") return null;
+  const out = { followed: w.followed === true, liked: w.liked === true, commented: w.commented === true };
+  return out.followed || out.liked || out.commented ? out : null;
 }
 
 /** A person logged the creator's reply. */

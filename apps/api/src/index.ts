@@ -61,6 +61,8 @@ import {
   redoSwipeImage,
   runSwipeSearch,
   outreachWorkQueue,
+  warmUpOf,
+  WARM_UP_STEPS,
   dmLinkFor,
   dmTargetFor,
   isApprovedWording,
@@ -765,7 +767,7 @@ const flowFail = (reply: FastifyReply, e: unknown) => {
   throw e;
 };
 
-app.get("/api/outreach/settings", { preHandler: requireRole("admin", "ops", "operator") }, async () => ({ settings: await loadOutreachSettings(db), defaults: DEFAULT_TEMPLATES }));
+app.get("/api/outreach/settings", { preHandler: requireRole("admin", "ops", "operator") }, async () => ({ settings: await loadOutreachSettings(db), defaults: DEFAULT_TEMPLATES, warmUpSteps: WARM_UP_STEPS }));
 
 app.put("/api/outreach/settings", { preHandler: requireRole("admin", "ops") }, async (req) => {
   const saved = await saveOutreachSettings(db, req.body, req.user!.id);
@@ -929,9 +931,9 @@ app.get("/api/leads/:id/outreach", { preHandler: requireRole("admin", "ops", "op
 
 app.post("/api/leads/:id/outreach/sent", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
   const id = Number((req.params as { id: string }).id);
-  const b = (req.body ?? {}) as { templateId?: string; body?: string; channel?: string; gapIndex?: number | null };
+  const b = (req.body ?? {}) as { templateId?: string; body?: string; channel?: string; gapIndex?: number | null; warmUp?: { followed?: boolean; liked?: boolean; commented?: boolean } };
   try {
-    const r = await recordFlowSent(db, { leadId: id, templateId: String(b.templateId ?? "") as never, body: String(b.body ?? ""), channel: String(b.channel ?? "") as never, gapIndex: typeof b.gapIndex === "number" ? b.gapIndex : null, userId: req.user!.id, recruiterName: req.user!.name });
+    const r = await recordFlowSent(db, { leadId: id, templateId: String(b.templateId ?? "") as never, body: String(b.body ?? ""), channel: String(b.channel ?? "") as never, gapIndex: typeof b.gapIndex === "number" ? b.gapIndex : null, userId: req.user!.id, recruiterName: req.user!.name, ...(warmUpOf(b.warmUp as never) ? { warmUp: warmUpOf(b.warmUp as never)! } : {}) });
     outreachClaims.delete(id);
     await audit(req, "outreach.sent", "leads", id, { templateId: b.templateId, channel: b.channel, messageId: r.messageId });
     return { ok: true, ...r };

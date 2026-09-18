@@ -205,6 +205,11 @@ function LeadCard({
     }
   };
 
+  // Warm-up before the first message: the person is on their profile anyway, and a DM from an account
+  // they just saw in their notifications gets opened instead of ignored in Requests.
+  const [warm, setWarm] = useState({ followed: false, liked: false, commented: false });
+  const firstMessage = conv.history.length === 0;
+  const warmDone = warm.followed && warm.liked && warm.commented;
   const noDm = !lead.dmUrl;
   const handleLabel = lead.handle ? `@${lead.handle}` : lead.name;
   const lastSentLabel = conv.history.filter((h) => h.type === "sent").at(-1)?.label ?? null;
@@ -240,6 +245,21 @@ function LeadCard({
 
       {conv.step.kind === "send" && message && (
         <>
+          {firstMessage && !noDm && (
+            <div className="warmup">
+              <div className="k">First, warm them up on their profile (20 seconds)</div>
+              {([["followed", "Follow them", "They see it in their notifications"], ["liked", "Like 2 recent posts", "Shows up right under the follow"], ["commented", "Leave one real comment", "A line about the actual post, never just an emoji"]] as const).map(([k, label, help]) => (
+                <label key={k} className="warmup-step" title={help}>
+                  <input type="checkbox" checked={warm[k]} onChange={(e) => setWarm({ ...warm, [k]: e.target.checked })} />
+                  <span>{label}</span>
+                  <span className="muted">{help}</span>
+                </label>
+              ))}
+              <div className="muted" style={{ fontSize: 12 }}>
+                {warmDone ? "Nice. Send the message a moment later." : "Not required, but it roughly doubles the chance the DM is opened."}
+              </div>
+            </div>
+          )}
           <ol className="outreach-steps">
             <li><strong>Copy the message</strong></li>
             <li>
@@ -287,7 +307,7 @@ function LeadCard({
               disabled={busy || busyLoading || check.blocked}
               onClick={() =>
                 void run(async () => {
-                  await api.outreachSent(lead.id, { templateId: message.templateId, body: text, channel: noDm && lead.email ? "Email" : channelFor(lead.platform), gapIndex: message.templateId.startsWith("offer") ? conv.gapIndex : null });
+                  await api.outreachSent(lead.id, { templateId: message.templateId, body: text, channel: noDm && lead.email ? "Email" : channelFor(lead.platform), gapIndex: message.templateId.startsWith("offer") ? conv.gapIndex : null, ...(firstMessage ? { warmUp: warm } : {}) });
                   onNext(`Recorded: sent to ${handleLabel}. Next lead loaded.`);
                 })
               }
