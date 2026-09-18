@@ -370,6 +370,11 @@ export const affiliates = mysqlTable("affiliates", {
   email: varchar("email", { length: 255 }),
   classification: varchar("classification", { length: 16 }).default("unresolved").notNull(), // internal | external | unresolved
   classifiedByUserId: int("classified_by_user_id"),
+  /** Their discount code, the thing they actually promote. iDev's API doesn't return it: it comes
+   *  from the sign-up we provisioned, or a person pastes it in. Used by the asset generator. */
+  couponCode: varchar("coupon_code", { length: 40 }),
+  /** Their tracking link, when they use one instead of (or beside) the code. */
+  referralLink: varchar("referral_link", { length: 500 }),
   recruiterIdevId: int("recruiter_idev_id"), // referral tree (Phase 0 probe)
   signedUpAt: datetime("signed_up_at"),
   overrideExpiresAt: datetime("override_expires_at"), // signup + 12 months

@@ -10,4 +10,5 @@ export * from "./notes.js";
 export * from "./outreach-path.js";
 export * from "./outreach-flow.js";
 export * from "./outreach-templates.js";
+export * from "./affiliate-assets.js";
 export * from "./reply-classify.js";

@@ -120,6 +120,29 @@ export interface ReplySuggestion {
   details: { email: string | null; code: string | null; firstName: string | null; lastName: string | null };
 }
 
+export interface RenderedAsset {
+  id: string;
+  label: string;
+  where: string;
+  platform: "any" | "instagram" | "tiktok" | "youtube";
+  text: string;
+  missing: string[];
+  chars: number;
+  maxChars: number | null;
+  tooLong: boolean;
+  note: string | null;
+  violations: Array<{ rule: string; severity: string; detail: string }>;
+  blocked: boolean;
+}
+
+export interface AffiliateAssets {
+  affiliate: { id: number; name: string; email: string | null; couponCode: string | null; referralLink: string | null };
+  code: string | null;
+  suggestedCode: string | null;
+  settings: { discountPct: number; storeUrl: string };
+  assets: RenderedAsset[];
+}
+
 export interface OutreachWork {
   counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number; importedNew: number };
   next: { leadId: number; bucket: "answer" | "checkin" | "new" } | null;
@@ -290,6 +313,9 @@ export interface LeadDetail {
 export const api = {
   me: () => request<Me>("/api/auth/me"),
   navCounts: () => request<Record<string, number>>("/api/nav-counts"),
+  affiliateAssets: (id: number) => request<AffiliateAssets>(`/api/affiliates/${id}/assets`),
+  affiliateUpdate: (id: number, body: { couponCode?: string; referralLink?: string }) =>
+    request<{ ok: true }>(`/api/affiliates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   login: (email: string, password: string) =>
     request<{ ok: true; user: Me }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   acceptInvite: (token: string, password: string) =>

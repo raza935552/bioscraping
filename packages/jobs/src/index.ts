@@ -13,6 +13,7 @@ export * from "./lead-ingest.js";
 export * from "./customerio-sync.js";
 export * from "./sourced-export.js";
 export * from "./sourced-details.js";
+export * from "./affiliate-assets.js";
 export * from "./content/biolinx-client.js";
 export * from "./content/content-rules.js";
 export * from "./content/post-writer.js";

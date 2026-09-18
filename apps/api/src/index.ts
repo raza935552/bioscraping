@@ -28,6 +28,7 @@ import {
   hasUsableNotes,
   isConverted,
   DEFAULT_TEMPLATES,
+  DEFAULT_ASSETS,
   OUTREACH_PATH_LABEL,
   isQualifiedPath,
   isSp5,
@@ -79,6 +80,10 @@ import {
   FlowError,
   loadOutreachSettings,
   saveOutreachSettings,
+  loadAssetSettings,
+  saveAssetSettings,
+  assetsFor,
+  codeForAffiliate,
   flowEventsByLead,
   flowStepFor,
   stepSummary,
@@ -344,6 +349,57 @@ app.get("/api/affiliates", { preHandler: requireAuth }, async (req) => {
       suggestion: a.classification === "unresolved" ? suggestClassification(a) : null,
     }))
     .sort((x, y) => x.idevId - y.idevId);
+});
+
+// ── Affiliate assets (what they post: bio line, stories, captions, ad break) ──
+
+app.get("/api/affiliate-assets/settings", { preHandler: requireRole("admin", "ops") }, async () => ({
+  settings: await loadAssetSettings(db),
+  defaults: DEFAULT_ASSETS,
+}));
+
+app.put("/api/affiliate-assets/settings", { preHandler: requireRole("admin", "ops") }, async (req) => {
+  const settings = await saveAssetSettings(db, req.body, req.user!.id);
+  await audit(req, "affiliate.assets.settings", "config", null, { discountPct: settings.discountPct, storeUrl: settings.storeUrl, edited: Object.keys(settings.assets) });
+  return { ok: true, settings };
+});
+
+app.get("/api/affiliates/:id/assets", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const a = await db.query.affiliates.findFirst({ where: eq(schema.affiliates.id, id) });
+  if (!a) return reply.code(404).send({ error: "not found" });
+  const { code, suggested } = await codeForAffiliate(db, a);
+  const settings = await loadAssetSettings(db);
+  return {
+    affiliate: { id: a.id, name: [a.firstName, a.lastName].filter(Boolean).join(" ") || a.username || `#${a.idevId}`, email: a.email, couponCode: a.couponCode, referralLink: a.referralLink },
+    code,
+    // What they asked for at sign-up: only a suggestion until someone confirms it exists in iDev.
+    suggestedCode: suggested,
+    settings,
+    assets: assetsFor({ firstName: a.firstName, couponCode: code, referralLink: a.referralLink }, settings),
+  };
+});
+
+app.patch("/api/affiliates/:id", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const b = (req.body ?? {}) as { couponCode?: unknown; referralLink?: unknown };
+  const a = await db.query.affiliates.findFirst({ where: eq(schema.affiliates.id, id) });
+  if (!a) return reply.code(404).send({ error: "not found" });
+  const set: { couponCode?: string | null; referralLink?: string | null } = {};
+  if ("couponCode" in b) {
+    const code = String(b.couponCode ?? "").trim().toUpperCase().slice(0, 40);
+    if (code && !/^[A-Z0-9._-]{2,40}$/.test(code)) return reply.code(400).send({ error: "a code is letters, numbers, dots, dashes or underscores" });
+    set.couponCode = code || null;
+  }
+  if ("referralLink" in b) {
+    const link = String(b.referralLink ?? "").trim().slice(0, 500);
+    if (link && !/^https?:\/\//i.test(link)) return reply.code(400).send({ error: "the link must start with http:// or https://" });
+    set.referralLink = link || null;
+  }
+  if (Object.keys(set).length === 0) return reply.code(400).send({ error: "nothing to change" });
+  await db.update(schema.affiliates).set(set).where(eq(schema.affiliates.id, id));
+  await audit(req, "affiliate.update", "affiliates", id, set);
+  return { ok: true };
 });
 
 const VALID_CLASSIFICATIONS = ["internal", "external", "unresolved"];
