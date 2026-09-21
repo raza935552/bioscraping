@@ -40,6 +40,8 @@ describe("telegram assistant", () => {
     expect(cleanQuestion("@biolinxbot how many leads?", "biolinxbot")).toBe("how many leads?");
     expect(cleanQuestion("/status@biolinxbot", "biolinxbot")).toBe("");
     expect(cleanQuestion("/ask what is the queue", "biolinxbot")).toBe("what is the queue");
+    // A doubled slash is a typo, not a different command (seen live, 2026-09-21).
+    expect(cleanQuestion("//status@biolinxbot hi".replace(/^\/{2,}/, "/"), "biolinxbot")).toBe("hi");
   });
 
   it("reads the allow-list and the caps from settings", () => {

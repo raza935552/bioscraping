@@ -125,7 +125,7 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
 
   const askedBy = [m!.from?.first_name, m!.from?.last_name].filter(Boolean).join(" ") || m!.from?.username || "someone";
   const chatTitle = m!.chat?.title ?? null;
-  const rawText = m!.text ?? m!.caption ?? "";
+  const rawText = (m!.text ?? m!.caption ?? "").replace(/^\/{2,}/, "/");
   const question = cleanQuestion(rawText, cfg.botUsername);
   const command = /^\/(\w+)/.exec(rawText.trim())?.[1]?.toLowerCase();
   const imageRef = imageRefOf(m!);
