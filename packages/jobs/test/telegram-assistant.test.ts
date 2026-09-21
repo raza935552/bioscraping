@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assistantConfigFromEnv, cleanQuestion, shouldAnswer, splitTaskTag } from "../src/telegram/assistant.js";
+import { askWithLookups, assistantConfigFromEnv, cleanQuestion, shouldAnswer, splitTaskTag } from "../src/telegram/assistant.js";
 import { SYSTEM_BRIEF } from "../src/telegram/brief.js";
 import { MAX_IMAGE_BYTES, imageRefOf, pickPhoto } from "../src/telegram/files.js";
 import { snapshotLines, type Snapshot } from "../src/telegram/snapshot.js";
@@ -100,5 +100,24 @@ describe("telegram assistant", () => {
     expect(lines).toContain("109 waiting for review");
     expect(lines).toContain("+11 for $2.82");
     expect(lines).toContain("add a sales report");
+  });
+
+  it("runs the lookups the model asks for, then answers", async () => {
+    const said: string[] = [];
+    const replies = ['[[lookup: find_leads {"competitor":"Amino Club"}]]', "Two of them are Amino Club."];
+    const cli = { ask: async (_s: string, prompt: string) => { said.push(prompt); return replies.shift()!; } };
+    const db = {} as never; // the lookup fails against a stub db, which the loop reports rather than throws
+    const r = await askWithLookups(db, cli, "system", "who did we find?");
+    expect(r.lookups).toEqual(["find_leads"]);
+    expect(r.answer).toBe("Two of them are Amino Club.");
+    // The result of the lookup is handed back in the next prompt.
+    expect(said[1]).toContain("You asked to look up find_leads");
+  });
+
+  it("stops asking for data instead of looping forever", async () => {
+    const cli = { ask: async () => '[[lookup: find_leads {}]]' };
+    const r = await askWithLookups({} as never, cli, "system", "who?", 2);
+    expect(r.lookups.length).toBeLessThanOrEqual(3);
+    expect(r.answer).toContain("Ask me again");
   });
 });

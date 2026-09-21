@@ -32,6 +32,25 @@ export interface LlmClient {
   completeWithImages?(system: string, user: string, images: LlmImage[], model: string, opts?: { maxTokens?: number }): Promise<string>;
   /** A conversation rather than a single question: earlier turns, and images on the last one. */
   completeChat?(system: string, turns: LlmTurn[], model: string, opts?: { maxTokens?: number; effort?: "low" | "medium" | "high" }): Promise<string>;
+  /** One raw turn of the Messages API, for callers that run their own tool loop. */
+  messagesRaw?(req: RawMessagesRequest): Promise<RawMessagesResponse>;
+}
+
+export interface RawMessagesRequest {
+  model: string;
+  system: string;
+  /** Raw Messages API content, so a caller can pass tool_use and tool_result blocks through. */
+  messages: Array<{ role: "user" | "assistant"; content: unknown }>;
+  tools?: unknown[];
+  maxTokens?: number;
+  effort?: "low" | "medium" | "high";
+}
+
+export interface RawMessagesResponse {
+  content: Array<Record<string, unknown>>;
+  stopReason: string | null;
+  /** The text blocks joined, for the common case. */
+  text: string;
 }
 
 /** One turn of a conversation. Images belong on a user turn. */
@@ -82,6 +101,39 @@ export function anthropicFromEnv(env = process.env, fetchImpl: typeof fetch = fe
       }
       const body = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
       return body.content?.find((c) => c.type === "text")?.text ?? "";
+    },
+
+    async messagesRaw(req) {
+      const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: req.model,
+          max_tokens: req.maxTokens ?? 2048,
+          system: req.system,
+          messages: req.messages,
+          ...(req.tools?.length ? { tools: req.tools } : {}),
+          ...(req.effort ? { output_config: { effort: req.effort } } : {}),
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!res.ok) {
+        let reason = "";
+        try {
+          const err = (await res.json()) as { error?: { type?: string; message?: string } };
+          reason = [err.error?.type, err.error?.message].filter(Boolean).join(": ");
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new Error(`Anthropic API: HTTP ${res.status}${reason ? ` — ${reason.slice(0, 200)}` : ""}`);
+      }
+      const body = (await res.json()) as { content?: Array<Record<string, unknown>>; stop_reason?: string };
+      const content = body.content ?? [];
+      return {
+        content,
+        stopReason: body.stop_reason ?? null,
+        text: content.filter((c) => c.type === "text").map((c) => String(c.text ?? "")).join("\n").trim(),
+      };
     },
 
     async completeChat(system, turns, model, opts) {

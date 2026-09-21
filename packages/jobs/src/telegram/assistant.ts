@@ -10,6 +10,8 @@ import { schema, type Db } from "@biolinx/db";
 import type { LlmClient, LlmImage, LlmTurn } from "@biolinx/drafting";
 import { imageRefOf, type ImageFetcher, type TelegramMessageFiles } from "./files.js";
 import { STYLE_EXAMPLES, SYSTEM_BRIEF } from "./brief.js";
+import { claudeCli, subscriptionAvailable, type ClaudeCli } from "./claude-cli.js";
+import { runAssistantTool } from "./tools.js";
 import { snapshotLines, systemSnapshot } from "./snapshot.js";
 
 export const ASSISTANT_MODEL = "claude-opus-5";
@@ -111,8 +113,44 @@ export function cleanQuestion(text: string, botUsername: string): string {
   return t.replace(/\s+/g, " ").trim();
 }
 
+/** The model asks for a record with one line; we run it and hand the result back. */
+const LOOKUP = /\[\[\s*lookup\s*:\s*([a-z_]{3,40})\s*(\{[\s\S]*?\})?\s*\]\]/i;
+export const MAX_LOOKUPS = 3;
+
+/** Runs the conversation until the model stops asking for data, then returns what it wrote. */
+export async function askWithLookups(
+  db: Db,
+  cli: ClaudeCli,
+  system: string,
+  prompt: string,
+  maxRounds = MAX_LOOKUPS,
+): Promise<{ answer: string; lookups: string[] }> {
+  const lookups: string[] = [];
+  let current = prompt;
+  for (let round = 0; round <= maxRounds; round++) {
+    const out = await cli.ask(system, current);
+    const m = LOOKUP.exec(out);
+    if (!m) return { answer: out, lookups };
+    const tool = m[1]!.toLowerCase();
+    let input: Record<string, unknown> = {};
+    try {
+      input = m[2] ? (JSON.parse(m[2]) as Record<string, unknown>) : {};
+    } catch {
+      input = {};
+    }
+    const result = round === maxRounds
+      ? "No more lookups: answer with what you already have."
+      : await runAssistantTool(db, tool, input);
+    lookups.push(tool);
+    current = `${current}\n\nYou asked to look up ${tool}. Result:\n${result}\n\nNow write the answer for the chat. Only ask for another lookup if you genuinely need different data.`;
+  }
+  return { answer: "I couldn't pull that together just now. Ask me again, or ask Raza.", lookups };
+}
+
 export interface HandleDeps {
   llm: LlmClient | null;
+  /** Answers through the subscription-authenticated CLI instead of an API key, when available. */
+  cli?: ClaudeCli | null;
   /** Downloads a screenshot so the assistant can read it. Omitted = images are ignored. */
   fetchImage?: ImageFetcher;
   now?: Date;
@@ -227,7 +265,30 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
   // ── The answer ─────────────────────────────────────────────────────────
   let answer: string;
   let usedAi = false;
-  if (!deps.llm) {
+  const cli = deps.cli === undefined ? (subscriptionAvailable() ? claudeCli() : null) : deps.cli;
+  if (cli) {
+    // Subscription-backed: the CLI is the model, and it can ask us to look records up.
+    const system = [SYSTEM_BRIEF, "", "EXAMPLES OF THE RIGHT TONE", STYLE_EXAMPLES].join("\n");
+    const conversation = history.map((h) => `${h.role === "user" ? "They said" : "You replied"}: ${h.text}`).join("\n");
+    const prompt = [
+      `Asked by ${askedBy}${chatTitle ? ` in ${chatTitle}` : ""}.`,
+      ...(conversation ? ["", "THE CONVERSATION SO FAR:", conversation] : []),
+      ...(imageRef ? ["", "They attached a screenshot. You cannot see it here, so answer what you can and ask what it shows."] : []),
+      "",
+      "LIVE NUMBERS, RIGHT NOW:",
+      snapshotLines(snapshot),
+      "",
+      "THE MESSAGE:",
+      question || "(no words, just a screenshot)",
+    ].join("\n");
+    try {
+      const r = await askWithLookups(db, cli, system, prompt);
+      answer = r.answer;
+      usedAi = true;
+    } catch (e) {
+      answer = `I couldn't write an answer just now (${(e as Error).message.slice(0, 80)}). Here are the current numbers:\n\n${snapshotLines(snapshot)}`;
+    }
+  } else if (!deps.llm) {
     answer = "I can't write an answer right now (the writing service isn't configured), but here are the current numbers:\n\n" + snapshotLines(snapshot);
   } else {
     const system = [SYSTEM_BRIEF, "", "EXAMPLES OF THE RIGHT TONE", STYLE_EXAMPLES].join("\n");
