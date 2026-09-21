@@ -114,12 +114,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     id: "alerts",
-    title: "Alerts & digest (Telegram)",
-    blurb: "Where fail-loud alerts and the daily number go.",
+    title: "Alerts, digest & the chat assistant (Telegram)",
+    blurb: "Where fail-loud alerts go, and the bot that answers questions about the system in Telegram.",
     fields: [
       // Plain text (visible) by request — a Telegram alert-bot token is low-risk.
-      { key: "TELEGRAM_BOT_TOKEN", label: "Bot token", kind: "text" },
-      { key: "TELEGRAM_CHAT_ID", label: "Chat ID", kind: "text" },
+      { key: "TELEGRAM_BOT_TOKEN", label: "Bot token", kind: "text", help: "From @BotFather. The same bot sends alerts and answers questions." },
+      { key: "TELEGRAM_CHAT_ID", label: "Chat ID", kind: "text", help: "Where alerts and the daily digest go." },
+      { key: "TELEGRAM_BOT_USERNAME", label: "Bot username", kind: "text", placeholder: "biolinx_engine_bot", help: "Without the @. In a group the bot only answers when this name is mentioned or someone replies to it." },
+      { key: "TELEGRAM_WEBHOOK_SECRET", label: "Webhook secret", kind: "secret", help: "Any long random string. Telegram sends it back on every update, and anything without it is refused." },
+      { key: "TELEGRAM_ALLOWED_CHATS", label: "Chats allowed to ask", kind: "text", placeholder: "-1001234567890, 987654321", help: "Comma-separated chat IDs. Blank = only the alert chat above." },
+      { key: "TELEGRAM_DAILY_ANSWERS", label: "Answers per day", kind: "number", placeholder: "120", help: "Cap on answers that use the writing model. /status and /tasks are free and never capped." },
     ],
   },
   {

@@ -82,6 +82,10 @@ import {
   saveOutreachSettings,
   loadAssetSettings,
   saveAssetSettings,
+  assistantConfigFromEnv,
+  handleTelegramUpdate,
+  telegramImageFetcher,
+  systemSnapshot,
   assetsFor,
   codeForAffiliate,
   flowEventsByLead,
@@ -109,6 +113,7 @@ import {
   setupRecruitingCampaign,
 } from "@biolinx/jobs";
 import { anthropicFromEnv } from "@biolinx/drafting";
+import { sendTelegram } from "@biolinx/notify";
 import { instantlyFromEnv, listAccounts, listCampaigns } from "@biolinx/instantly";
 import {
   SESSION_COOKIE,
@@ -873,6 +878,9 @@ app.get("/api/nav-counts", { preHandler: requireAuth }, async (req) => {
     db.select({ id: schema.signups.id, status: schema.signups.status }).from(schema.signups),
     me.role === "admin" || me.role === "ops" ? db.select({ id: schema.swipePosts.id }).from(schema.swipePosts).where(eq(schema.swipePosts.status, "draft")) : Promise.resolve([]),
   ]);
+  const requests = me.role === "admin" || me.role === "ops"
+    ? (await db.select({ id: schema.tasks.id }).from(schema.tasks).where(eq(schema.tasks.status, "open"))).length
+    : 0;
   const canOutreach = ["admin", "ops", "operator"].includes(me.role);
   return {
     "/leads": rows(leads),
@@ -881,6 +889,7 @@ app.get("/api/nav-counts", { preHandler: requireAuth }, async (req) => {
     "/replies": replies.filter((r) => r.handledAt == null).length,
     "/signups": signups.filter((s) => s.status !== "confirmed").length,
     "/swipe": rows(swipe),
+    "/requests": requests,
   } as Record<string, number>;
 });
 
@@ -1825,6 +1834,59 @@ await app.register(async (scope) => {
     return { received: true, known };
   });
 });
+
+// ── Telegram assistant ──────────────────────────────────────────────────
+// The team and the client ask questions in Telegram; this answers from live data, argues back when a
+// request would break a platform rule, and logs anything needing Raza as a task. Telegram
+// authenticates itself with the secret token header we set when registering the webhook.
+
+app.post("/webhooks/telegram", async (req, reply) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!token || !secret) return reply.code(503).send({ error: "telegram not configured" });
+  const provided = String(req.headers["x-telegram-bot-api-secret-token"] ?? "");
+  if (provided.length !== secret.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(secret))) {
+    req.log.warn("telegram webhook refused: bad secret token");
+    return reply.code(401).send({ error: "bad secret" });
+  }
+  // Always 200: Telegram retries anything else, and a retry storm is worse than a missed answer.
+  try {
+    const cfg = assistantConfigFromEnv();
+    const llm = process.env.ANTHROPIC_API_KEY ? anthropicFromEnv() : null;
+    const result = await handleTelegramUpdate(db, req.body as never, cfg, { llm, fetchImage: telegramImageFetcher(token) });
+    if (result.reply) {
+      const chatId = (req.body as { message?: { chat?: { id?: number | string } } })?.message?.chat?.id;
+      await sendTelegram({ botToken: token, chatId: String(chatId ?? "") }, result.reply);
+    }
+  } catch (e) {
+    req.log.error({ err: (e as Error).message }, "telegram update failed");
+  }
+  return { ok: true };
+});
+
+app.get("/api/tasks", { preHandler: requireRole("admin", "ops") }, async (req) => {
+  const q = (req.query ?? {}) as { status?: string };
+  const rows = await db.select().from(schema.tasks).orderBy(desc(schema.tasks.id)).limit(300);
+  const counts: Record<string, number> = {};
+  for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  return { counts, rows: q.status && q.status !== "all" ? rows.filter((r) => r.status === q.status) : rows };
+});
+
+app.post("/api/tasks/:id/status", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  const status = String((req.body as { status?: string })?.status ?? "");
+  if (!["open", "doing", "done", "declined"].includes(status)) return reply.code(400).send({ error: "status must be open, doing, done or declined" });
+  const done = status === "done" || status === "declined";
+  await db
+    .update(schema.tasks)
+    .set({ status, closedByUserId: done ? req.user!.id : null, closedAt: done ? new Date() : null })
+    .where(eq(schema.tasks.id, id));
+  await audit(req, "task.status", "tasks", id, { status });
+  return { ok: true };
+});
+
+/** The same numbers the assistant answers from, for the admin and for a quick health read. */
+app.get("/api/snapshot", { preHandler: requireAuth }, async () => systemSnapshot(db));
 
 // ── Store webhooks (Laravel PR, Phase 5) ────────────────────────────────
 

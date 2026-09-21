@@ -70,6 +70,9 @@ importers:
       '@biolinx/jobs':
         specifier: workspace:*
         version: link:../../packages/jobs
+      '@biolinx/notify':
+        specifier: workspace:*
+        version: link:../../packages/notify
       '@biolinx/scraping':
         specifier: workspace:*
         version: link:../../packages/scraping

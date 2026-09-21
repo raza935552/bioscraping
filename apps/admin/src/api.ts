@@ -120,6 +120,22 @@ export interface ReplySuggestion {
   details: { email: string | null; code: string | null; firstName: string | null; lastName: string | null };
 }
 
+export interface TaskRow {
+  id: number;
+  source: string;
+  chatId: string | null;
+  chatTitle: string | null;
+  askedBy: string | null;
+  askedByUsername: string | null;
+  kind: string;
+  title: string;
+  detail: string | null;
+  reply: string | null;
+  pushedBack: boolean;
+  status: string;
+  createdAt: string;
+}
+
 export interface RenderedAsset {
   id: string;
   label: string;
@@ -313,6 +329,9 @@ export interface LeadDetail {
 export const api = {
   me: () => request<Me>("/api/auth/me"),
   navCounts: () => request<Record<string, number>>("/api/nav-counts"),
+  tasks: (status: string) => request<{ counts: Record<string, number>; rows: TaskRow[] }>(`/api/tasks?status=${encodeURIComponent(status)}`),
+  taskStatus: (id: number, status: string) =>
+    request<{ ok: true }>(`/api/tasks/${id}/status`, { method: "POST", body: JSON.stringify({ status }) }),
   affiliateAssets: (id: number) => request<AffiliateAssets>(`/api/affiliates/${id}/assets`),
   affiliateUpdate: (id: number, body: { couponCode?: string; referralLink?: string }) =>
     request<{ ok: true }>(`/api/affiliates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),

@@ -28,6 +28,14 @@ export interface DraftResult {
 
 export interface LlmClient {
   complete(system: string, user: string, model: string, opts?: { maxTokens?: number }): Promise<string>;
+  /** Same, with images alongside the text. Used by the Telegram assistant to read screenshots. */
+  completeWithImages?(system: string, user: string, images: LlmImage[], model: string, opts?: { maxTokens?: number }): Promise<string>;
+}
+
+/** An image for a vision call: the raw bytes base64-encoded, plus its media type. */
+export interface LlmImage {
+  mediaType: string;
+  dataBase64: string;
 }
 
 /** Minimal Anthropic Messages API client (fetch-based; mocked in tests). */
@@ -54,6 +62,31 @@ export function anthropicFromEnv(env = process.env, fetchImpl: typeof fetch = fe
       if (!res.ok) {
         // Surface the API's own reason (type + message, never the key) so a
         // failed enrichment or draft is diagnosable from its history row.
+        let reason = "";
+        try {
+          const err = (await res.json()) as { error?: { type?: string; message?: string } };
+          reason = [err.error?.type, err.error?.message].filter(Boolean).join(": ");
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new Error(`Anthropic API: HTTP ${res.status}${reason ? ` — ${reason.slice(0, 200)}` : ""}`);
+      }
+      const body = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+      return body.content?.find((c) => c.type === "text")?.text ?? "";
+    },
+
+    async completeWithImages(system, user, images, model, opts) {
+      const content = [
+        ...images.map((img) => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.dataBase64 } })),
+        { type: "text", text: user },
+      ];
+      const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model, max_tokens: opts?.maxTokens ?? 1024, system, messages: [{ role: "user", content }] }),
+        signal: AbortSignal.timeout(90_000),
+      });
+      if (!res.ok) {
         let reason = "";
         try {
           const err = (await res.json()) as { error?: { type?: string; message?: string } };

@@ -15,6 +15,7 @@
     "@biolinx/drafting": "workspace:*",
     "@biolinx/instantly": "workspace:*",
     "@biolinx/jobs": "workspace:*",
+    "@biolinx/notify": "workspace:*",
     "@biolinx/scraping": "workspace:*",
     "@fastify/cookie": "^11.0.1",
     "@fastify/cors": "^10.0.1",

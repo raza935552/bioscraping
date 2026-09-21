@@ -4,6 +4,7 @@
 // never in logs or the repo.
 
 import {
+  bigint,
   boolean,
   date,
   datetime,
@@ -359,6 +360,42 @@ export const signups = mysqlTable("signups", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [uniqueIndex("signups_email").on(t.emailNormalized)]);
+
+/** A change somebody asked for in Telegram, kept so nothing said in a chat is lost. */
+export const tasks = mysqlTable("tasks", {
+  id: id(),
+  source: varchar("source", { length: 16 }).default("telegram").notNull(),
+  chatId: varchar("chat_id", { length: 32 }),
+  chatTitle: varchar("chat_title", { length: 160 }),
+  askedBy: varchar("asked_by", { length: 120 }),
+  askedByUsername: varchar("asked_by_username", { length: 120 }),
+  kind: varchar("kind", { length: 16 }).default("change").notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  detail: text("detail"),
+  reply: text("reply"),
+  /** True when the assistant argued back: the request was risky, or already solved another way. */
+  pushedBack: boolean("pushed_back").default(false).notNull(),
+  status: varchar("status", { length: 16 }).default("open").notNull(),
+  closedByUserId: int("closed_by_user_id"),
+  closedAt: datetime("closed_at"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [index("tasks_status").on(t.status), index("tasks_created").on(t.createdAt)]);
+
+/** Every Telegram exchange: what was asked, what was answered, whether a model was used. */
+export const telegramLog = mysqlTable("telegram_log", {
+  id: id(),
+  chatId: varchar("chat_id", { length: 32 }).notNull(),
+  chatTitle: varchar("chat_title", { length: 160 }),
+  askedBy: varchar("asked_by", { length: 120 }),
+  updateId: bigint("update_id", { mode: "number" }),
+  question: text("question"),
+  answer: text("answer"),
+  kind: varchar("kind", { length: 16 }),
+  taskId: int("task_id"),
+  usedAi: boolean("used_ai").default(false).notNull(),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex("telegram_update").on(t.updateId), index("telegram_chat").on(t.chatId), index("telegram_created").on(t.createdAt)]);
 
 /** Mirror of the iDev roster + our classification + referral expiry tracking. */
 export const affiliates = mysqlTable("affiliates", {

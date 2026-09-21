@@ -16,6 +16,7 @@ import { Swipe } from "./pages/Swipe.js";
 import { Templates } from "./pages/Templates.js";
 import { Outreach } from "./pages/Outreach.js";
 import { Team } from "./pages/Team.js";
+import { Requests } from "./pages/Requests.js";
 import { ToastHost } from "./toast.js";
 
 const WIDE_ROUTES = new Set(["/leads", "/swipe"]);
@@ -33,6 +34,7 @@ const NAV_TITLE: Record<string, string> = {
   "/approvals": "Send messages",
   "/email": "Email ops",
   "/replies": "Replies",
+  "/requests": "Requests",
   "/signups": "Signups",
   "/affiliates": "Affiliates",
   "/activity": "Activity",
@@ -117,6 +119,7 @@ export function App() {
     ["/approvals", "Send messages", "✉️"],
     ["/email", "Email ops", "📮"],
     ["/replies", "Replies", "💬"],
+    ...(me.role === "admin" || me.role === "ops" ? ([["/requests", "Requests", "📥"]] as const) : []),
     ["/signups", "Signups", "✍️"],
     ["/affiliates", "Affiliates", "🤝"],
     ["/activity", "Activity", "🕡"],
@@ -144,6 +147,8 @@ export function App() {
         return <Email />;
       case "/replies":
         return <Replies />;
+      case "/requests":
+        return <Requests me={me} />;
       case "/signups":
         return <Signups me={me} />;
       case "/affiliates":
