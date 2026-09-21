@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { assistantConfigFromEnv, classifyMessage, cleanQuestion, shouldAnswer } from "../src/telegram/assistant.js";
+import { assistantConfigFromEnv, cleanQuestion, shouldAnswer, splitTaskTag } from "../src/telegram/assistant.js";
 import { SYSTEM_BRIEF } from "../src/telegram/brief.js";
 import { MAX_IMAGE_BYTES, imageRefOf, pickPhoto } from "../src/telegram/files.js";
-import { fastAnswer } from "../src/telegram/fast-answers.js";
 import { snapshotLines, type Snapshot } from "../src/telegram/snapshot.js";
 
 
@@ -40,13 +39,16 @@ describe("telegram assistant", () => {
     expect(shouldAnswer(msg({ ...photo, chat: { id: -100, type: "group" }, caption: "@biolinxbot what is this" }), "biolinxbot")).toBe(true);
   });
 
-  it("separates a question from a request that needs a person", () => {
-    expect(classifyMessage("how many affiliates do we have?")).toBe("question");
-    expect(classifyMessage("is the scrape running")).toBe("question");
-    expect(classifyMessage("can you add a report of sales per affiliate")).toBe("change");
-    expect(classifyMessage("we need the leads page to show the country")).toBe("change");
-    expect(classifyMessage("the outreach page is not working")).toBe("bug");
-    expect(classifyMessage("idea: what if we recruited doctors")).toBe("idea");
+  it("takes the task out of the reply, and leaves an ordinary answer alone", () => {
+    // The model marks a request itself; keyword rules used to get this wrong on real messages.
+    const tagged = splitTaskTag("Not safely, here is why.\n\n[[task: look at auto-DM options for TikTok]]");
+    expect(tagged.task).toBe("look at auto-DM options for TikTok");
+    expect(tagged.reply).toBe("Not safely, here is why.");
+    const plain = splitTaskTag("43 of 100 external affiliates.");
+    expect(plain.task).toBeNull();
+    expect(plain.reply).toBe("43 of 100 external affiliates.");
+    // A tag in the middle of a sentence is not a task marker.
+    expect(splitTaskTag("the [[task: x]] is mid sentence here").task).toBeNull();
   });
 
   it("strips the mention and the command from the question", () => {
@@ -86,6 +88,9 @@ describe("telegram assistant", () => {
     expect(SYSTEM_BRIEF).toMatch(/positively/i);
     expect(SYSTEM_BRIEF).toMatch(/research use only/i);
     expect(SYSTEM_BRIEF).toMatch(/screenshot/i);
+    // The model, not a keyword rule, decides what becomes a task.
+    expect(SYSTEM_BRIEF).toContain("[[task:");
+    expect(SYSTEM_BRIEF).toMatch(/talk like a person/i);
   });
 
   it("turns the snapshot into lines with every number a person asks for", () => {
@@ -95,30 +100,5 @@ describe("telegram assistant", () => {
     expect(lines).toContain("109 waiting for review");
     expect(lines).toContain("+11 for $2.82");
     expect(lines).toContain("add a sales report");
-  });
-
-  it("answers the everyday questions from the database, with no model call", () => {
-    const ask = (q: string, hasHistory = false) => fastAnswer(q, SNAP, { hasHistory });
-    expect(ask("how many affiliates do we have?")?.text).toContain("43 of 100");
-    expect(ask("how many leads are waiting for review")?.text).toContain("109 leads waiting");
-    expect(ask("is the scrape running?")?.text).toContain("every night");
-    expect(ask("how many signups so far")?.text).toContain("3 sign-ups");
-    expect(ask("what's slowing us down")?.text).toMatch(/109 leads waiting for a yes or no/);
-    expect(ask("how many competitors do we search")?.text).toContain("43 competitor brands");
-    expect(ask("any open requests?")?.text).toContain("add a sales report");
-  });
-
-  it("hands anything conversational or layered to the model instead", () => {
-    const ask = (q: string, hasHistory = false) => fastAnswer(q, SNAP, { hasHistory });
-    // A follow-up only means something against what was said before.
-    expect(ask("and how many of those are in the US?", true)).toBeNull();
-    expect(ask("why is that so slow?", true)).toBeNull();
-    // Two questions at once, or a long one, deserve written prose.
-    expect(ask("how many affiliates do we have? and how many leads are waiting?")).toBeNull();
-    expect(ask("can you explain how the sourcing works and why we search competitor codes instead of hashtags, in detail")).toBeNull();
-    // Nothing it recognises.
-    expect(ask("what did jakob say about the aro lander")).toBeNull();
-    // Without history, a question starting with a follow-up word is still answerable.
-    expect(ask("so how many affiliates do we have?")?.text).toContain("43 of 100");
   });
 });

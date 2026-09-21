@@ -18,7 +18,6 @@ export * from "./telegram/assistant.js";
 export * from "./telegram/snapshot.js";
 export * from "./telegram/brief.js";
 export * from "./telegram/files.js";
-export * from "./telegram/fast-answers.js";
 export * from "./content/biolinx-client.js";
 export * from "./content/content-rules.js";
 export * from "./content/post-writer.js";

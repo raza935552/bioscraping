@@ -9,16 +9,15 @@ import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { schema, type Db } from "@biolinx/db";
 import type { LlmClient, LlmImage, LlmTurn } from "@biolinx/drafting";
 import { imageRefOf, type ImageFetcher, type TelegramMessageFiles } from "./files.js";
-import { REQUEST_GUIDANCE, STYLE_EXAMPLES, SYSTEM_BRIEF } from "./brief.js";
-import { fastAnswer } from "./fast-answers.js";
+import { STYLE_EXAMPLES, SYSTEM_BRIEF } from "./brief.js";
 import { snapshotLines, systemSnapshot } from "./snapshot.js";
 
 export const ASSISTANT_MODEL = "claude-sonnet-5";
 export const DEFAULT_DAILY_ANSWERS = 120;
 /** How many earlier exchanges in this chat the assistant is reminded of. A chat is one long
  *  conversation, so "and how many of those are in the US?" has to know what "those" were. */
-export const MEMORY_TURNS = 8;
-const MEMORY_CHARS = 700;
+export const MEMORY_TURNS = 20;
+const MEMORY_CHARS = 1200;
 
 /** The recent back-and-forth in this chat, oldest first, as model turns. */
 export async function chatHistory(db: Db, chatId: string, limit = MEMORY_TURNS): Promise<LlmTurn[]> {
@@ -74,23 +73,15 @@ export function assistantConfigFromEnv(env = process.env): AssistantConfig {
 
 export type MessageKind = "question" | "change" | "bug" | "idea";
 
-const REQUEST_WORDS = [
-  /\b(can|could|would) (you|we|u)\b.*\b(add|build|make|change|create|set up|setup|enable|turn on|turn off|remove|fix)\b/i,
-  /\b(please|pls|plz)\b.*\b(add|build|make|change|create|fix|send|set)\b/i,
-  /\b(we|i) (need|want|should)\b/i,
-  /\b(add|build|create|implement|integrate|automate)\b.*\b(feature|page|button|report|system|bot|tool)\b/i,
-  /\blet'?s (add|build|do|make|try)\b/i,
-];
-const BUG_WORDS = [/\b(broken|not working|doesn'?t work|does not work|error|failing|failed|bug|stuck|wrong)\b/i];
-const IDEA_WORDS = [/\b(idea|what if|maybe we|thinking about|proposal|suggestion)\b/i];
+/** The model ends a reply with "[[task: title]]" when there is something for Raza. Keyword rules used
+ *  to decide this and got it wrong on real messages: "what review lets accept all the leads so
+ *  outreach starts" was read as an outreach question (2026-09-21). The model reads the sentence. */
+const TASK_TAG = /\n*\[\[\s*task\s*:\s*([^\]]{3,200}?)\s*\]\]\s*$/i;
 
-/** Question, or something that needs a person? Keywords only: cheap, predictable, and overridable. */
-export function classifyMessage(text: string): MessageKind {
-  const t = text.trim();
-  if (BUG_WORDS.some((r) => r.test(t))) return "bug";
-  if (REQUEST_WORDS.some((r) => r.test(t))) return "change";
-  if (IDEA_WORDS.some((r) => r.test(t))) return "idea";
-  return "question";
+export function splitTaskTag(answer: string): { reply: string; task: string | null } {
+  const m = TASK_TAG.exec(answer);
+  if (!m) return { reply: answer.trim(), task: null };
+  return { reply: answer.replace(TASK_TAG, "").trim(), task: m[1]!.trim() };
 }
 
 /** In a group the bot stays quiet unless spoken to; in a private chat every message is for it. */
@@ -220,7 +211,6 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
     return { reply, usedAi: false, reason: "daily cap" };
   }
 
-  const kind = classifyMessage(question);
   const snapshot = await systemSnapshot(db, now);
   const images: LlmImage[] = [];
   if (imageRef && deps.fetchImage) {
@@ -229,27 +219,16 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
   }
   const history = await chatHistory(db, chatId);
 
-  // The everyday questions are answered straight from the database: instant, free, same words every
-  // time. A screenshot, a request, or anything that leans on the conversation goes to the model.
-  if (kind === "question" && images.length === 0 && !imageRef) {
-    const fast = fastAnswer(question, snapshot, { hasHistory: history.length > 0 });
-    if (fast) {
-      await log(fast.text, "question", undefined, false);
-      return { reply: fast.text, kind: "question", usedAi: false, reason: `fast:${fast.intent}` };
-    }
-  }
-
   // ── The answer ─────────────────────────────────────────────────────────
   let answer: string;
   let usedAi = false;
   if (!deps.llm) {
     answer = "I can't write an answer right now (the writing service isn't configured), but here are the current numbers:\n\n" + snapshotLines(snapshot);
   } else {
-    const system = [SYSTEM_BRIEF, "", "EXAMPLES OF THE RIGHT TONE", STYLE_EXAMPLES, ...(kind === "question" ? [] : ["", REQUEST_GUIDANCE])].join("\n");
+    const system = [SYSTEM_BRIEF, "", "EXAMPLES OF THE RIGHT TONE", STYLE_EXAMPLES].join("\n");
     const user = [
       `Asked by ${askedBy}${chatTitle ? ` in ${chatTitle}` : ""}.`,
       ...(history.length > 0 ? ["This is the same running conversation as the messages above; earlier questions and your answers are there."] : []),
-      `This message is a ${kind === "question" ? "question" : `request of kind "${kind}"`}.`,
       ...(images.length > 0 ? ["They attached a screenshot. Read it and answer about what it shows."] : []),
       ...(imageRef && images.length === 0 ? ["They attached an image that could not be downloaded. Say so briefly and answer what you can."] : []),
       "",
@@ -275,8 +254,11 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
   }
 
   // ── Log anything that needs a person ───────────────────────────────────
+  const { reply: cleanReply, task } = splitTaskTag(answer);
+  answer = cleanReply;
   let taskId: number | undefined;
-  if (kind !== "question") {
+  let kind: MessageKind = task ? "change" : "question";
+  if (task) {
     const pushedBack = /\b(cannot|can't|not safely|instead|does not work|won'?t work|risk)\b/i.test(answer);
     const [ins] = await db
       .insert(schema.tasks)
@@ -287,15 +269,14 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
         askedBy: askedBy.slice(0, 120),
         askedByUsername: m!.from?.username?.slice(0, 120) ?? null,
         kind,
-        title: (question || "screenshot with no words").slice(0, 200),
+        title: task.slice(0, 200),
         detail: (rawText + (imageRef ? "\n[screenshot attached]" : "")).slice(0, 4000),
         reply: answer.slice(0, 4000),
         pushedBack,
       })
       .$returningId();
     taskId = ins!.id;
-    if (!/logged/i.test(answer)) answer += `\n\nLogged for Raza as #${taskId}.`;
-    else answer += ` (#${taskId})`;
+    answer += `\n\nLogged for Raza as #${taskId}.`;
   }
 
   await log(answer, kind, taskId, usedAi);
