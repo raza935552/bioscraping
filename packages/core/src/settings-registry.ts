@@ -124,6 +124,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
       { key: "TELEGRAM_WEBHOOK_SECRET", label: "Webhook secret", kind: "secret", help: "Any long random string. Telegram sends it back on every update, and anything without it is refused." },
       { key: "TELEGRAM_ALLOWED_CHATS", label: "Chats allowed to ask", kind: "text", placeholder: "-1001234567890, 987654321", help: "Comma-separated chat IDs. Blank = only the alert chat above." },
       { key: "TELEGRAM_DAILY_ANSWERS", label: "Answers per day", kind: "number", placeholder: "120", help: "Cap on answers that use the writing model. /status and /tasks are free and never capped." },
+      { key: "TELEGRAM_ASSISTANT_EFFORT", label: "How hard it thinks", kind: "text", placeholder: "high", help: "low, medium, high, xhigh or max. Higher is better and slower. Blank = high." },
     ],
   },
   {

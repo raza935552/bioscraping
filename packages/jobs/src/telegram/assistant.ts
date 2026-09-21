@@ -21,8 +21,6 @@ export const DEFAULT_DAILY_ANSWERS = 120;
 /** Sonnet thinks before it writes and that thinking comes out of the same budget: at 700 a real
  *  answer was cut off mid-sentence (live, 2026-09-21). Only what is generated is billed. */
 export const ANSWER_TOKENS = 2500;
-/** A chat reply should land in seconds; medium keeps Opus quick without making it careless. */
-export const ANSWER_EFFORT = "medium" as const;
 export const MEMORY_TURNS = 20;
 const MEMORY_CHARS = 1200;
 
@@ -308,7 +306,7 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
       const turns: LlmTurn[] = [...history, { role: "user", text: user, ...(images.length > 0 ? { images } : {}) }];
       answer = (
         deps.llm.completeChat
-          ? await deps.llm.completeChat(system, turns, cfg.model, { maxTokens: ANSWER_TOKENS, effort: ANSWER_EFFORT })
+          ? await deps.llm.completeChat(system, turns, cfg.model, { maxTokens: ANSWER_TOKENS, effort: "high" })
           : images.length > 0 && deps.llm.completeWithImages
             ? await deps.llm.completeWithImages(system, user, images, cfg.model, { maxTokens: ANSWER_TOKENS })
             : await deps.llm.complete(system, user, cfg.model, { maxTokens: ANSWER_TOKENS })

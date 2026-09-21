@@ -16,12 +16,22 @@ const DENIED_TOOLS = [
 
 export const CLAUDE_BIN = "/root/.local/bin/claude";
 
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type AssistantEffort = (typeof EFFORT_LEVELS)[number];
+export const DEFAULT_EFFORT: AssistantEffort = "high";
+
+/** Setting TELEGRAM_ASSISTANT_EFFORT, so this is tuned without a deploy. */
+export function effortFromEnv(env = process.env): AssistantEffort {
+  const want = String(env.TELEGRAM_ASSISTANT_EFFORT ?? "").trim().toLowerCase();
+  return (EFFORT_LEVELS as readonly string[]).includes(want) ? (want as AssistantEffort) : DEFAULT_EFFORT;
+}
+
 export interface ClaudeCliOptions {
   bin?: string;
   model?: string;
   timeoutMs?: number;
-  /** Chat replies do not need maximum deliberation; medium keeps them a few seconds quicker. */
-  effort?: "low" | "medium" | "high";
+  /** How hard it thinks before replying. Higher is better and slower; set in Settings. */
+  effort?: AssistantEffort;
   /** Where the CLI runs. A directory with nothing in it keeps project files out of its context. */
   cwd?: string;
 }
@@ -40,7 +50,7 @@ export function claudeCli(opts: ClaudeCliOptions = {}): ClaudeCli {
   const model = opts.model ?? "opus";
   const timeout = opts.timeoutMs ?? 120_000;
   const cwd = opts.cwd ?? "/tmp";
-  const effort = opts.effort ?? "medium";
+  const effort = opts.effort ?? effortFromEnv();
   return {
     ask(system, prompt) {
       return new Promise((resolve, reject) => {
