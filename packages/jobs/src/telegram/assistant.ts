@@ -165,13 +165,13 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
     return { reply, usedAi: false };
   }
 
-  if (command === "status") {
+  if (command === "status" && !question) {
     const reply = snapshotLines(await systemSnapshot(db, now));
     await log(reply, "question", undefined, false);
     return { reply, kind: "question", usedAi: false };
   }
 
-  if (command === "tasks") {
+  if (command === "tasks" && !question) {
     const open = await db.select().from(schema.tasks).where(eq(schema.tasks.status, "open")).orderBy(desc(schema.tasks.id)).limit(15);
     const reply = open.length === 0
       ? "Nothing open. Everything asked for in here has been dealt with."
