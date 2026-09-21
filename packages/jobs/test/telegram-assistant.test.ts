@@ -2,7 +2,20 @@ import { describe, expect, it } from "vitest";
 import { assistantConfigFromEnv, classifyMessage, cleanQuestion, shouldAnswer } from "../src/telegram/assistant.js";
 import { SYSTEM_BRIEF } from "../src/telegram/brief.js";
 import { MAX_IMAGE_BYTES, imageRefOf, pickPhoto } from "../src/telegram/files.js";
+import { fastAnswer } from "../src/telegram/fast-answers.js";
 import { snapshotLines, type Snapshot } from "../src/telegram/snapshot.js";
+
+
+const SNAP: Snapshot = {
+  takenAt: "2026-09-21T00:00:00Z",
+  goal: { target: 100, external: 43, unclassified: 4, internal: 16, daysToBlackFriday: 67 },
+  leads: { total: 625, sourced: 213, accepted: 57, pendingReview: 109, rejected: 47, withCompetitor: 312 },
+  sourcing: { competitorsActive: 43, lastRunAt: "2026-09-20", lastRunAdded: 11, lastRunCostUsd: 2.82, nightly: [{ day: "2026-09-20", added: 11, costUsd: 2.82 }] },
+  outreach: { queueNew: 42, repliesToAnswer: 1, checkinsDue: 0, waitingForReply: 3, messagesSent: 3, repliesLogged: 2 },
+  signups: { total: 3, pending: 0 },
+  content: { sourcePostsBanked: 95, drafts: 2, sent: 1 },
+  tasks: { open: 2, lastTitles: ["add a sales report"] },
+};
 
 const msg = (over: Record<string, unknown> = {}) => ({
   update_id: 1,
@@ -76,20 +89,36 @@ describe("telegram assistant", () => {
   });
 
   it("turns the snapshot into lines with every number a person asks for", () => {
-    const s: Snapshot = {
-      takenAt: "2026-09-21T00:00:00Z",
-      goal: { target: 100, external: 43, unclassified: 4, internal: 16, daysToBlackFriday: 67 },
-      leads: { total: 625, sourced: 213, accepted: 57, pendingReview: 109, rejected: 47, withCompetitor: 312 },
-      sourcing: { competitorsActive: 43, lastRunAt: "2026-09-20", lastRunAdded: 11, lastRunCostUsd: 2.82, nightly: [{ day: "2026-09-20", added: 11, costUsd: 2.82 }] },
-      outreach: { queueNew: 42, repliesToAnswer: 1, checkinsDue: 0, waitingForReply: 3, messagesSent: 3, repliesLogged: 2 },
-      signups: { total: 3, pending: 0 },
-      content: { sourcePostsBanked: 95, drafts: 2, sent: 1 },
-      tasks: { open: 2, lastTitles: ["add a sales report"] },
-    };
+    const s = SNAP;
     const lines = snapshotLines(s);
     expect(lines).toContain("43 of 100 external affiliates");
     expect(lines).toContain("109 waiting for review");
     expect(lines).toContain("+11 for $2.82");
     expect(lines).toContain("add a sales report");
+  });
+
+  it("answers the everyday questions from the database, with no model call", () => {
+    const ask = (q: string, hasHistory = false) => fastAnswer(q, SNAP, { hasHistory });
+    expect(ask("how many affiliates do we have?")?.text).toContain("43 of 100");
+    expect(ask("how many leads are waiting for review")?.text).toContain("109 leads waiting");
+    expect(ask("is the scrape running?")?.text).toContain("every night");
+    expect(ask("how many signups so far")?.text).toContain("3 sign-ups");
+    expect(ask("what's slowing us down")?.text).toMatch(/109 leads waiting for a yes or no/);
+    expect(ask("how many competitors do we search")?.text).toContain("43 competitor brands");
+    expect(ask("any open requests?")?.text).toContain("add a sales report");
+  });
+
+  it("hands anything conversational or layered to the model instead", () => {
+    const ask = (q: string, hasHistory = false) => fastAnswer(q, SNAP, { hasHistory });
+    // A follow-up only means something against what was said before.
+    expect(ask("and how many of those are in the US?", true)).toBeNull();
+    expect(ask("why is that so slow?", true)).toBeNull();
+    // Two questions at once, or a long one, deserve written prose.
+    expect(ask("how many affiliates do we have? and how many leads are waiting?")).toBeNull();
+    expect(ask("can you explain how the sourcing works and why we search competitor codes instead of hashtags, in detail")).toBeNull();
+    // Nothing it recognises.
+    expect(ask("what did jakob say about the aro lander")).toBeNull();
+    // Without history, a question starting with a follow-up word is still answerable.
+    expect(ask("so how many affiliates do we have?")?.text).toContain("43 of 100");
   });
 });

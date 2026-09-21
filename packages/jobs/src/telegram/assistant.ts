@@ -5,15 +5,40 @@
 // Safety: it only ever reads the engine. The single thing it writes is a task row and its own log.
 // Only allow-listed chats are answered at all, and there is a daily cap on model calls.
 
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { schema, type Db } from "@biolinx/db";
-import type { LlmClient, LlmImage } from "@biolinx/drafting";
+import type { LlmClient, LlmImage, LlmTurn } from "@biolinx/drafting";
 import { imageRefOf, type ImageFetcher, type TelegramMessageFiles } from "./files.js";
 import { REQUEST_GUIDANCE, STYLE_EXAMPLES, SYSTEM_BRIEF } from "./brief.js";
+import { fastAnswer } from "./fast-answers.js";
 import { snapshotLines, systemSnapshot } from "./snapshot.js";
 
 export const ASSISTANT_MODEL = "claude-sonnet-5";
 export const DEFAULT_DAILY_ANSWERS = 120;
+/** How many earlier exchanges in this chat the assistant is reminded of. A chat is one long
+ *  conversation, so "and how many of those are in the US?" has to know what "those" were. */
+export const MEMORY_TURNS = 8;
+const MEMORY_CHARS = 700;
+
+/** The recent back-and-forth in this chat, oldest first, as model turns. */
+export async function chatHistory(db: Db, chatId: string, limit = MEMORY_TURNS): Promise<LlmTurn[]> {
+  const rows = await db
+    .select({ q: schema.telegramLog.question, a: schema.telegramLog.answer })
+    .from(schema.telegramLog)
+    .where(and(eq(schema.telegramLog.chatId, chatId), isNotNull(schema.telegramLog.answer)))
+    .orderBy(desc(schema.telegramLog.id))
+    .limit(limit);
+  const turns: LlmTurn[] = [];
+  for (const r of rows.reverse()) {
+    const q = (r.q ?? "").trim();
+    const a = (r.a ?? "").trim();
+    // The refusal to an unlisted chat is not part of the conversation.
+    if (!q || !a || a.startsWith("I only answer in the BiolinX team chats")) continue;
+    turns.push({ role: "user", text: q.slice(0, MEMORY_CHARS) });
+    turns.push({ role: "assistant", text: a.slice(0, MEMORY_CHARS) });
+  }
+  return turns;
+}
 
 export interface TelegramUpdate {
   update_id?: number;
@@ -202,6 +227,17 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
     const img = await deps.fetchImage(imageRef.fileId, imageRef.mediaType);
     if (img) images.push(img);
   }
+  const history = await chatHistory(db, chatId);
+
+  // The everyday questions are answered straight from the database: instant, free, same words every
+  // time. A screenshot, a request, or anything that leans on the conversation goes to the model.
+  if (kind === "question" && images.length === 0 && !imageRef) {
+    const fast = fastAnswer(question, snapshot, { hasHistory: history.length > 0 });
+    if (fast) {
+      await log(fast.text, "question", undefined, false);
+      return { reply: fast.text, kind: "question", usedAi: false, reason: `fast:${fast.intent}` };
+    }
+  }
 
   // ── The answer ─────────────────────────────────────────────────────────
   let answer: string;
@@ -212,6 +248,7 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
     const system = [SYSTEM_BRIEF, "", "EXAMPLES OF THE RIGHT TONE", STYLE_EXAMPLES, ...(kind === "question" ? [] : ["", REQUEST_GUIDANCE])].join("\n");
     const user = [
       `Asked by ${askedBy}${chatTitle ? ` in ${chatTitle}` : ""}.`,
+      ...(history.length > 0 ? ["This is the same running conversation as the messages above; earlier questions and your answers are there."] : []),
       `This message is a ${kind === "question" ? "question" : `request of kind "${kind}"`}.`,
       ...(images.length > 0 ? ["They attached a screenshot. Read it and answer about what it shows."] : []),
       ...(imageRef && images.length === 0 ? ["They attached an image that could not be downloaded. Say so briefly and answer what you can."] : []),
@@ -223,10 +260,13 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
       question || "(no words, just the screenshot)",
     ].join("\n");
     try {
+      const turns: LlmTurn[] = [...history, { role: "user", text: user, ...(images.length > 0 ? { images } : {}) }];
       answer = (
-        images.length > 0 && deps.llm.completeWithImages
-          ? await deps.llm.completeWithImages(system, user, images, cfg.model, { maxTokens: 700 })
-          : await deps.llm.complete(system, user, cfg.model, { maxTokens: 600 })
+        deps.llm.completeChat
+          ? await deps.llm.completeChat(system, turns, cfg.model, { maxTokens: 700 })
+          : images.length > 0 && deps.llm.completeWithImages
+            ? await deps.llm.completeWithImages(system, user, images, cfg.model, { maxTokens: 700 })
+            : await deps.llm.complete(system, user, cfg.model, { maxTokens: 600 })
       ).trim();
       usedAi = true;
     } catch (e) {
