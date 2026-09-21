@@ -115,15 +115,7 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
   if (!shouldAnswer(update, cfg.botUsername)) return { reply: null, reason: "not addressed to the bot" };
 
   const chatId = String(m!.chat?.id ?? "");
-  // Deny by default. The bot's address is public (anyone can find t.me/<name>), so an unconfigured
-  // allow-list must mean "nobody yet", never "everybody". The chat id is in the refusal so adding a
-  // chat is one paste rather than a hunt through getUpdates.
-  if (!cfg.allowedChats.includes(chatId)) {
-    return {
-      reply: `I only answer in the BiolinX team chats. Ask Raza to add this one — the chat id is ${chatId}.`,
-      reason: "chat not allowed",
-    };
-  }
+  const deniedReply = `I only answer in the BiolinX team chats. Ask Raza to add this one — the chat id is ${chatId}.`;
 
   // Telegram retries an update it thinks failed; the unique index on update_id stops a double answer.
   if (update.update_id != null) {
@@ -151,6 +143,14 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
       usedAi,
     });
   };
+
+  // Deny by default. The bot's address is public (anyone can find t.me/<name>), so an unconfigured
+  // allow-list means "nobody yet", never "everybody". The attempt is logged with its chat id so a
+  // chat can be allowed from the admin instead of by reading somebody's phone.
+  if (!cfg.allowedChats.includes(chatId)) {
+    await log(deniedReply, undefined, undefined, false);
+    return { reply: deniedReply, reason: "chat not allowed" };
+  }
 
   // ── Commands that need no model ────────────────────────────────────────
   if (command === "start" || command === "help") {
