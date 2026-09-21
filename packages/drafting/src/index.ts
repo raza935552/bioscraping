@@ -31,7 +31,7 @@ export interface LlmClient {
   /** Same, with images alongside the text. Used by the Telegram assistant to read screenshots. */
   completeWithImages?(system: string, user: string, images: LlmImage[], model: string, opts?: { maxTokens?: number }): Promise<string>;
   /** A conversation rather than a single question: earlier turns, and images on the last one. */
-  completeChat?(system: string, turns: LlmTurn[], model: string, opts?: { maxTokens?: number }): Promise<string>;
+  completeChat?(system: string, turns: LlmTurn[], model: string, opts?: { maxTokens?: number; effort?: "low" | "medium" | "high" }): Promise<string>;
 }
 
 /** One turn of a conversation. Images belong on a user turn. */
@@ -95,7 +95,13 @@ export function anthropicFromEnv(env = process.env, fetchImpl: typeof fetch = fe
       const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-        body: JSON.stringify({ model, max_tokens: opts?.maxTokens ?? 1024, system, messages }),
+        body: JSON.stringify({
+          model,
+          max_tokens: opts?.maxTokens ?? 1024,
+          system,
+          messages,
+          ...(opts?.effort ? { output_config: { effort: opts.effort } } : {}),
+        }),
         signal: AbortSignal.timeout(90_000),
       });
       if (!res.ok) {

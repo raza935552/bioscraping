@@ -12,10 +12,15 @@ import { imageRefOf, type ImageFetcher, type TelegramMessageFiles } from "./file
 import { STYLE_EXAMPLES, SYSTEM_BRIEF } from "./brief.js";
 import { snapshotLines, systemSnapshot } from "./snapshot.js";
 
-export const ASSISTANT_MODEL = "claude-sonnet-5";
+export const ASSISTANT_MODEL = "claude-opus-5";
 export const DEFAULT_DAILY_ANSWERS = 120;
 /** How many earlier exchanges in this chat the assistant is reminded of. A chat is one long
  *  conversation, so "and how many of those are in the US?" has to know what "those" were. */
+/** Sonnet thinks before it writes and that thinking comes out of the same budget: at 700 a real
+ *  answer was cut off mid-sentence (live, 2026-09-21). Only what is generated is billed. */
+export const ANSWER_TOKENS = 2500;
+/** A chat reply should land in seconds; medium keeps Opus quick without making it careless. */
+export const ANSWER_EFFORT = "medium" as const;
 export const MEMORY_TURNS = 20;
 const MEMORY_CHARS = 1200;
 
@@ -242,10 +247,10 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
       const turns: LlmTurn[] = [...history, { role: "user", text: user, ...(images.length > 0 ? { images } : {}) }];
       answer = (
         deps.llm.completeChat
-          ? await deps.llm.completeChat(system, turns, cfg.model, { maxTokens: 700 })
+          ? await deps.llm.completeChat(system, turns, cfg.model, { maxTokens: ANSWER_TOKENS, effort: ANSWER_EFFORT })
           : images.length > 0 && deps.llm.completeWithImages
-            ? await deps.llm.completeWithImages(system, user, images, cfg.model, { maxTokens: 700 })
-            : await deps.llm.complete(system, user, cfg.model, { maxTokens: 600 })
+            ? await deps.llm.completeWithImages(system, user, images, cfg.model, { maxTokens: ANSWER_TOKENS })
+            : await deps.llm.complete(system, user, cfg.model, { maxTokens: ANSWER_TOKENS })
       ).trim();
       usedAi = true;
     } catch (e) {
