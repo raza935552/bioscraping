@@ -115,8 +115,14 @@ export async function handleTelegramUpdate(db: Db, update: TelegramUpdate, cfg: 
   if (!shouldAnswer(update, cfg.botUsername)) return { reply: null, reason: "not addressed to the bot" };
 
   const chatId = String(m!.chat?.id ?? "");
-  if (cfg.allowedChats.length > 0 && !cfg.allowedChats.includes(chatId)) {
-    return { reply: "I only answer in the BiolinX team chats. Ask Raza to add this chat.", reason: "chat not allowed" };
+  // Deny by default. The bot's address is public (anyone can find t.me/<name>), so an unconfigured
+  // allow-list must mean "nobody yet", never "everybody". The chat id is in the refusal so adding a
+  // chat is one paste rather than a hunt through getUpdates.
+  if (!cfg.allowedChats.includes(chatId)) {
+    return {
+      reply: `I only answer in the BiolinX team chats. Ask Raza to add this one — the chat id is ${chatId}.`,
+      reason: "chat not allowed",
+    };
   }
 
   // Telegram retries an update it thinks failed; the unique index on update_id stops a double answer.

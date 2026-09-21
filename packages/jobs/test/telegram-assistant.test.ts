@@ -43,6 +43,8 @@ describe("telegram assistant", () => {
   });
 
   it("reads the allow-list and the caps from settings", () => {
+    // Deny by default: the bot's address is public, so an empty list means nobody, not everybody.
+    expect(assistantConfigFromEnv({} as never).allowedChats).toEqual([]);
     const cfg = assistantConfigFromEnv({ TELEGRAM_ALLOWED_CHATS: "-100123, 456 -100123", TELEGRAM_BOT_USERNAME: "@biolinxbot", TELEGRAM_DAILY_ANSWERS: "50" } as never);
     expect(cfg.allowedChats).toEqual(["-100123", "456"]);
     expect(cfg.botUsername).toBe("biolinxbot");
