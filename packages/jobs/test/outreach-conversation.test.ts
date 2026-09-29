@@ -15,10 +15,17 @@ describe("outreach flow messages", () => {
     }
   });
 
-  it("a message that still needs a link can't be marked ready", () => {
+  it("sends without an optional link, and still blocks when the message itself is incomplete", () => {
+    // The details link is an extra: its line is dropped rather than stopping the conversation
+    // (an unset link blocked Reply 2 and both check-ins in production, 2026-09-29).
     const r = renderFor("reply2_details", { ...lead, followUpsSent: 1 }, "Amino Club", "Raza", DEFAULT_OUTREACH_SETTINGS, 0);
-    expect(r.missing).toEqual(["details link"]);
-    expect(r.blocked).toBe(true);
+    expect(r.missing).toEqual([]);
+    expect(r.blocked).toBe(false);
+    expect(r.text).not.toContain("[details link]");
+    // The brand is the point of Offer 2, so a message without it is still held back.
+    const noBrand = renderFor("offer2_soft", { ...lead, followUpsSent: 0 }, null, "Raza", DEFAULT_OUTREACH_SETTINGS, 0);
+    expect(noBrand.missing).toContain("brand");
+    expect(noBrand.blocked).toBe(true);
   });
 
   it("summarises a step for the table", () => {
