@@ -242,6 +242,12 @@ export interface RenderVars {
   settings: OutreachSettings;
 }
 
+/** Placeholders whose line is an extra, not the point of the message: a link to more detail, the Aro
+ *  terms. When one of these has no value the line is dropped and the message still sends. Before this,
+ *  an unset details link blocked Reply 2 and both check-ins outright, which stopped the conversation
+ *  dead with a disabled button and no way forward (live, 2026-09-29). */
+const OPTIONAL_PLACEHOLDERS = new Set(["details link", "aro details link", "aro commission", "aro cookie"]);
+
 /** Fills the placeholders the system knows. Others ("[name or nickname]") are part of the copy
  *  and stay. `missing` lists known placeholders with no value, so the message isn't sent half-filled. */
 export function renderTemplate(templateId: TemplateId, vars: RenderVars): { text: string; missing: string[] } {
@@ -258,9 +264,18 @@ export function renderTemplate(templateId: TemplateId, vars: RenderVars): { text
     "aro commission": vars.settings.aroCommission,
     "aro cookie": vars.settings.aroCookie,
   };
+  // A line that only exists to carry an unset optional value is dropped rather than left half-written.
+  const kept = body
+    .split("\n")
+    .filter((line) => {
+      const empties = [...line.matchAll(/\[([a-z ]+)\]/gi)].map((m) => m[1]!.toLowerCase());
+      return !empties.some((k) => OPTIONAL_PLACEHOLDERS.has(k) && !values[k]);
+    })
+    .join("\n");
+
   // "[curiosity gap]." keeps the line's own ending: "want to make more money?" gets no extra full stop.
   const gap = vars.curiosityGap.trim();
-  const withGap = body.replace(/\[curiosity gap\]\.?/gi, (m) => (/[?!.…:]$/.test(gap) || !m.endsWith(".") ? gap : `${gap}.`) || m);
+  const withGap = kept.replace(/\[curiosity gap\]\.?/gi, (m) => (/[?!.…:]$/.test(gap) || !m.endsWith(".") ? gap : `${gap}.`) || m);
   // The gap line may itself hold [brand].
   const fill = (text: string) =>
     text.replace(/\[([a-z ]+)\]/gi, (whole, key: string) => {

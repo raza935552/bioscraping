@@ -59,8 +59,18 @@ describe("templates", () => {
     const signup = renderTemplate("reply1_signup", { ...base, curiosityGap: "x" });
     expect(signup.text).toContain("[name or nickname] + [last name initial] + 10");
     expect(signup.text).toContain("Welcome to the team Jamie!");
-    expect(renderTemplate("reply2_details", { ...base, curiosityGap: "x" }).missing).toEqual(["details link"]);
-    expect(renderTemplate("reply2_details", { ...base, curiosityGap: "x", settings: { ...DEFAULT_OUTREACH_SETTINGS, detailsLink: "https://biolinxlabs.com/affiliates" } }).missing).toEqual([]);
+    // An unset details link drops its line instead of blocking the message: it used to stop Reply 2
+    // and both check-ins from ever being sent (live, 2026-09-29).
+    const noLink = renderTemplate("reply2_details", { ...base, curiosityGap: "x" });
+    expect(noLink.missing).toEqual([]);
+    expect(noLink.text).not.toContain("[details link]");
+    expect(noLink.text).not.toContain("detailed version");
+    expect(noLink.text).toContain("commission rate: 25% on every order");
+    const withLink = renderTemplate("reply2_details", { ...base, curiosityGap: "x", settings: { ...DEFAULT_OUTREACH_SETTINGS, detailsLink: "https://biolinxlabs.com/affiliates" } });
+    expect(withLink.missing).toEqual([]);
+    expect(withLink.text).toContain("(detailed version: https://biolinxlabs.com/affiliates)");
+    // The essential placeholders still block: a message without the brand or the opening line is broken.
+    expect(renderTemplate("offer2_soft", { ...base, curiosityGap: "x", brand: null }).missing).toContain("brand");
   });
   it("edited templates override defaults; junk settings fall back", () => {
     const s = outreachSettings({ templates: { offer1_soft: "hey [first name]", nope: "x" }, gaps: [{ kind: "bad", text: "x" }], checkinDays: 99 });
