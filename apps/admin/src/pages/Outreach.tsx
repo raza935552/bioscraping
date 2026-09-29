@@ -66,13 +66,14 @@ export function Outreach({ me }: { me: Me }) {
 
   const c = work?.counts;
   const lead = work?.lead ?? null;
+  const queueLeft = (c?.answer ?? 0) + (c?.checkin ?? 0) + (c?.new ?? 0);
 
   return (
     <div className="outreach-page">
       <div className="outreach-progress">
         <span><strong>{c?.sentTodayByMe ?? 0}</strong> sent by you today</span>
         <span className="sep" />
-        <span>{(c?.answer ?? 0) + (c?.checkin ?? 0) + (c?.new ?? 0)} left in the queue</span>
+        <span>{queueLeft} left to send</span>
         {(c?.answer ?? 0) > 0 && <span className="chip ok">{c!.answer} replied, answer first</span>}
         {(c?.checkin ?? 0) > 0 && <span className="chip unresolved">{c!.checkin} follow-up due</span>}
       </div>
@@ -90,8 +91,16 @@ export function Outreach({ me }: { me: Me }) {
       </p>
 
       <PageHeader title="Outreach">
-        <button className={tab === "next" ? "primary" : ""} onClick={() => setTab("next")}>Next up</button>
-        <button className={tab === "waiting" ? "primary" : ""} onClick={() => setTab("waiting")}>Waiting for reply ({c?.waiting ?? 0})</button>
+        {/* Tabs, not actions: "Next up" looked like a button that fetches the next lead, so people
+            pressed it on the tab they were already on and nothing happened (2026-09-29). */}
+        <div className="tabs" role="tablist" aria-label="Outreach views">
+          <button role="tab" aria-selected={tab === "next"} className={tab === "next" ? "on" : ""} onClick={() => setTab("next")}>
+            Next up{queueLeft > 0 ? ` · ${queueLeft}` : ""}
+          </button>
+          <button role="tab" aria-selected={tab === "waiting"} className={tab === "waiting" ? "on" : ""} onClick={() => setTab("waiting")}>
+            Waiting for reply · {c?.waiting ?? 0}
+          </button>
+        </div>
         {skipped.length > 0 && (
           <button onClick={() => { setSkipped([]); void load([]); }} title="Bring back the leads you skipped">Show skipped again ({skipped.length})</button>
         )}
@@ -242,9 +251,19 @@ function LeadCard({
               .join(" · ")}
           </div>
         </div>
-        <span className={`chip ${work.next!.bucket === "answer" ? "ok" : work.next!.bucket === "checkin" ? "unresolved" : "internal"}`}>
-          {BUCKET_LABEL[work.next!.bucket]}
-        </span>
+        <div className="lead-head-right">
+          <span className={`chip ${work.next!.bucket === "answer" ? "ok" : work.next!.bucket === "checkin" ? "unresolved" : "internal"}`}>
+            {BUCKET_LABEL[work.next!.bucket]}
+          </span>
+          <button
+            className="skip-top"
+            disabled={busy}
+            title="Leave this one and load the next conversation"
+            onClick={() => { void api.outreachRelease(lead.id).catch(() => {}); onSkip(); }}
+          >
+            Skip for now →
+          </button>
+        </div>
       </div>
       <p className="lead-task">{BUCKET_TASK[work.next!.bucket]}</p>
       {lead.competitor && (
