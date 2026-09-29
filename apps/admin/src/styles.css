@@ -413,6 +413,20 @@ table.sourced .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 90px
 .page-header { margin-bottom: 14px; }
 .page-header h1 { font-size: 24px; }
 
+/* Outreach: the person being contacted is the top of the page, then why, then the message. */
+.outreach-intro { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 0 0 12px; max-width: 62ch; }
+.outreach-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.outreach-progress strong { color: var(--ink); font-size: 15px; }
+.outreach-progress .sep { width: 1px; height: 14px; background: var(--line); }
+.lead-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.lead-name { margin: 0; font-size: 23px; letter-spacing: -0.02em; line-height: 1.15; }
+.lead-facts { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.lead-task { font-size: 14px; margin: 10px 0 8px; }
+.lead-why { background: var(--surface-2); border-radius: 10px; padding: 9px 12px; font-size: 13px; margin-bottom: 4px; }
+.lead-why .bubble-quote { margin-top: 5px; }
+/* Always say what the button will do, or why it can't; a tooltip is not an explanation. */
+.action-note { flex: 1 1 100%; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
 /* The 20 seconds of real engagement before the first DM. */
 .warmup { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
 .warmup .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; margin-bottom: 6px; }

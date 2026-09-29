@@ -69,11 +69,22 @@ class ApiError extends Error {
   }
 }
 
+/** A session lasts a week. When it ends, every button quietly stops working unless someone is told,
+ *  so the app hears about it here and asks the person to sign in again. */
+let onSessionEnded: (() => void) | null = null;
+export function handleSessionEnd(fn: () => void): void {
+  onSessionEnded = fn;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const merged: RequestInit = { credentials: "same-origin", ...init };
   if (init?.body) merged.headers = { "content-type": "application/json" };
   const res = await fetch(path, merged);
   const body = (await res.json().catch(() => ({}))) as { error?: string };
+  if (res.status === 401) {
+    onSessionEnded?.();
+    throw new ApiError(401, "Your session ended. Sign in again.");
+  }
   if (!res.ok) throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
   return body as T;
 }

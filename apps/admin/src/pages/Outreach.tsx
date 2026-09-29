@@ -9,9 +9,16 @@ import { api, type Me, type OutreachWork, type ReplySuggestion } from "../api.js
 import { REPLY_OPTIONS, channelFor, compact, copyText, splitName, suggestCode, type ReplyKind } from "../outreachShared.js";
 
 const BUCKET_LABEL: Record<string, string> = {
-  answer: "They replied: send the next message",
-  checkin: "No reply yet: send a check-in",
-  new: "New lead: send the first message",
+  answer: "They replied",
+  checkin: "Follow-up due",
+  new: "New lead",
+};
+
+/** The sentence under the name: what this person needs from you right now. */
+const BUCKET_TASK: Record<string, string> = {
+  answer: "They answered you. The reply below is what goes back to them.",
+  checkin: "They went quiet. This is the nudge, and the last one they get.",
+  new: "Nobody has contacted them yet. This is the first message.",
 };
 
 type SignupDetails = ReplySuggestion["details"];
@@ -62,11 +69,12 @@ export function Outreach({ me }: { me: Me }) {
 
   return (
     <div className="outreach-page">
-      <div className="outreach-counts">
-        <div><strong>{c?.sentTodayByMe ?? 0}</strong> sent by you today</div>
-        <div><strong>{c?.answer ?? 0}</strong> replies to answer</div>
-        <div><strong>{c?.checkin ?? 0}</strong> check-ins due</div>
-        <div><strong>{c?.new ?? 0}</strong> new leads</div>
+      <div className="outreach-progress">
+        <span><strong>{c?.sentTodayByMe ?? 0}</strong> sent by you today</span>
+        <span className="sep" />
+        <span>{(c?.answer ?? 0) + (c?.checkin ?? 0) + (c?.new ?? 0)} left in the queue</span>
+        {(c?.answer ?? 0) > 0 && <span className="chip ok">{c!.answer} replied, answer first</span>}
+        {(c?.checkin ?? 0) > 0 && <span className="chip unresolved">{c!.checkin} follow-up due</span>}
       </div>
 
       {(c?.importedNew ?? 0) > 0 && me.role !== "operator" && (
@@ -75,6 +83,11 @@ export function Outreach({ me }: { me: Me }) {
           anyone wants to work through them.
         </p>
       )}
+
+      <p className="outreach-intro">
+        One person at a time. Copy the message, send it from your own account, then press <strong>I sent it</strong> and
+        the next lead appears. Nothing here sends anything by itself.
+      </p>
 
       <PageHeader title="Outreach">
         <button className={tab === "next" ? "primary" : ""} onClick={() => setTab("next")}>Next up</button>
@@ -184,7 +197,11 @@ function LeadCard({
       void api.outreachCheck(lead.id, text, message.templateId).then((r) => {
         if (stale) return;
         setCheck({ blocked: r.blocked, problems: [...r.placeholders.map((p) => `Fill in [${p}] (ask an admin to set it on Message templates, or type it in).`), ...r.violations.map((v) => v.detail), ...(text.trim().length < 5 ? ["The message is empty."] : [])] });
-      }).catch(() => {});
+      }).catch((e) => {
+        // Swallowing this left the button disabled with nothing on screen to explain it.
+        if (stale) return;
+        setCheck({ blocked: false, problems: [`Couldn't check this message just now (${(e as Error).message}). Read it yourself before you send it.`] });
+      });
     }, 350);
     return () => {
       stale = true;
@@ -216,17 +233,26 @@ function LeadCard({
 
   return (
     <div className="outreach-card">
-      <div className="muted" style={{ fontSize: 12.5 }}>{BUCKET_LABEL[work.next!.bucket]}</div>
-      <h2 style={{ margin: "4px 0" }}>
-        {handleLabel}{" "}
-        <span className="muted" style={{ fontWeight: 400, fontSize: 15 }}>
-          · {lead.platform ?? ""}{lead.followers != null ? ` · ${compact(lead.followers)} followers` : ""}
+      <div className="lead-head">
+        <div>
+          <h2 className="lead-name">{handleLabel}</h2>
+          <div className="lead-facts">
+            {[lead.platform, lead.followers != null ? `${compact(lead.followers)} followers` : null, lead.country ?? "location unknown"]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+        </div>
+        <span className={`chip ${work.next!.bucket === "answer" ? "ok" : work.next!.bucket === "checkin" ? "unresolved" : "internal"}`}>
+          {BUCKET_LABEL[work.next!.bucket]}
         </span>
-      </h2>
+      </div>
+      <p className="lead-task">{BUCKET_TASK[work.next!.bucket]}</p>
       {lead.competitor && (
-        <div className="muted" style={{ fontSize: 13 }}>
-          Promotes <strong>{lead.competitor}</strong>
-          {lead.code ? <> (code <code>{lead.code}</code>)</> : null}
+        <div className="lead-why">
+          <div>
+            Already promotes <strong>{lead.competitor}</strong>
+            {lead.code ? <> with code <code>{lead.code}</code></> : null}, which is why they are worth asking.
+          </div>
           {lead.evidence && <div className="bubble-quote">“{lead.evidence.quote}”</div>}
         </div>
       )}
@@ -281,6 +307,7 @@ function LeadCard({
             <button
               className="big"
               disabled={check.blocked}
+              title={check.blocked ? "Fix the problem above first" : "Copy this message"}
               onClick={() => void copyText(text, textRef.current).then((ok) => setCopied(ok ? "yes" : "failed"))}
             >
               {copied === "yes" ? "✓ Copied" : "📋 Copy message"}
@@ -305,6 +332,7 @@ function LeadCard({
             <button
               className="primary big"
               disabled={busy || busyLoading || check.blocked}
+              title={check.blocked ? "Fix the problem above first" : "Record it and load the next lead"}
               onClick={() =>
                 void run(async () => {
                   await api.outreachSent(lead.id, { templateId: message.templateId, body: text, channel: noDm && lead.email ? "Email" : channelFor(lead.platform), gapIndex: message.templateId.startsWith("offer") ? conv.gapIndex : null, ...(firstMessage ? { warmUp: warm } : {}) });
@@ -314,6 +342,15 @@ function LeadCard({
             >
               ✅ I sent it → next lead
             </button>
+            <div className="action-note">
+              {check.blocked
+                ? "Fix the problem above before this can be sent."
+                : busyLoading
+                  ? "Loading the next lead…"
+                  : copied === "yes"
+                    ? "Copied. Paste it into the DM, then press I sent it."
+                    : "Copy it, send it in the DM, then press I sent it."}
+            </div>
           </div>
           {conv.messages.length > 1 && (
             <details className="outreach-change">

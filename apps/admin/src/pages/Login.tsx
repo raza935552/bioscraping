@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api.js";
 
-export function Login({ onDone }: { onDone: () => Promise<void> }) {
+export function Login({ onDone, note }: { onDone: () => Promise<void>; note?: string | null }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -25,6 +25,7 @@ export function Login({ onDone }: { onDone: () => Promise<void> }) {
     <div className="auth-shell">
       <form className="auth-card" onSubmit={submit}>
         <h1>⚗️ BiolinX Engine</h1>
+        {note && <div className="notice" style={{ marginBottom: 4 }}>{note}</div>}
         <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <input
           type="password"

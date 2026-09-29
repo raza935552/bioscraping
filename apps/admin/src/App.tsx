@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Me } from "./api.js";
+import { api, handleSessionEnd, type Me } from "./api.js";
 import { AcceptInvite } from "./pages/AcceptInvite.js";
 import { Activity } from "./pages/Activity.js";
 import { Affiliates } from "./pages/Affiliates.js";
@@ -67,6 +67,7 @@ export function App() {
   const [checked, setChecked] = useState(false);
   // How much work is waiting behind each page, so nobody has to open them to find out.
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [endedNote, setEndedNote] = useState(false);
 
   const refreshMe = useCallback(async () => {
     try {
@@ -81,6 +82,16 @@ export function App() {
   useEffect(() => {
     void refreshMe();
   }, [refreshMe]);
+
+  // A tab left open past the week-long session shows the sign-in screen instead of dead buttons.
+  useEffect(() => {
+    handleSessionEnd(() => {
+      setMe((current) => {
+        if (current) setEndedNote(true);
+        return null;
+      });
+    });
+  }, []);
 
   // The browser tab says which page this is and how much is waiting on it.
   useEffect(() => {
@@ -108,7 +119,7 @@ export function App() {
     return <AcceptInvite token={route.split("/")[2] ?? ""} onDone={refreshMe} />;
   }
   if (!checked) return null;
-  if (!me) return <Login onDone={refreshMe} />;
+  if (!me) return <Login onDone={() => { setEndedNote(false); return refreshMe(); }} note={endedNote ? "Your session ended after a week. Sign in again to pick up where you left off." : null} />;
 
   // Outreach people (operator role) see only their page and sign-ups.
   const nav = me.role === "operator" ? ([["/outreach", "Outreach", "💌"], ["/signups", "Signups", "✍️"]] as const) : ([
