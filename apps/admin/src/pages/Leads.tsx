@@ -549,6 +549,22 @@ export function Leads({ me, initialQuery = "" }: { me: Me; initialQuery?: string
                           {l.competitorLinked ?? l.competitor}
                           {l.affiliateCode ? <> · <code>{l.affiliateCode}</code></> : l.currentOffer ? <span className="muted tiny"> · {l.currentOffer}</span> : null}
                         </div>
+                        {(() => {
+                          const cs = l.competitorId != null ? data?.competitorStats?.[String(l.competitorId)] : null;
+                          if (!cs) return null;
+                          return (
+                            <div className="muted tiny" title="What this brand has produced for us so far">
+                              {[
+                                `${cs.leads} ${cs.leads === 1 ? "lead" : "leads"} from this brand`,
+                                cs.signed > 0 ? `${cs.signed} signed` : null,
+                                cs.contacted > 0 ? `${cs.contacted} contacted` : null,
+                                cs.medianFollowers != null ? `typically ${compact(cs.medianFollowers)} followers` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </div>
+                          );
+                        })()}
                         {path && (
                           <span className={`chip ${path.tone === "ok" ? "ok" : path.tone === "bad" ? "failed" : "unresolved"}`} title={path.help}>
                             {path.short}{l.competitorRatePct != null ? ` · pays ${l.competitorRatePct}%` : ""}

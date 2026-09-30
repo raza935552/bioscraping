@@ -14,7 +14,7 @@ import fastifyHelmet from "@fastify/helmet";
 import fastifyStatic from "@fastify/static";
 import fastifyRateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyReply } from "fastify";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, isNotNull } from "drizzle-orm";
 import {
   connect,
   hydrateEnvFromSettings,
@@ -694,6 +694,7 @@ app.get("/api/leads", { preHandler: requireRole("admin", "ops", "rep") }, async 
     page,
     pageSize,
     totalPages: Math.ceil(filtered.length / pageSize),
+    competitorStats: await competitorStats(),
     rows: await (async () => {
       // The outreach flow's next step for each lead on this page (the table bubble shows it).
       const settings = await loadOutreachSettings(db);
@@ -740,6 +741,7 @@ app.get("/api/leads", { preHandler: requireRole("admin", "ops", "rep") }, async 
         const t = dmTargetFor(l, handleKeysByLead.get(l.id));
         return { dmUrl: t?.url ?? null, dmKind: t?.kind ?? null, dmProfileUrl: t?.profileUrl ?? null };
       })(),
+      competitorId: l.competitorId,
       competitorLinked: l.competitorId != null ? competitorById.get(l.competitorId)?.name ?? null : null,
       competitorRatePct: l.competitorId != null ? competitorById.get(l.competitorId)?.commissionPct ?? null : null,
       details: details.get(l.id) ?? null,
@@ -1129,9 +1131,52 @@ function parseAudience(body: Record<string, unknown>): { row: AudienceInsert } |
   };
 }
 
+/** What each competitor brand has actually produced, so the list can be worked instead of read. */
+async function competitorStats(): Promise<Record<number, { leads: number; accepted: number; contacted: number; signed: number; withCode: number; medianFollowers: number | null; lastSeen: string | null }>> {
+  const rows = await db
+    .select({
+      competitorId: schema.leads.competitorId,
+      review: schema.leads.sourcingReview,
+      status: schema.leads.status,
+      code: schema.leads.affiliateCode,
+      reach: schema.leads.totalReach,
+      createdAt: schema.leads.createdAt,
+    })
+    .from(schema.leads)
+    .where(isNotNull(schema.leads.competitorId));
+  const out: Record<number, { leads: number; accepted: number; contacted: number; signed: number; withCode: number; followers: number[]; lastSeen: string | null; medianFollowers: number | null }> = {};
+  for (const r of rows) {
+    const id = r.competitorId!;
+    const s = (out[id] ??= { leads: 0, accepted: 0, contacted: 0, signed: 0, withCode: 0, followers: [], lastSeen: null, medianFollowers: null });
+    s.leads++;
+    if (r.review === "accepted") s.accepted++;
+    if (r.status && !["Not contacted", "Passed"].includes(r.status)) s.contacted++;
+    if (["Signed", "Signed up"].includes(r.status ?? "")) s.signed++;
+    if (r.code) s.withCode++;
+    if (r.reach != null) s.followers.push(r.reach);
+    const at = r.createdAt ? new Date(r.createdAt).toISOString().slice(0, 10) : null;
+    if (at && (!s.lastSeen || at > s.lastSeen)) s.lastSeen = at;
+  }
+  const final: Record<number, { leads: number; accepted: number; contacted: number; signed: number; withCode: number; medianFollowers: number | null; lastSeen: string | null }> = {};
+  for (const [id, s] of Object.entries(out)) {
+    const sorted = s.followers.sort((a, b) => a - b);
+    final[Number(id)] = {
+      leads: s.leads,
+      accepted: s.accepted,
+      contacted: s.contacted,
+      signed: s.signed,
+      withCode: s.withCode,
+      medianFollowers: sorted.length ? sorted[Math.floor(sorted.length / 2)]! : null,
+      lastSeen: s.lastSeen,
+    };
+  }
+  return final;
+}
+
 app.get("/api/audiences", { preHandler: requireRole("admin", "ops") }, async () => ({
   profiles: await db.select().from(schema.sourcingProfiles).orderBy(desc(schema.sourcingProfiles.id)),
   competitors: await db.select().from(schema.competitors).orderBy(schema.competitors.name),
+  competitorStats: await competitorStats(),
   niches: [...NICHE_PRIORITY],
   platforms: [...PLATFORMS],
   defaults: AUDIENCE_DEFAULTS,

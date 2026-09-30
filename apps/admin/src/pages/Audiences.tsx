@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type AudienceProfile, type AudiencesPayload, type Competitor } from "../api.js";
+import { api, type AudienceProfile, type AudiencesPayload, type Competitor, type CompetitorStat } from "../api.js";
 import { PageInfo } from "../components.js";
 import { BRAND_LABEL, NICHE_BRAND, PLATFORM_LABEL, TERM_HELP } from "../labels.js";
+
+/** 8.1K rather than 8,142: the size is the point, not the digits. */
+const compact = (n: number): string =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}K` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 
 export function Audiences() {
   const [data, setData] = useState<AudiencesPayload | null>(null);
@@ -70,7 +74,7 @@ export function Audiences() {
             <tbody>
               {data.profiles.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={8} className="muted">
                     No audiences yet. Create one to start finding leads.
                   </td>
                 </tr>
@@ -117,7 +121,7 @@ export function Audiences() {
         an affiliate.
       </p>
       <CompetitorSuggestions onChanged={load} />
-      {data && <CompetitorTable rows={data.competitors} onChanged={load} />}
+      {data && <CompetitorTable rows={data.competitors} stats={data.competitorStats ?? {}} onChanged={load} />}
     </>
   );
 }
@@ -364,7 +368,7 @@ function AudienceForm({ initial, niches, platforms, defaults, onClose, onSaved }
 
 const EMPTY_COMPETITOR = { name: "", domains: "", codePrefix: "", codePattern: "", commissionPct: "", recurring: "", notes: "" };
 
-function CompetitorTable({ rows, onChanged }: { rows: Competitor[]; onChanged: () => Promise<void> }) {
+function CompetitorTable({ rows, stats, onChanged }: { rows: Competitor[]; stats: Record<string, CompetitorStat>; onChanged: () => Promise<void> }) {
   const [draft, setDraft] = useState<Record<string, string>>(EMPTY_COMPETITOR);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [err, setErr] = useState("");
@@ -429,37 +433,58 @@ function CompetitorTable({ rows, onChanged }: { rows: Competitor[]; onChanged: (
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Link domains</th>
-              <th>Code prefix</th>
-              <th>Code pattern</th>
-              <th>Commission</th>
-              <th>Recurring</th>
+              <th>Brand</th>
+              <th title="Creators found promoting this brand">Leads found</th>
+              <th title="How many of those became our affiliates">Signed with us</th>
+              <th title="The median follower count of the creators it finds">Creator size</th>
+              <th title="The most recent lead found for this brand">Last found</th>
+              <th title="What they pay their affiliates, when we know it">They pay</th>
+              <th title="How their codes look, used to spot them in captions">Code</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={8} className="muted">
                   No competitors yet. Add the programs from Matt's list.
                 </td>
               </tr>
             )}
-            {rows.map((c) => (
+            {[...rows]
+              .sort((a, b) => (stats[String(b.id)]?.leads ?? 0) - (stats[String(a.id)]?.leads ?? 0) || a.name.localeCompare(b.name))
+              .map((c) => {
+              const s = stats[String(c.id)];
+              return (
               <tr key={c.id} className={c.active ? "" : "muted"}>
-                <td>{c.name}</td>
-                <td className="muted">{(c.domains ?? []).join(", ") || "—"}</td>
-                <td>{c.codePrefix ?? "—"}</td>
-                <td className="muted">{c.codePattern ?? "—"}</td>
-                <td>{c.commissionPct != null ? `${c.commissionPct}%` : "unknown"}</td>
-                <td>{c.recurring == null ? "unknown" : c.recurring ? "yes" : "no"}</td>
+                <td>
+                  <div style={{ fontWeight: 600 }}>{c.name}</div>
+                  <div className="muted" style={{ fontSize: 11.5 }}>
+                    {(c.domains ?? []).join(", ") || "no domains on file"}
+                    {c.active ? "" : " · not searched"}
+                  </div>
+                </td>
+                <td>
+                  <strong>{s?.leads ?? 0}</strong>
+                  <div className="muted" style={{ fontSize: 11.5 }}>
+                    {s ? `${s.withCode} with a code · ${s.accepted} accepted` : "none yet"}
+                  </div>
+                </td>
+                <td>
+                  {s?.signed ? <strong>{s.signed}</strong> : <span className="muted">0</span>}
+                  <div className="muted" style={{ fontSize: 11.5 }}>{s?.contacted ? `${s.contacted} contacted` : "none contacted"}</div>
+                </td>
+                <td className="muted">{s?.medianFollowers != null ? `${compact(s.medianFollowers)} typical` : "—"}</td>
+                <td className="muted">{s?.lastSeen ?? "—"}</td>
+                <td>{c.commissionPct != null ? `${c.commissionPct}%` : <span className="muted">unknown</span>}</td>
+                <td className="muted">{c.codePrefix ?? c.codePattern ?? "—"}</td>
                 <td>
                   <button onClick={() => startEdit(c)}>Edit</button>{" "}
                   <button onClick={() => void remove(c.id)}>{confirmDelete === c.id ? "Click again to delete" : "Delete"}</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

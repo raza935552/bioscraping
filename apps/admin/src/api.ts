@@ -213,6 +213,7 @@ export interface LeadRow {
   dmProfileUrl?: string | null;
   flowStep?: { kind: "send" | "wait" | "signup" | "done"; templateId: string | null; label: string; dueAt: string | null; outcome: string | null };
   outreachPath?: OutreachPath;
+  competitorId?: number | null;
   competitorLinked?: string | null;
   competitorRatePct?: number | null;
   email?: string | null;
@@ -323,6 +324,7 @@ export interface Competitor {
 }
 
 export interface AudiencesPayload {
+  competitorStats?: Record<string, CompetitorStat>;
   profiles: AudienceProfile[];
   competitors: Competitor[];
   niches: string[];
@@ -461,6 +463,16 @@ export interface SettingsSection {
 
 export type OutreachPath = "offer1" | "offer2" | "higher" | "competitor_unnamed" | "unsigned" | "converted";
 
+export interface CompetitorStat {
+  leads: number;
+  accepted: number;
+  contacted: number;
+  signed: number;
+  withCode: number;
+  medianFollowers: number | null;
+  lastSeen: string | null;
+}
+
 export interface LeadsPage {
   pathCounts?: Partial<Record<OutreachPath, number>>;
   analytics: {
@@ -479,6 +491,7 @@ export interface LeadsPage {
   pageSize: number;
   totalPages: number;
   rows: LeadRow[];
+  competitorStats?: Record<string, CompetitorStat>;
 }
 
 export interface EmailCampaigns {
