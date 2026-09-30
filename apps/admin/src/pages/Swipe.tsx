@@ -2,14 +2,24 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Me, type SwipePayload, type SwipePost } from "../api.js";
 import { Modal, PageInfo, PageHeader } from "../components.js";
 
-const TABS: Array<[string, string]> = [
-  ["draft", "Drafts"],
-  ["approved", "Approved"],
-  ["sent", "Sent"],
-  ["rejected", "Rejected"],
-  ["failed", "Failed"],
-  ["declined", "Declined"],
-  ["all", "All"],
+/** The status in the words a reviewer would use. */
+const STATUS_WORD: Record<string, string> = {
+  draft: "waiting for you",
+  approved: "approved, not sent yet",
+  sending: "sending…",
+  sent: "with Biolinx",
+  declined: "you asked for changes",
+  rejected: "Biolinx turned it down",
+  duplicate: "already sent before",
+  failed: "something went wrong",
+};
+
+const TABS: Array<[string, string, string]> = [
+  ["draft", "To review", "Written and waiting for your yes or no"],
+  ["approved", "Ready to send", "You approved these; they go out on the next send"],
+  ["sent", "With Biolinx", "Sent. They reach affiliates once someone presses Publish there"],
+  ["problems", "Needs a look", "Turned down, or something went wrong"],
+  ["all", "Everything", "Every post the engine has written"],
 ];
 
 const DECLINE_CHIPS = [
@@ -95,13 +105,15 @@ export function Swipe({ me }: { me: Me }) {
 
       <PageHeader title="Swipe file" />
 
-      <div className="settings-card" style={{ marginBottom: 16 }}>
-        <div className="toolbar" style={{ margin: 0, flexWrap: "wrap", gap: 10 }}>
-          <strong>Biolinx connection:</strong>
-          {c?.configured ? <span className="chip ok">secret saved</span> : <span className="chip failed">no secret yet</span>}
-          <span className={`chip ${c?.autoSend ? "ok" : "unresolved"}`}>{c?.autoSend ? "auto-send every 10 min" : "send manually"}</span>
+      <details className="settings-card swipe-connection">
+        <summary>
+          Connection to Biolinx
+          <span className={`chip ${c?.configured ? "ok" : "failed"}`}>{c?.configured ? "connected" : "not connected"}</span>
+          <span className="muted">{c?.autoSend ? "approved posts go out every 10 minutes" : "approved posts wait for Send"}</span>
+        </summary>
+        <div className="toolbar" style={{ margin: "10px 0 0", flexWrap: "wrap", gap: 10 }}>
           <span className={`chip ${c?.biolinxMakesImages ? "ok" : "unresolved"}`} title="Settings → Biolinx makes the images">
-            {c?.biolinxMakesImages ? "images made by Biolinx" : "images: paste a link"}
+            {c?.biolinxMakesImages ? "Biolinx makes the pictures" : "pictures: paste a link yourself"}
           </span>
           <span className="muted" style={{ fontSize: 12 }}>
             Callback URL for Biolinx: <code className="inline">{c?.callbackUrl ?? "…"}</code>
@@ -112,33 +124,26 @@ export function Swipe({ me }: { me: Me }) {
               {busy === "test" ? "Testing…" : "Test connection"}
             </button>
           )}
-          <button
-            disabled={!c?.configured || busy === "send" || !((counts.approved ?? 0) > 0)}
-            onClick={() =>
-              void run("send", async () => {
-                const r = (await api.swipeSend()).result;
-                return r.error ? `Send stopped: ${r.error}` : `Sent ${r.sent}: ${r.accepted} accepted, ${r.duplicates} duplicates, ${r.rejected} rejected. ${r.remainingToday ?? "?"} left today.`;
-              })
-            }
-          >
-            {busy === "send" ? "Sending…" : `Send approved now (${counts.approved ?? 0})`}
-          </button>
         </div>
-      </div>
+      </details>
 
       {error && <div className="error">{error}</div>}
       {msg && <div className="notice">{msg}</div>}
 
       <div className="toolbar">
-        {TABS.map(([k, label]) => (
-          <button key={k} className={tab === k ? "primary" : ""} onClick={() => setTab(k)}>
-            {label}
-            {k !== "all" && counts[k] ? ` (${counts[k]})` : ""}
-          </button>
-        ))}
+        <div className="tabs" role="tablist" aria-label="Swipe file views">
+          {TABS.map(([k, label, help]) => {
+            const n = k === "problems" ? (counts.rejected ?? 0) + (counts.failed ?? 0) + (counts.declined ?? 0) : counts[k] ?? 0;
+            return (
+              <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} title={help} onClick={() => setTab(k)}>
+                {label}{k !== "all" && n ? ` · ${n}` : ""}
+              </button>
+            );
+          })}
+        </div>
         <div className="grow" />
         <span className="muted" style={{ fontSize: 12 }} title={data?.sources.searchDaily ? "Searched automatically once a day when fewer than 10 are left" : "Turn on 'Find top posts automatically' in Settings to search daily"}>
-          {data ? `${data.sources.unused} unused source post${data.sources.unused === 1 ? "" : "s"} from search` : ""}
+          {data ? `${data.sources.unused} idea${data.sources.unused === 1 ? "" : "s"} banked to write from` : ""}
         </span>
         <button
           disabled={busy === "find"}
@@ -152,7 +157,7 @@ export function Swipe({ me }: { me: Me }) {
             })
           }
         >
-          {busy === "find" ? "Searching TikTok…" : "Find top posts"}
+          {busy === "find" ? "Searching TikTok…" : "Find more ideas · about $1"}
         </button>
         <select value={count} onChange={(e) => setCount(Number(e.target.value))} style={{ width: 80 }}>
           {[1, 3, 5, 10].map((n) => (
@@ -174,7 +179,7 @@ export function Swipe({ me }: { me: Me }) {
             })
           }
         >
-          {busy === "gen" ? "Writing posts…" : "Generate posts"}
+          {busy === "gen" ? "Writing posts…" : `Write ${count} new post${count === 1 ? "" : "s"}`}
         </button>
       </div>
 
@@ -277,14 +282,10 @@ function SwipeCard({ p, busy, makesImages, onApprove, onEdit, onDecline, onRefre
       </div>
       <div className="swipe-body">
         <div className="chips">
-          <span className={`chip ${STATUS_CHIP[p.status] ?? "unresolved"}`}>{p.status}</span>
-          {p.biolinxStatus && <span className={`chip ${p.biolinxStatus === "published" ? "ok" : p.biolinxStatus === "failed" ? "failed" : "internal"}`}>Biolinx: {p.biolinxStatus.replace("_", " ")}</span>}
-          {p.imageCheck && <span className={`chip ${p.imageCheck === "passed" ? "ok" : "failed"}`}>image text: {p.imageCheck}</span>}
-          <span className="chip internal">{p.platform}</span>
-          <span className="chip internal">{p.format}</span>
-          <span className="chip internal">{p.biolinxNiche}</span>
-          {p.hookType && <span className="chip suggest">{p.hookType}</span>}
-          {p.version > 1 && <span className="chip unresolved">v{p.version}</span>}
+          <span className={`chip ${STATUS_CHIP[p.status] ?? "unresolved"}`}>{STATUS_WORD[p.status] ?? p.status}</span>
+          {p.biolinxStatus === "published" && <span className="chip ok">live for affiliates</span>}
+          {p.version > 1 && <span className="chip unresolved">rewrite {p.version}</span>}
+          <span className="muted tiny">for {p.platform}</span>
         </div>
         <div className="swipe-hook">{p.hook}</div>
         <div className="swipe-caption">
@@ -298,7 +299,7 @@ function SwipeCard({ p, busy, makesImages, onApprove, onEdit, onDecline, onRefre
         {p.hashtags?.length ? <div className="muted" style={{ fontSize: 12 }}>{p.hashtags.map((h) => `#${h}`).join(" ")}</div> : null}
         {p.angle && <div className="muted" style={{ fontSize: 12 }}>Angle: {p.angle}</div>}
         <div className="muted" style={{ fontSize: 12 }}>
-          Inspired by{" "}
+          Written from{" "}
           {p.sourcePostUrl ? (
             <a href={p.sourcePostUrl} target="_blank" rel="noreferrer">
               a {p.sourcePlatform ?? ""} post ↗
@@ -337,26 +338,32 @@ function SwipeCard({ p, busy, makesImages, onApprove, onEdit, onDecline, onRefre
           </ul>
         ) : null}
         {p.error && <div className="error" style={{ fontSize: 12 }}>{p.error}</div>}
-        <div className="modal-actions">
+        <div className="modal-actions swipe-actions">
           {p.status === "draft" && (
-            <button className="primary" disabled={busy === `a${p.id}` || !!blocker || problems.length > 0} title={blocker ?? (problems.length ? "Fix the problems first" : "Send on the next run")} onClick={onApprove}>
-              Approve
+            <button className="primary" disabled={busy === `a${p.id}` || !!blocker || problems.length > 0} onClick={onApprove}>
+              Approve this post
             </button>
           )}
-          {editable && <button onClick={onEdit}>Edit</button>}
-          {editable && <button onClick={onDecline}>Decline…</button>}
-          {canRedoImage && <button onClick={onRedoImage}>Redo image…</button>}
+          {editable && <button onClick={onEdit}>Edit the words</button>}
+          {editable && <button onClick={onDecline}>Ask for changes…</button>}
+          {canRedoImage && <button onClick={onRedoImage}>Ask for a new picture…</button>}
           {p.status === "sent" && (
             <button disabled={busy === `r${p.id}`} onClick={onRefresh}>
-              Refresh status
+              Check with Biolinx
             </button>
           )}
           {isHttps(p.mediaUrl) && (
             <a className="btn-link" href={p.mediaUrl} target="_blank" rel="noreferrer">
-              Biolinx image ↗
+              The picture ↗
             </a>
           )}
         </div>
+        {p.status === "draft" && (blocker || problems.length > 0) && (
+          <div className="action-note">{blocker ?? "Fix what is listed above before this can be approved."}</div>
+        )}
+        {p.status === "draft" && !blocker && problems.length === 0 && (
+          <div className="action-note">Approving puts it in the next send to Biolinx. It reaches affiliates only after someone presses Publish there.</div>
+        )}
       </div>
     </div>
   );

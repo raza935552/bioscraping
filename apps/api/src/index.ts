@@ -1706,7 +1706,14 @@ app.get("/api/swipe", { preHandler: requireRole("admin", "ops") }, async (req) =
   const rows = await db.select().from(schema.swipePosts).orderBy(desc(schema.swipePosts.id)).limit(500);
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
-  const list = q.status && q.status !== "all" ? rows.filter((r) => r.status === q.status) : rows.filter((r) => r.status !== "declined");
+  // "problems" is one tab in the admin: turned down, or something went wrong.
+  const PROBLEM = ["rejected", "failed", "declined"];
+  const list =
+    q.status === "problems"
+      ? rows.filter((r) => PROBLEM.includes(r.status))
+      : q.status && q.status !== "all"
+        ? rows.filter((r) => r.status === q.status)
+        : rows.filter((r) => r.status !== "declined");
   const origin = (process.env.ADMIN_ORIGIN ?? "https://gemboxpk.com").split(",")[0]!.replace(/\/+$/, "");
   const [lastSearch] = await recentSwipeSearches(db, 1);
   return {

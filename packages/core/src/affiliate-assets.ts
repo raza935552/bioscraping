@@ -115,7 +115,7 @@ ${RESEARCH_USE_LINE}`,
     where: "Read it out, about 20 seconds, anywhere in the video",
     platform: "youtube",
     body: `Quick word from the partner of this video, Biolinx Labs.
-They are a research supplier: third party tested, a COA with every batch.
+They supply research peptides and amino acids: third party tested, a COA with every batch.
 If you order from them, my code [code] takes [discount]% off, and the link is in the description.
 ${RESEARCH_USE_LINE}`,
   },

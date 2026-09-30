@@ -86,6 +86,7 @@ Once you send that over...
 I sign you up (asap)
 YOU get an email (with everything you need)
 WE make magic happen (as a team)
+or if you'd rather do it yourself, the form is here: [details link]
 lmk if you have questions, but if you don't...
 Welcome to the team [first name]! 🔥
 ps - we can hop on a quick call if you need anything`,
@@ -117,7 +118,7 @@ recruitment rate: 5% on every recruit sale (4 life)
 cookie: lifetime
 payout: monthly (check or zelle)
 support: free promo assets + telegram community
-(detailed version: [details link])
+full details and the sign-up form: [details link]
 What a few affiliates earned so far (historical results, not a promise):
 Nick (team member) → historical $441.71
 Jason (mortgage lender) → historical $222.49
@@ -135,7 +136,7 @@ commission rate: [aro commission]
 cookie: [aro cookie]
 payout: monthly (check or zelle)
 support: free promo assets + telegram community
-(detailed version: [aro details link])
+full details and the sign-up form: [aro details link]
 lmk if you have any questions
 ps - we reply FAST (within 48 hours)`,
   },
@@ -178,7 +179,7 @@ ps - signing up won't hurt you, but losing your spot might.`,
     source: "marketing",
     body: `quick check-in: I'm running out of spots for the 25% lifetime commission, and I'd hate for you to lose it because you didn't see this message...
 lmk if you're interested
-ps - here's the deets: [details link]`,
+ps - everything about the program, and the sign-up form: [details link]`,
   },
 };
 

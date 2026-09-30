@@ -68,7 +68,7 @@ describe("templates", () => {
     expect(noLink.text).toContain("commission rate: 25% on every order");
     const withLink = renderTemplate("reply2_details", { ...base, curiosityGap: "x", settings: { ...DEFAULT_OUTREACH_SETTINGS, detailsLink: "https://biolinxlabs.com/affiliates" } });
     expect(withLink.missing).toEqual([]);
-    expect(withLink.text).toContain("(detailed version: https://biolinxlabs.com/affiliates)");
+    expect(withLink.text).toContain("full details and the sign-up form: https://biolinxlabs.com/affiliates");
     // The essential placeholders still block: a message without the brand or the opening line is broken.
     expect(renderTemplate("offer2_soft", { ...base, curiosityGap: "x", brand: null }).missing).toContain("brand");
   });

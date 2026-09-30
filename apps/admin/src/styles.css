@@ -452,6 +452,15 @@ table.leads tbody tr, table.sourced tbody tr { cursor: pointer; }
 .sort-picker select { width: auto; font-size: 12.5px; padding: 5px 8px; }
 .sort-dir { padding: 5px 9px; font-size: 11px; }
 
+/* Swipe file: the post is the content, the plumbing folds away, the decision sits at the end. */
+.swipe-connection { margin-bottom: 14px; padding: 10px 14px; }
+.swipe-connection > summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; cursor: pointer; }
+.swipe-connection > summary::-webkit-details-marker { display: none; }
+.swipe-connection > summary::before { content: "▸"; color: var(--faint); }
+.swipe-connection[open] > summary::before { content: "▾"; }
+.swipe-actions { flex-wrap: wrap; gap: 6px; }
+.swipe-card .action-note { margin: 6px 0 0; }
+
 /* A segmented control: one of these is where you are, the other is somewhere to go. Styled as a
    single unit so nobody reads them as buttons that do something. */
 .tabs { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 2px; gap: 2px; }
