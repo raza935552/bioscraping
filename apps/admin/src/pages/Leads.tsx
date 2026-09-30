@@ -360,6 +360,28 @@ export function Leads({ me, initialQuery = "" }: { me: Me; initialQuery?: string
           onChange={(e) => setSearch(e.target.value)}
           style={{ maxWidth: 300 }}
         />
+        <label className="sort-picker">
+          Sort by{" "}
+          <select
+            value={sort}
+            onChange={(e) => {
+              setSort(e.target.value);
+              setDir("desc");
+            }}
+          >
+            {SORTS.filter(([col]) => (view === "sourced" ? SOURCED_SORTS.has(col) : !SOURCED_ONLY_SORTS.has(col))).map(([col, label]) => (
+              <option key={col} value={col}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="sort-dir"
+          title={dir === "asc" ? "Smallest first" : "Largest first"}
+          onClick={() => setDir(dir === "asc" ? "desc" : "asc")}
+        >
+          {dir === "asc" ? "▲" : "▼"}
+        </button>
         <button
           type="button"
           className={`filter-toggle${activeFilters > 0 ? " on" : ""}`}
@@ -449,122 +471,106 @@ export function Leads({ me, initialQuery = "" }: { me: Me; initialQuery?: string
         />
       ) : (
       <div className="tablewrap">
-        <table className="sourced">
+        {/* Five columns, one per question a person actually asks: who, how big, why them, what next.
+            The numbers are all still here, ranked under the one that leads. */}
+        <table className="leads">
           <thead>
             <tr>
-              {SORTS.map(([col, label, help]) => [
-                <th
-                  key={col}
-                  className={`sortable ${sort === col ? "active" : ""}`}
-                  onClick={() => clickSort(col)}
-                  title={help}
-                >
-                  {label}
-                  {sort === col ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
-                </th>,
-                col === "name" ? <th key="found" title="How we found them and what to do next. Hover for details.">Found · next step</th> : null,
-              ])}
-              <th>Notes</th>
-              <th>Profile</th>
+              <th className="col-rank sortable" onClick={() => clickSort("rank")} title="Conversion rank: who to work first">
+                #{sort === "rank" ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
+              </th>
+              <th className="sortable" onClick={() => clickSort("name")}>
+                Creator{sort === "name" ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
+              </th>
+              <th className="sortable" onClick={() => clickSort("reach")} title="Followers, with what their posts actually do">
+                Audience{sort === "reach" ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
+              </th>
+              <th className="sortable" onClick={() => clickSort("competitor")} title="The brand they already promote, and which offer that earns them">
+                Why them{sort === "competitor" ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
+              </th>
+              <th className="sortable" onClick={() => clickSort("lastTouch")} title="What to do with them next">
+                Next step{sort === "lastTouch" ? (dir === "asc" ? " ▲" : dir === "desc" ? " ▼" : "") : ""}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {data?.rows.map((l) => (
-              <tr
-                key={l.id}
-                className={open === l.id ? "selected" : ""}
-                style={{ cursor: "pointer" }}
-                onClick={() => setOpen(open === l.id ? null : l.id)}
-              >
-                <td>
-                  {l.rank ?? "—"}
-                  {l.band && (
-                    <span className="muted" style={{ fontSize: 11 }} title={BAND_HELP[l.band]}>
-                      {" "}
-                      {BAND_LABEL[l.band] ?? l.band}
-                    </span>
-                  )}
-                </td>
-                <td className="creator">
-                  <div>
-                    {l.name}
-                    {l.details?.handle && <span className="muted"> @{l.details.handle}</span>}{" "}
-                    {l.needsTriage && <span className="chip suggest">needs triage</span>}
-                    {l.isDead && <span className="chip failed">unreachable</span>}
-                    {l.details?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">store</span>}
-                  </div>
-                  {l.details?.bio && <div className="bio" title={l.details.bio}>{l.details.bio}</div>}
-                </td>
-                <td>
-                  <LeadBubbleCell l={l} />
-                </td>
-                <td>
-                  {l.details?.niche ?? l.niche ?? "—"}
-                  {l.brandFit && <div className="muted" style={{ fontSize: 11 }}>{BRAND_LABEL[l.brandFit] ?? l.brandFit}</div>}
-                </td>
-                <td className="muted">
-                  {l.platform ?? "—"}
-                  {l.country && <div style={{ fontSize: 11 }}>{l.country}</div>}
-                </td>
-                <td>{l.reach != null ? l.reach.toLocaleString() : <span className="muted">unverified</span>}</td>
-                <td>{l.details?.avgViews != null ? compact(l.details.avgViews) : <span className="muted">—</span>}</td>
-                <td title={l.details?.engagementBasis === "followers" ? "per follower (posts have no view count)" : "per view"}>
-                  {l.details?.engagementRate != null ? `${(l.details.engagementRate * 100).toFixed(1)}%` : <span className="muted">—</span>}
-                  {l.details?.engagementBasis === "followers" && <span className="muted" style={{ fontSize: 11 }}> /fol.</span>}
-                </td>
-                <td>
-                  {l.details?.postsLast30 != null ? <>{l.details.postsLast30}<span className="muted" style={{ fontSize: 11 }}> /{l.details.postsRead}</span></> : <span className="muted">—</span>}
-                </td>
-                <td>
-                  {l.competitor ? <span className="chip suggest">{l.competitor}</span> : <span className="muted">—</span>}
-                  {l.outreachPath && PATH_LABEL[l.outreachPath] && (
-                    <div>
-                      <span className={`chip ${PATH_LABEL[l.outreachPath]!.tone === "ok" ? "ok" : PATH_LABEL[l.outreachPath]!.tone === "bad" ? "failed" : "unresolved"}`} title={PATH_LABEL[l.outreachPath]!.help}>
-                        {PATH_LABEL[l.outreachPath]!.short}
-                        {l.competitorRatePct != null ? ` · ${l.competitorRatePct}%` : ""}
-                      </span>
+            {data?.rows.map((l) => {
+              const sp = subProfileLabel(l.subProfile);
+              const path = l.outreachPath ? PATH_LABEL[l.outreachPath] : null;
+              const enrich = ENRICH_LABEL[l.hasNotes ? "enriched" : (l.enrichmentStatus ?? "pending")] ?? ENRICH_LABEL.pending!;
+              return (
+                <tr key={l.id} className={open === l.id ? "selected" : ""} onClick={() => setOpen(open === l.id ? null : l.id)}>
+                  <td className="col-rank">
+                    <div className="rank-n">{l.rank ?? "—"}</div>
+                    {l.band && <div className="muted tiny" title={BAND_HELP[l.band]}>{BAND_LABEL[l.band] ?? l.band}</div>}
+                  </td>
+
+                  <td className="cell-creator">
+                    <div className="creator-line">
+                      <span className="creator-name">{l.name}</span>
+                      {isHttp(l.profileUrl) && (
+                        <a href={l.profileUrl!} target="_blank" rel="noreferrer" title="Open their profile" onClick={(e) => e.stopPropagation()}>↗</a>
+                      )}
                     </div>
-                  )}
-                  {(l.affiliateCode || l.currentOffer) && (
-                    <div className="muted" style={{ fontSize: 11 }} title="Their code or offer with that competitor">
-                      {l.affiliateCode ? <code>{l.affiliateCode}</code> : l.currentOffer}
+                    <div className="muted tiny">
+                      {[l.details?.handle ? `@${l.details.handle}` : null, l.platform, l.country ?? "location unknown", l.details?.niche ?? l.niche]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </div>
-                  )}
-                </td>
-                <td className="muted">{l.status ?? "—"}</td>
-                <td>
-                  {(() => {
-                    const sp = subProfileLabel(l.subProfile);
-                    return sp.danger ? (
-                      <span className="chip failed" title={sp.help}>{sp.text}</span>
+                    <div className="row-flags">
+                      {l.needsTriage && <span className="chip suggest">needs triage</span>}
+                      {l.isDead && <span className="chip failed">unreachable</span>}
+                      {l.details?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">a shop</span>}
+                      {sp.danger && <span className="chip failed" title={sp.help}>{sp.text}</span>}
+                    </div>
+                  </td>
+
+                  <td className="cell-audience">
+                    <div className="audience-n">
+                      {l.reach != null ? compact(l.reach) : <span className="muted">unverified</span>}
+                    </div>
+                    <div className="muted tiny">
+                      {[
+                        l.details?.avgViews != null ? `${compact(l.details.avgViews)} avg views` : null,
+                        l.details?.engagementRate != null
+                          ? `${(l.details.engagementRate * 100).toFixed(1)}% engaged${l.details.engagementBasis === "followers" ? " of followers" : ""}`
+                          : null,
+                        l.details?.postsLast30 != null ? `${l.details.postsLast30} posts in 30 days` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "no reads yet"}
+                    </div>
+                  </td>
+
+                  <td className="cell-why">
+                    {l.competitor || l.competitorLinked ? (
+                      <>
+                        <div className="why-brand">
+                          {l.competitorLinked ?? l.competitor}
+                          {l.affiliateCode ? <> · <code>{l.affiliateCode}</code></> : l.currentOffer ? <span className="muted tiny"> · {l.currentOffer}</span> : null}
+                        </div>
+                        {path && (
+                          <span className={`chip ${path.tone === "ok" ? "ok" : path.tone === "bad" ? "failed" : "unresolved"}`} title={path.help}>
+                            {path.short}{l.competitorRatePct != null ? ` · pays ${l.competitorRatePct}%` : ""}
+                          </span>
+                        )}
+                      </>
                     ) : (
-                      <span className="muted" title={sp.help}>{sp.text}</span>
-                    );
-                  })()}
-                </td>
-                <td className="muted">{l.lastReachedOut?.slice(0, 10) ?? "never"}</td>
-                <td>
-                  {(() => {
-                    const key = l.hasNotes ? "enriched" : (l.enrichmentStatus ?? "pending");
-                    const e = ENRICH_LABEL[key] ?? ENRICH_LABEL.pending!;
-                    return (
-                      <span className={`chip ${e.tone === "ok" ? "ok" : e.tone === "bad" ? "failed" : "unresolved"}`} title={e.help}>
-                        {e.text}
-                      </span>
-                    );
-                  })()}
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  {l.profileUrl && /^https?:\/\//i.test(l.profileUrl) ? (
-                    <a href={l.profileUrl} target="_blank" rel="noreferrer" title={l.profileUrl}>
-                      ↗ open
-                    </a>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
+                      <span className="muted">No competitor found</span>
+                    )}
+                  </td>
+
+                  <td className="cell-next">
+                    <LeadBubbleCell l={l} />
+                    <div className="muted tiny">
+                      {[l.status ?? "Not contacted", l.lastReachedOut ? `last touch ${l.lastReachedOut.slice(0, 10)}` : null, enrich.text]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -881,22 +887,11 @@ interface SourcedTableProps {
 }
 
 const SOURCED_COLUMNS: Array<[string | null, string, string?]> = [
-  ["score", "Score"],
-  ["name", "Creator"],
-  [null, "Found · next step", "How we found them and what to do next. Hover for details."],
-  ["niche", "Niche"],
-  ["platform", "Platform"],
-  ["reach", "Reach", "Followers from a real profile read"],
-  ["avgViews", "Avg views", "Average views across their most recent posts"],
-  ["engagement", "Engagement", "(likes + comments) ÷ views, averaged over recent posts. Per follower when posts have no view count"],
-  ["posts30", "Posts 30d", "Posts in the last 30 days, out of the recent posts read"],
-  ["lastPost", "Last post"],
-  [null, "Surfaced post", "The post that found them: views · likes · comments"],
-  ["competitor", "Competitor"],
-  [null, "Code"],
-  [null, "Flags"],
-  [null, "Links"],
-  [null, "Decision"],
+  ["score", "Score", "Points, each with a written reason. Open the lead to read them."],
+  ["name", "Creator", "Who they are, where we found them, and what their bio says"],
+  ["reach", "Audience", "Followers, and what their posts actually do"],
+  ["competitor", "Why them", "The brand they promote, their code, and the post that proves it"],
+  [null, "Decision", "Accept sends them to outreach. Reject keeps them out of future searches."],
 ];
 
 function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept, onReject, confirmReject, onBulkDone }: SourcedTableProps) {
@@ -991,85 +986,88 @@ function SourcedTable({ rows, sort, dir, onSort, canRun, open, onOpen, onAccept,
                     <input type="checkbox" checked={picked.has(l.id)} onChange={() => toggle(l.id)} />
                   </td>
                 )}
-                <td>
-                  <strong>{l.sourcingScore ?? 0}</strong>
-                  <div className="muted" style={{ fontSize: 11 }}>{l.scoreReasons.length} reasons</div>
+                <td className="cell-score">
+                  <div className="score-n">{l.sourcingScore ?? 0}</div>
+                  <div className="muted tiny">{l.scoreReasons.length} reasons</div>
                 </td>
-                <td className="creator">
-                  <div><strong>{l.name}</strong>{d?.handle && <span className="muted"> @{d.handle}</span>}</div>
+
+                <td className="cell-creator">
+                  <div className="creator-line">
+                    <span className="creator-name">{l.name}</span>
+                    {isHttp(l.profileUrl) && (
+                      <a href={l.profileUrl} target="_blank" rel="noreferrer" title="Open their profile" onClick={(e) => e.stopPropagation()}>↗</a>
+                    )}
+                  </div>
+                  <div className="muted tiny">
+                    {[d?.handle ? `@${d.handle}` : null, l.platform, d?.niche ?? l.niche].filter(Boolean).join(" · ")}
+                  </div>
                   {d?.bio && <div className="bio" title={d.bio}>{d.bio}</div>}
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    {d?.term ? <>via <strong>{d.term}</strong>{d.audience ? ` · ${d.audience}` : ""}</> : l.sourcingReason}
+                  <div className="muted tiny">
+                    {d?.term ? <>found by searching <strong>{d.term}</strong></> : l.sourcingReason}
                   </div>
-                  {l.rejectedReason && <div className="chip failed" style={{ marginTop: 4 }}>rejected: {l.rejectedReason}</div>}
+                  <div className="row-flags">
+                    {l.country ? (
+                      <span className={`chip ${l.country === "US" ? "ok" : "failed"}`} title="Where they are, from the platform or their bio">
+                        {l.country === "US" ? "United States" : l.country}
+                      </span>
+                    ) : (
+                      <span className="chip unresolved" title="No platform or bio evidence of where they are">location unknown</span>
+                    )}
+                    {d?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">a shop</span>}
+                    {l.email && <span className="chip ok" title={`Email ${d?.emailSource?.where === "post" ? "in a post" : "in bio"}: ${l.email}`}>has email</span>}
+                    {l.promoTrackRecord && <span className="chip ok" title="Has run a code, discount link or #ad before">promotes already</span>}
+                    {l.doesLive && <span className="chip ok">goes live</span>}
+                    {l.rejectedReason && <span className="chip failed">rejected: {l.rejectedReason}</span>}
+                  </div>
                 </td>
-                <td>
-                  <LeadBubbleCell l={l} />
+
+                <td className="cell-audience">
+                  <div className="audience-n">{l.reach != null ? compact(l.reach) : <span className="muted">unverified</span>}</div>
+                  <div className="muted tiny">
+                    {[
+                      d?.avgViews != null ? `${compact(d.avgViews)} avg views` : null,
+                      d?.engagementRate != null ? `${(d.engagementRate * 100).toFixed(1)}% engaged${d.engagementBasis === "followers" ? " of followers" : ""}` : null,
+                      d?.postsLast30 != null ? `${d.postsLast30} posts in 30 days` : null,
+                      d?.daysSinceLastPost != null ? `last posted ${d.daysSinceLastPost}d ago` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "no profile read yet"}
+                  </div>
                 </td>
-                <td>
-                  {d?.niche ?? l.niche ?? "—"}
-                  <div className="muted" style={{ fontSize: 11 }}>{BRAND_LABEL[l.brandFit ?? ""] ?? l.brandFit ?? ""}</div>
-                </td>
-                <td className="muted">{l.platform ?? "—"}</td>
-                <td>{l.reach != null ? l.reach.toLocaleString() : <span className="muted">unverified</span>}</td>
-                <td>{d?.avgViews != null ? compact(d.avgViews) : <span className="muted">—</span>}</td>
-                <td title={d?.engagementBasis === "followers" ? "per follower (posts have no view count)" : "per view"}>
-                  {d?.engagementRate != null ? `${(d.engagementRate * 100).toFixed(1)}%` : <span className="muted">—</span>}
-                  {d?.engagementBasis === "followers" && <span className="muted" style={{ fontSize: 11 }}> /fol.</span>}
-                </td>
-                <td>{d?.postsLast30 != null ? <>{d.postsLast30}<span className="muted" style={{ fontSize: 11 }}> /{d.postsRead}</span></> : <span className="muted">—</span>}</td>
-                <td className="muted">
-                  {l.lastPostAt?.slice(0, 10) ?? "—"}
-                  {d?.daysSinceLastPost != null && <div style={{ fontSize: 11 }}>{d.daysSinceLastPost}d ago</div>}
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  {s ? (
+
+                <td className="cell-why">
+                  {l.competitor ? (
                     <>
-                      {isHttp(s.url) ? <a href={s.url} target="_blank" rel="noreferrer">post ↗</a> : null}
-                      <div className="muted" style={{ fontSize: 11 }}>
-                        {compact(s.views)} views · {compact(s.likes)} likes · {compact(s.comments)} comm.
+                      <div className="why-brand">
+                        {l.competitor}
+                        {l.affiliateCode ? <> · <code>{l.affiliateCode}</code></> : null}
                       </div>
+                      {d?.evidence?.quote && <div className="bubble-quote">“{d.evidence.quote}”</div>}
                     </>
                   ) : (
-                    <span className="muted">—</span>
+                    <span className="muted">No competitor named</span>
+                  )}
+                  {s && (
+                    <div className="muted tiny" onClick={(e) => e.stopPropagation()}>
+                      {isHttp(s.url) ? <a href={s.url} target="_blank" rel="noreferrer">the post ↗</a> : "the post"} · {compact(s.views)} views · {compact(s.likes)} likes
+                    </div>
                   )}
                 </td>
-                <td>{l.competitor ? <span className="chip suggest">{l.competitor}</span> : <span className="muted">—</span>}</td>
-                <td>{l.affiliateCode ? <code>{l.affiliateCode}</code> : <span className="muted">—</span>}</td>
-                <td>
-                  <div className="flags">
-                  {d?.isStore && <span className="chip failed" title="Handle or bio looks like a shop, not a creator">store</span>}
-                  {l.email && <span className="chip ok" title={`Email ${d?.emailSource?.where === "post" ? "in a post" : "in bio"}: ${l.email}`}>✉ email</span>}
-                  {d?.channel?.kind === "competitor" && <span className="chip suggest" title={d.channel.label}>via competitor search</span>}
-                  {l.promoTrackRecord && <span className="chip ok" title="Has run a code, discount link or #ad before">promo</span>}
-                  {l.doesLive && <span className="chip ok">LIVE</span>}
-                  {l.country ? (
-                    <span className={`chip ${l.country === "US" ? "ok" : "failed"}`} title="Where they are, from the platform or their bio">{l.country === "US" ? "US ✓" : l.country}</span>
-                  ) : (
-                    <span className="chip unresolved" title="No platform or bio evidence of where they are">location ?</span>
-                  )}
-                  </div>
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  {isHttp(l.profileUrl) && (
-                    <a href={l.profileUrl} target="_blank" rel="noreferrer">profile ↗</a>
-                  )}
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
+
+                <td className="cell-decision" onClick={(e) => e.stopPropagation()}>
                   {canRun ? (
-                    <>
-                      <button className="primary" onClick={() => onAccept(l)}>
-                        Accept…
-                      </button>{" "}
-                      <button onClick={() => onReject(l)}>{confirmReject === l.id ? "Click again to reject" : "Reject"}</button>{" "}
-                      <button onClick={() => onReject(l, "goodwill advocate")} title="SP5: never contacted, by rule">
-                        Goodwill advocate
+                    <div className="decision-actions">
+                      <button className="primary" onClick={() => onAccept(l)}>Accept</button>
+                      <button onClick={() => onReject(l)}>{confirmReject === l.id ? "Click again" : "Reject"}</button>
+                      <button className="link-button" onClick={() => onReject(l, "goodwill advocate")} title="Never contacted, by rule: they already speak well of us">
+                        Never contact
                       </button>
-                    </>
+                    </div>
                   ) : (
                     <span className="muted">{l.sourcingReview ?? ""}</span>
                   )}
                 </td>
+
               </tr>
             );
           })}
