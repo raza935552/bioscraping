@@ -146,6 +146,15 @@ input:focus, select:focus, textarea:focus {
   content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px;
   background: var(--accent); border-radius: 0 3px 3px 0;
 }
+.nav-item { display: contents; }
+@media (max-width: 700px) { .nav-group { display: none; } .nav-older { display: none; } }
+.nav-group { font-size: 10.5px; color: var(--faint); letter-spacing: 0.06em; padding: 12px 11px 4px; }
+.nav-older { margin-top: 6px; }
+.nav-older > summary { font-size: 12.5px; color: var(--faint); padding: 8px 11px; cursor: pointer; list-style: none; }
+.nav-older > summary::-webkit-details-marker { display: none; }
+.nav-older > summary::before { content: "▸ "; }
+.nav-older[open] > summary::before { content: "▾ "; }
+.nav-older > summary:hover { color: var(--ink); }
 .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* How much work waits behind a page, without opening it. */
 .nav-badge {

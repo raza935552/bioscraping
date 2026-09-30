@@ -121,21 +121,47 @@ export function App() {
   if (!checked) return null;
   if (!me) return <Login onDone={() => { setEndedNote(false); return refreshMe(); }} note={endedNote ? "Your session ended after a week. Sign in again to pick up where you left off." : null} />;
 
-  // Outreach people (operator role) see only their page and sign-ups.
-  const nav = me.role === "operator" ? ([["/outreach", "Outreach", "💌"], ["/signups", "Signups", "✍️"]] as const) : ([
-    ["/dashboard", "Dashboard", "📊"],
-    ...(me.role === "admin" || me.role === "ops" ? ([["/outreach", "Outreach", "💌"]] as const) : []),
-    ["/leads", "Leads", "🎯"],
-    ...(me.role === "admin" || me.role === "ops" ? ([["/audiences", "Audiences", "🔎"], ["/templates", "Message templates", "📝"], ["/swipe", "Swipe file", "🖼️"]] as const) : []),
-    ["/approvals", "Send messages", "✉️"],
-    ["/email", "Email ops", "📮"],
-    ["/replies", "Replies", "💬"],
-    ...(me.role === "admin" || me.role === "ops" ? ([["/requests", "Requests", "📥"]] as const) : []),
-    ["/signups", "Signups", "✍️"],
-    ["/affiliates", "Affiliates", "🤝"],
-    ["/activity", "Activity", "🕡"],
-    ...(me.role === "admin" ? ([["/team", "Team", "👥"], ["/settings", "Settings", "⚙️"]] as const) : []),
-  ] as const);
+  // Outreach people (operator role) see only their page and sign-ups: the simplest possible seat.
+  const isOps = me.role === "admin" || me.role === "ops";
+  const nav: Array<[string, string, string, string]> = me.role === "operator"
+    ? [
+        ["/outreach", "Outreach", "💌", ""],
+        ["/signups", "Signups", "✍️", ""],
+      ]
+    : [
+        // Day to day.
+        ["/outreach", "Outreach", "💌", "Your work"],
+        ["/leads", "Leads", "🎯", "Your work"],
+        ...(isOps ? ([["/requests", "Requests", "📥", "Your work"]] as Array<[string, string, string, string]>) : []),
+        // Where the numbers land.
+        ["/dashboard", "Dashboard", "📊", "Results"],
+        ["/signups", "Signups", "✍️", "Results"],
+        ["/affiliates", "Affiliates", "🤝", "Results"],
+        // Things you set up once and revisit.
+        ...(isOps
+          ? ([
+              ["/audiences", "Audiences", "🔎", "Set up"],
+              ["/templates", "Message templates", "📝", "Set up"],
+              ["/swipe", "Swipe file", "🖼️", "Set up"],
+            ] as Array<[string, string, string, string]>)
+          : []),
+        ["/activity", "Activity", "🕡", "Set up"],
+        ...(me.role === "admin"
+          ? ([
+              ["/team", "Team", "👥", "Set up"],
+              ["/settings", "Settings", "⚙️", "Set up"],
+            ] as Array<[string, string, string, string]>)
+          : []),
+      ];
+
+  // Superseded by the Outreach page and by email that nobody sends. Kept reachable, out of the way.
+  const older: Array<[string, string, string]> = isOps
+    ? [
+        ["/approvals", "Send messages", "✉️"],
+        ["/replies", "Replies", "💬"],
+        ["/email", "Email ops", "📮"],
+      ]
+    : [];
 
   // Outreach people only use their page and Signups; anything else lands on Outreach.
   const allowed = me.role !== "operator" || ["/outreach", "/signups"].includes(route);
@@ -179,13 +205,28 @@ export function App() {
     <div className="layout">
       <nav className="nav">
         <div className="brand">⚗️ BiolinX Engine</div>
-        {nav.map(([path, label, ico]) => (
-          <a key={path} href={`#${path}`} className={route === path ? "active" : ""}>
-            <span className="ico">{ico}</span>
-            <span className="nav-label">{label}</span>
-            {counts[path] ? <span className="nav-badge" title={`${counts[path]} waiting`}>{counts[path] > 99 ? "99+" : counts[path]}</span> : null}
-          </a>
+        {nav.map(([path, label, ico, group], i) => (
+          <div key={path} className="nav-item">
+            {group && group !== nav[i - 1]?.[3] && <div className="nav-group">{group}</div>}
+            <a href={`#${path}`} className={route === path ? "active" : ""}>
+              <span className="ico">{ico}</span>
+              <span className="nav-label">{label}</span>
+              {counts[path] ? <span className="nav-badge" title={`${counts[path]} waiting`}>{counts[path] > 99 ? "99+" : counts[path]}</span> : null}
+            </a>
+          </div>
         ))}
+        {older.length > 0 && (
+          <details className="nav-older" open={older.some(([p]) => p === route)}>
+            <summary>Older tools</summary>
+            {older.map(([path, label, ico]) => (
+              <a key={path} href={`#${path}`} className={route === path ? "active" : ""}>
+                <span className="ico">{ico}</span>
+                <span className="nav-label">{label}</span>
+                {counts[path] ? <span className="nav-badge">{counts[path]}</span> : null}
+              </a>
+            ))}
+          </details>
+        )}
         <div className="spacer" />
         <div className="whoami">
           {me.name} · {me.role}
