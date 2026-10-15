@@ -10,7 +10,8 @@
     "run:idev-sync": "tsx src/run-idev-sync.ts",
     "run:enrich": "tsx src/run-enrich.ts",
     "run:dispatch": "tsx src/run-dispatch.ts",
-    "run:ingest": "tsx src/run-ingest.ts"
+    "run:ingest": "tsx src/run-ingest.ts",
+    "run:accept-pending": "tsx src/run-accept-pending.ts"
   },
   "dependencies": {
     "@biolinx/compliance": "workspace:*",

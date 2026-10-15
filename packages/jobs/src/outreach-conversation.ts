@@ -325,7 +325,7 @@ export const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000;
  *  of a conversation and not a mis-press. */
 export async function undoFlowSent(
   db: Db,
-  input: { leadId: number; userId: number },
+  input: { leadId: number; userId: number; anyAge?: boolean },
   now = new Date(),
 ): Promise<{ templateId: string | null; touchNumber: number; label: string }> {
   const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, input.leadId) });
@@ -340,7 +340,9 @@ export async function undoFlowSent(
   const flowTemplate = flowTemplateOf(last);
   if (!flowTemplate) throw new FlowError("that message was sent through Send messages, not this page; undo isn't available for it");
   const at = new Date(last.sentAt ?? last.createdAt);
-  if (now.getTime() - at.getTime() > UNDO_WINDOW_MS) throw new FlowError("too late to undo: this was recorded more than a day ago");
+  // The window keeps an outreach person from rewriting last week's history by accident; an admin
+  // clearing up after a test has no such limit.
+  if (!input.anyAge && now.getTime() - at.getTime() > UNDO_WINDOW_MS) throw new FlowError("too late to undo: this was recorded more than a day ago. An admin can still undo it.");
   const replies = await db.select().from(schema.replies).where(eq(schema.replies.leadId, input.leadId));
   if (replies.some((r) => new Date(r.receivedAt).getTime() >= at.getTime())) {
     throw new FlowError("they replied after this message, so it can't be undone");

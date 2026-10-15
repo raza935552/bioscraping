@@ -94,20 +94,23 @@ export function Outreach({ me }: { me: Me }) {
     scrollPageTop();
   };
 
-  /** Takes the last send back and puts that lead in front of you again. */
-  const undoSent = async () => {
-    if (!undoable) return;
-    const { leadId } = undoable;
+  /** Takes a recorded send back. From the notice it also opens that lead again; from the waiting
+   *  list it just clears it, so a row of test sends can be undone one after another. */
+  const undoSent = async (leadId: number, who: string, reopen: boolean) => {
     try {
-      await api.outreachUndoSent(leadId);
+      const r = await api.outreachUndoSent(leadId);
       setUndoable(null);
-      setNote("");
       const keep = skipped.filter((id) => id !== leadId);
       setSkipped(keep);
-      toast("Taken back. Nothing is recorded for them.");
-      setTab("next");
-      await load(keep, leadId);
-      scrollPageTop();
+      toast(`Took back "${r.label}" to ${who}. Nothing is recorded for them.`);
+      if (reopen) {
+        setNote("");
+        setTab("next");
+        await load(keep, leadId);
+        scrollPageTop();
+      } else {
+        await load(keep);
+      }
     } catch (e) {
       toastError((e as Error).message);
     }
@@ -217,7 +220,7 @@ export function Outreach({ me }: { me: Me }) {
         <div className="notice undo-note">
           <span>{note}</span>
           {undoable && (
-            <button type="button" onClick={() => void undoSent()} title={`Take back the message to ${undoable.who} and open them again`}>
+            <button type="button" onClick={() => void undoSent(undoable.leadId, undoable.who, true)} title={`Take back the message to ${undoable.who} and open them again`}>
               ↩︎ Undo that
             </button>
           )}
@@ -226,12 +229,13 @@ export function Outreach({ me }: { me: Me }) {
 
       {tab === "waiting" && work && (
         <div className="outreach-card">
-          <p className="muted" style={{ marginTop: 0 }}>Got a reply in your DMs? Find the person here and paste what they said. The next message is ready straight away.</p>
+          <p className="muted" style={{ marginTop: 0 }}>Got a reply in your DMs? Find the person here and paste what they said. The next message is ready straight away. Pressed "I sent it" by mistake, or testing? <strong>Undo last message</strong> puts the lead back as it was.</p>
           {work.waiting.length === 0 && <div className="muted">Nobody is waiting for a reply.</div>}
           {work.waiting.map((w) => (
             <WaitingRow
               key={w.leadId}
               w={w}
+              onUndo={(leadId, who) => undoSent(leadId, who, false)}
               onSaved={async (kind, d) => {
                 if (d && (d.email || d.code || d.firstName)) setDetails({ leadId: w.leadId, d });
                 setTab("next");
@@ -566,18 +570,36 @@ function LeadCard({
   );
 }
 
-function WaitingRow({ w, onSaved }: { w: OutreachWork["waiting"][number]; onSaved: (kind: ReplyKind, d: SignupDetails | null) => Promise<void> }) {
+function WaitingRow({ w, onSaved, onUndo }: { w: OutreachWork["waiting"][number]; onSaved: (kind: ReplyKind, d: SignupDetails | null) => Promise<void>; onUndo: (leadId: number, who: string) => Promise<void> }) {
   const [open, setOpen] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const who = w.handle ? `@${w.handle}` : w.name;
   return (
     <div className="waiting-row">
       <div>
-        <strong>{w.handle ? `@${w.handle}` : w.name}</strong> <span className="muted">· {w.platform ?? ""}</span>
+        <strong>{who}</strong> <span className="muted">· {w.platform ?? ""}</span>
         {w.dmUrl && <> · <a href={w.dmUrl} target="_blank" rel="noreferrer">open ↗</a></>}
         <div className="muted" style={{ fontSize: 12 }}>
           Sent {w.lastLabel} on {new Date(w.sentAt).toLocaleDateString()} · check-in {new Date(w.dueAt).toLocaleDateString()}
         </div>
       </div>
-      {open ? <ReplyBox leadId={w.leadId} lastLabel={w.lastLabel} onSaved={onSaved} /> : <button onClick={() => setOpen(true)}>They replied</button>}
+      {open ? (
+        <ReplyBox leadId={w.leadId} lastLabel={w.lastLabel} onSaved={onSaved} />
+      ) : (
+        <div className="waiting-actions">
+          <button onClick={() => setOpen(true)}>They replied</button>
+          <button
+            disabled={undoing}
+            title={`Take back "${w.lastLabel}" — use this if it was never really sent`}
+            onClick={() => {
+              setUndoing(true);
+              void onUndo(w.leadId, who).finally(() => setUndoing(false));
+            }}
+          >
+            ↩︎ Undo last message
+          </button>
+        </div>
+      )}
     </div>
   );
 }

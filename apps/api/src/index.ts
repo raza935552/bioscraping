@@ -1040,7 +1040,7 @@ app.post("/api/leads/:id/outreach/sent", { preHandler: requireRole("admin", "ops
 app.post("/api/leads/:id/outreach/undo-sent", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
   const id = Number((req.params as { id: string }).id);
   try {
-    const r = await undoFlowSent(db, { leadId: id, userId: req.user!.id });
+    const r = await undoFlowSent(db, { leadId: id, userId: req.user!.id, anyAge: req.user!.role === "admin" || req.user!.role === "ops" });
     await audit(req, "outreach.sent_undone", "leads", id, { templateId: r.templateId, touchNumber: r.touchNumber });
     return { ok: true, ...r };
   } catch (e) {
