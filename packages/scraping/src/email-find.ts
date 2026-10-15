@@ -30,21 +30,34 @@ const BLOCKED_V4 = [
   [224, 255], // multicast + reserved
 ] as const;
 
-function isBlockedIp(ip: string): boolean {
+export function isBlockedIp(ip: string): boolean {
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];
     if (a === 169) return b === 254;
     if (a === 172) return b >= 16 && b <= 31;
-    if (a === 192) return b === 168 || b === 0;
+    if (a === 192) return b === 168 || b === 0 || b === 88; // private, protocol assignments, 6to4 relay
     if (a === 100) return b >= 64 && b <= 127;
-    return BLOCKED_V4.some(([lo, hi]) => a >= lo && a <= hi && a !== 169 && a !== 172 && a !== 192 && a !== 100);
+    if (a === 198) return b === 18 || b === 19 || b === 51; // benchmarking, TEST-NET-2
+    if (a === 203) return b === 0; // TEST-NET-3
+    return BLOCKED_V4.some(([lo, hi]) => a >= lo && a <= hi && ![169, 172, 192, 100, 198, 203].includes(a));
   }
-  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, "").replace(/%.*$/, "");
   if (v6 === "::" || v6 === "::1") return true;
-  // IPv4-mapped (::ffff:127.0.0.1) is the same address by another name.
-  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(v6);
-  if (mapped) return isBlockedIp(mapped[1]!);
+  // The same address wearing another hat: IPv4-mapped (::ffff:127.0.0.1), IPv4-compatible
+  // (::127.0.0.1) and NAT64 (64:ff9b::7f00:1) all reach an IPv4 host through IPv6.
+  const embedded = /^(?:::ffff:|::|64:ff9b::)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(v6);
+  if (embedded) return isBlockedIp(embedded[1]!);
+  if (/^64:ff9b:/.test(v6)) {
+    // NAT64 in hex form: the last 32 bits are the IPv4 address.
+    const groups = v6.split(":").filter(Boolean);
+    const tail = groups.slice(-2);
+    if (tail.length === 2 && tail.every((g) => /^[0-9a-f]{1,4}$/.test(g))) {
+      const [hi, lo] = tail.map((g) => parseInt(g, 16)) as [number, number];
+      return isBlockedIp(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    return true; // anything else in the NAT64 prefix is not worth reaching
+  }
   return /^(fe[89ab]|fc|fd)/.test(v6); // link-local, unique-local
 }
 
@@ -113,7 +126,9 @@ export interface FoundEmail {
 }
 
 export interface FindDeps {
-  fetchImpl: typeof fetch;
+  /** Tests only. Left out in production so the pinned request is used, which is what makes the
+   *  address check binding; a plain fetch re-resolves the name and can be rebound. */
+  fetchImpl?: typeof fetch;
   /** Pages per creator across every hop; the default keeps a run polite and quick. */
   maxPages?: number;
   /** Domains that belong to competitors, deal sites or anyone else who isn't this creator. Nothing
@@ -266,6 +281,103 @@ export function contactUrlsFor(siteUrl: string): string[] {
   return [...new Set([...onPath, ...CONTACT_PATHS.map((p) => `${base}${p}`)])];
 }
 
+/** A reply, cut down to what the finder reads off it. */
+export interface HttpReply {
+  status: number;
+  /** Where the request ended up (we never auto-follow, so this is the URL asked for). */
+  url: string;
+  header(name: string): string | null;
+  body(): Promise<string>;
+}
+
+export type HttpGet = (url: string, timeoutMs: number) => Promise<HttpReply | null>;
+
+/** Node's own request, with a lookup hook that decides the address the socket connects to. This is
+ *  stronger than checking DNS first and fetching after: there is no window in between for the name
+ *  to be re-resolved to 127.0.0.1 (DNS rebinding), because this answer IS the one that is used. */
+const pinnedGet: HttpGet = async (url, timeoutMs) => {
+  const { request: httpsRequest } = await import("node:https");
+  const { request: httpRequest } = await import("node:http");
+  const { lookup: dnsLookup } = await import("node:dns");
+  const u = new URL(url);
+  const request = u.protocol === "https:" ? httpsRequest : httpRequest;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- node's LookupFunction overloads
+  const lookup: any = (hostname: string, options: any, callback: any) => {
+    dnsLookup(hostname, { ...options, all: true }, (err, addresses) => {
+      if (err) return callback(err, "", 0);
+      const list = Array.isArray(addresses) ? addresses : [addresses];
+      const bad = list.find((a) => isBlockedIp(a.address));
+      if (bad || list.length === 0) return callback(new Error(`blocked address for ${hostname}`), "", 0);
+      if (options?.all) return callback(null, list);
+      return callback(null, list[0]!.address, list[0]!.family);
+    });
+  };
+  return new Promise<HttpReply | null>((resolve) => {
+    // One way out, however the request ends. Cutting a page off at MAX_BYTES destroys the response,
+    // which never emits "end", so settling only there hung the whole run (2026-10-15).
+    let settled = false;
+    const settle = (reply: HttpReply | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      resolve(reply);
+    };
+    const req = request(
+      url,
+      { method: "GET", headers: { "user-agent": UA, accept: "text/html,*/*" }, lookup, timeout: timeoutMs },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        const done = () =>
+          settle({
+            status: res.statusCode ?? 0,
+            url,
+            header: (name) => {
+              const v = res.headers[name.toLowerCase()];
+              return Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
+            },
+            body: async () => Buffer.concat(chunks).toString("utf8"),
+          });
+        res.on("data", (c: Buffer) => {
+          size += c.length;
+          if (size <= MAX_BYTES) chunks.push(c);
+          else res.destroy(); // enough read: whatever is here is answered below
+        });
+        res.on("end", done);
+        res.on("close", done); // destroyed by the cap, or cut off by the server
+        res.on("aborted", () => settle(null));
+        res.on("error", () => settle(null));
+      },
+    );
+    // A server that connects and then says nothing would otherwise sit here: the socket timeout
+    // only covers inactivity, so the whole request gets its own deadline.
+    const deadline = setTimeout(() => {
+      req.destroy();
+      settle(null);
+    }, timeoutMs + 2_000);
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => settle(null)); // unreachable, blocked address, bad certificate
+    req.end();
+  });
+};
+
+/** A fetch-like function, as the tests inject, read through the same small surface. */
+function fromFetch(fetchImpl: typeof fetch): HttpGet {
+  return async (url, timeoutMs) => {
+    const res = await fetchImpl(url, {
+      headers: { "user-agent": UA, accept: "text/html,*/*" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return {
+      status: res.status,
+      url: res.url || url,
+      header: (name) => res.headers.get(name),
+      body: () => res.text(),
+    };
+  };
+}
+
 interface Page {
   html: string;
   /** Where the request ended up: a bit.ly in a bio lands on the brand's store. */
@@ -274,25 +386,22 @@ interface Page {
 
 /** One page, if it may be fetched. Redirects are followed by hand so each hop is checked too: a
  *  public URL that redirects to 127.0.0.1 is the usual way around a check done only on the first. */
-async function getPage(url: string, fetchImpl: typeof fetch, resolve: ResolveHost): Promise<Page | null> {
+async function getPage(url: string, get: HttpGet, resolve: ResolveHost): Promise<Page | null> {
   let next: string | null = url;
   try {
     for (let hop = 0; next && hop <= MAX_REDIRECTS; hop++) {
       if (!(await isFetchable(next, resolve))) return null;
       const here: string = next;
-      const res = await fetchImpl(here, {
-        headers: { "user-agent": UA, accept: "text/html,*/*" },
-        redirect: "manual",
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
+      const res = await get(here, TIMEOUT_MS);
+      if (!res) return null;
       if (res.status >= 300 && res.status < 400) {
-        const location = res.headers.get("location");
+        const location = res.header("location");
         next = location ? normalizeUrl(new URL(location, here).toString()) : null;
         continue;
       }
-      if (!res.ok) return null;
-      if (!/text\/html|text\/plain|application\/xhtml/i.test(res.headers.get("content-type") ?? "")) return null;
-      const body = await res.text();
+      if (res.status < 200 || res.status >= 300) return null;
+      if (!/text\/html|text\/plain|application\/xhtml/i.test(res.header("content-type") ?? "")) return null;
+      const body = await res.body();
       return { html: body.slice(0, MAX_BYTES), url: normalizeUrl(res.url) ?? here };
     }
     return null;
@@ -319,6 +428,7 @@ export async function findBusinessEmail(url: string, deps: FindDeps): Promise<Fi
   const maxPages = deps.maxPages ?? 6;
   const rejects = deps.rejectDomains ?? [];
   const resolve = deps.resolveHost ?? resolveWithDns;
+  const get = deps.fetchImpl ? fromFetch(deps.fetchImpl) : pinnedGet;
   const tokens = deps.creatorTokens ?? [];
   let pages = 0;
   if (!start) return { found: null, pages };
@@ -341,7 +451,7 @@ export async function findBusinessEmail(url: string, deps: FindDeps): Promise<Fi
     for (const candidate of contactUrlsFor(siteUrl)) {
       if (pages >= maxPages) return null;
       pages++;
-      const page = await getPage(candidate, deps.fetchImpl, resolve);
+      const page = await getPage(candidate, get, resolve);
       if (!page) continue;
       const host = hostOf(page.url);
       // A shortener or a redirect can land us somewhere that isn't theirs after all.
@@ -364,7 +474,7 @@ export async function findBusinessEmail(url: string, deps: FindDeps): Promise<Fi
 
   if (isLinkHub(start)) {
     pages++;
-    const hub = await getPage(start, deps.fetchImpl, resolve);
+    const hub = await getPage(start, get, resolve);
     if (!hub) return { found: null, pages };
     // A hub sometimes prints the address itself; otherwise follow the first site that is theirs.
     const onHub = emailsFromHtml(hub.html, start).filter((e) => theirs(e, null)).find((e) => e.how !== "text");

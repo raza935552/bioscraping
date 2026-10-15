@@ -23,7 +23,8 @@ export interface EmailFindSummary {
   duplicate: number;
   /** A link hub that led to their own site, which we saved for next time. */
   sitesLearned: number;
-  pagesFetched: number;
+  /** Pages the finder asked for, including ones refused before a socket was opened. */
+  pagesTried: number;
   nothing: number;
   /** The link in their bio was a brand's store or a coupon page: nothing there is theirs. */
   brandStore: number;
@@ -37,6 +38,8 @@ export interface EmailFindOptions {
   cap?: number;
   /** Only this lead, for checking one by hand from the admin. */
   leadId?: number;
+  /** Tests only. Left unset in production so the finder uses its own request, which pins the
+   *  connection to an address it has checked (a bio link is attacker input). */
   fetchImpl?: typeof fetch;
   /** Found addresses are written unless this is false (the admin's dry run). */
   write?: boolean;
@@ -72,9 +75,8 @@ async function candidates(db: Db, opts: EmailFindOptions) {
 }
 
 export async function runEmailFind(db: Db, opts: EmailFindOptions = {}): Promise<EmailFindSummary> {
-  const fetchImpl = opts.fetchImpl ?? fetch;
   const write = opts.write !== false;
-  const summary: EmailFindSummary = { checked: 0, found: 0, duplicate: 0, sitesLearned: 0, pagesFetched: 0, nothing: 0, brandStore: 0, notTheirs: 0, samples: [] };
+  const summary: EmailFindSummary = { checked: 0, found: 0, duplicate: 0, sitesLearned: 0, pagesTried: 0, nothing: 0, brandStore: 0, notTheirs: 0, samples: [] };
   const rows = await candidates(db, opts);
   if (rows.length === 0) return summary;
 
@@ -102,8 +104,8 @@ export async function runEmailFind(db: Db, opts: EmailFindOptions = {}): Promise
       [lead.firstName, lead.lastName].filter(Boolean).join(" "),
       handleOf(lead.social) ?? "",
     ].filter((t) => t.trim().length >= 5);
-    const res = await findBusinessEmail(start, { fetchImpl, rejectDomains, creatorTokens });
-    summary.pagesFetched += res.pages;
+    const res = await findBusinessEmail(start, { rejectDomains, creatorTokens, ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
+    summary.pagesTried += res.pages;
     if (res.skipped === "affiliate_link" || res.skipped === "rejected_domain") summary.brandStore++;
     if (res.skipped === "not_their_domain") summary.notTheirs++;
     // A hub that led to their own site: save it, so next time we start a hop further along.

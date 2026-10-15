@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contactUrlsFor, domainLooksLikeCreator, isFetchable, isIpLiteral, emailsFromHtml, findBusinessEmail, isLinkHub, isOwnSite, linksFromHtml, normalizeUrl } from "../src/email-find.js";
+import { contactUrlsFor, domainLooksLikeCreator, isBlockedIp, isFetchable, isIpLiteral, emailsFromHtml, findBusinessEmail, isLinkHub, isOwnSite, linksFromHtml, normalizeUrl } from "../src/email-find.js";
 
 /** Tests never do DNS: every host resolves to one public address. */
 const resolveHost = async () => ["93.184.216.34"];
@@ -233,5 +233,23 @@ describe("a bio link is attacker input", () => {
       resolveHost: async () => ["93.184.216.34"],
     });
     expect(called).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("the address blocklist", () => {
+  it("covers every way an inside address can be written", () => {
+    const blocked = [
+      "127.0.0.1", "127.1.2.3", "0.0.0.0", "10.1.2.3", "172.16.0.1", "172.31.255.255",
+      "192.168.1.1", "192.0.0.1", "192.88.99.1", "169.254.169.254", "100.64.0.1", "100.127.3.4",
+      "198.18.0.1", "198.19.5.5", "198.51.100.1", "203.0.113.9", "224.0.0.1", "255.255.255.255",
+      "::1", "::", "fe80::1", "fd00::1", "fc00::abcd",
+      "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::127.0.0.1",
+      "64:ff9b::7f00:1", "64:ff9b::169.254.169.254", "64:ff9b::a00:1",
+      "fe80::1%eth0",
+    ];
+    for (const ip of blocked) expect([ip, isBlockedIp(ip)]).toEqual([ip, true]);
+
+    const allowed = ["93.184.216.34", "1.1.1.1", "172.15.0.1", "172.32.0.1", "192.167.1.1", "100.63.0.1", "198.17.0.1", "2606:4700::1111", "64:ff9c::1"];
+    for (const ip of allowed) expect([ip, isBlockedIp(ip)]).toEqual([ip, false]);
   });
 });
