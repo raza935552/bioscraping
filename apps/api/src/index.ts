@@ -62,6 +62,7 @@ import {
   redoSwipeImage,
   runSwipeSearch,
   outreachWorkQueue,
+  undoFlowSent,
   warmUpOf,
   WARM_UP_STEPS,
   dmLinkFor,
@@ -912,7 +913,7 @@ app.get("/api/nav-counts", { preHandler: requireAuth }, async (req) => {
 });
 
 app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operator") }, async (req) => {
-  const q = (req.query ?? {}) as { skip?: string; lead?: string };
+  const q = (req.query ?? {}) as { skip?: string; lead?: string; platform?: string; niche?: string; competitor?: string; minFollowers?: string };
   const me = req.user!;
   const now = new Date();
   const exclude = new Set((q.skip ?? "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0));
@@ -921,7 +922,17 @@ app.get("/api/outreach/work", { preHandler: requireRole("admin", "ops", "operato
     else if (c.userId !== me.id) exclude.add(id);
   }
   const forceLeadId = q.lead ? Number(q.lead) : null;
-  const work = await outreachWorkQueue(db, { userId: me.id, now, exclude, dayStart: startOfBusinessDay(now), forceLeadId: forceLeadId && !exclude.has(forceLeadId) ? forceLeadId : null });
+  const num = (v: string | undefined) => {
+    const n = Number(v);
+    return v && Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const filters = {
+    platform: q.platform?.trim() || null,
+    niche: q.niche?.trim() || null,
+    competitorId: num(q.competitor),
+    minFollowers: num(q.minFollowers),
+  };
+  const work = await outreachWorkQueue(db, { userId: me.id, now, exclude, dayStart: startOfBusinessDay(now), forceLeadId: forceLeadId && !exclude.has(forceLeadId) ? forceLeadId : null, filters });
   if (!work.next) return { ...work, lead: null, conversation: null };
   // One lead held per person: handing out the next one releases the last.
   for (const [id, c] of outreachClaims) if (c.userId === me.id) outreachClaims.delete(id);
@@ -1019,6 +1030,18 @@ app.post("/api/leads/:id/outreach/sent", { preHandler: requireRole("admin", "ops
     const r = await recordFlowSent(db, { leadId: id, templateId: String(b.templateId ?? "") as never, body: String(b.body ?? ""), channel: String(b.channel ?? "") as never, gapIndex: typeof b.gapIndex === "number" ? b.gapIndex : null, userId: req.user!.id, recruiterName: req.user!.name, ...(warmUpOf(b.warmUp as never) ? { warmUp: warmUpOf(b.warmUp as never)! } : {}) });
     outreachClaims.delete(id);
     await audit(req, "outreach.sent", "leads", id, { templateId: b.templateId, channel: b.channel, messageId: r.messageId });
+    return { ok: true, ...r };
+  } catch (e) {
+    return flowFail(reply, e);
+  }
+});
+
+// Pressed "I sent it" by mistake: the message row goes and the lead comes back as it was.
+app.post("/api/leads/:id/outreach/undo-sent", { preHandler: requireRole("admin", "ops", "operator") }, async (req, reply) => {
+  const id = Number((req.params as { id: string }).id);
+  try {
+    const r = await undoFlowSent(db, { leadId: id, userId: req.user!.id });
+    await audit(req, "outreach.sent_undone", "leads", id, { templateId: r.templateId, touchNumber: r.touchNumber });
     return { ok: true, ...r };
   } catch (e) {
     return flowFail(reply, e);

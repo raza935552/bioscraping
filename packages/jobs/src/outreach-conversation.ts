@@ -315,6 +315,67 @@ export async function recordFlowSent(
   return { messageId };
 }
 
+/** How long a recorded send can be taken back. Long enough to notice at the end of a sitting, short
+ *  enough that a check-in date nobody remembers isn't quietly rewritten a week later. */
+export const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Takes back the last "I sent it" on a lead: the message row goes, and the lead's touch count,
+ *  status, last-contact and check-in date go back to what the message before it left behind.
+ *  Refused once anything has happened after it (a reply, a sign-up), because then the send is part
+ *  of a conversation and not a mis-press. */
+export async function undoFlowSent(
+  db: Db,
+  input: { leadId: number; userId: number },
+  now = new Date(),
+): Promise<{ templateId: string | null; touchNumber: number; label: string }> {
+  const lead = await db.query.leads.findFirst({ where: eq(schema.leads.id, input.leadId) });
+  if (!lead) throw new FlowError("lead not found");
+  const sent = await db
+    .select()
+    .from(schema.messages)
+    .where(and(eq(schema.messages.leadId, input.leadId), eq(schema.messages.state, "sent")))
+    .orderBy(asc(schema.messages.id));
+  const last = sent[sent.length - 1];
+  if (!last) throw new FlowError("nothing to undo: no message has been recorded for this lead");
+  const flowTemplate = flowTemplateOf(last);
+  if (!flowTemplate) throw new FlowError("that message was sent through Send messages, not this page; undo isn't available for it");
+  const at = new Date(last.sentAt ?? last.createdAt);
+  if (now.getTime() - at.getTime() > UNDO_WINDOW_MS) throw new FlowError("too late to undo: this was recorded more than a day ago");
+  const replies = await db.select().from(schema.replies).where(eq(schema.replies.leadId, input.leadId));
+  if (replies.some((r) => new Date(r.receivedAt).getTime() >= at.getTime())) {
+    throw new FlowError("they replied after this message, so it can't be undone");
+  }
+  const signup = await db.query.signups.findFirst({ where: eq(schema.signups.leadId, input.leadId) });
+  if (signup) throw new FlowError("this lead has signed up, so their messages are kept as they are");
+
+  const prev = sent[sent.length - 2] ?? null;
+  const prevAt = prev ? new Date(prev.sentAt ?? prev.createdAt) : null;
+  const settings = await loadOutreachSettings(db);
+  // What the lead looked like before this message: the touch count it had, the channel of the one
+  // before, and a status read back off what is left rather than remembered.
+  const touch = last.touchNumber ?? sent.length;
+  const prevChannel = prev ? ((prev.lintReport as { contactChannel?: string } | null)?.contactChannel ?? null) : null;
+  const status = replies.length ? "In talks" : prev ? "Contacted" : "Not contacted";
+  // A check-in is only due while the last word was ours. If they answered after the message before
+  // this one, the lead is waiting on us instead, and inventing a date would push it into check-ins.
+  const answeredLast = prevAt ? replies.some((r) => new Date(r.receivedAt).getTime() > prevAt.getTime()) : replies.length > 0;
+  await db.transaction(async (tx) => {
+    const [res] = await tx.delete(schema.messages).where(eq(schema.messages.id, last.id));
+    if (!(res as { affectedRows?: number }).affectedRows) throw new FlowError("already undone");
+    await tx
+      .update(schema.leads)
+      .set({
+        followUpsSent: prev ? (prev.touchNumber ?? Math.max(touch - 1, 0)) : 0,
+        lastReachedOut: prevAt,
+        contactChannel: prevChannel,
+        status,
+        nextFollowUpDate: prevAt && !answeredLast ? new Date(prevAt.getTime() + settings.checkinDays * 86_400_000) : null,
+      })
+      .where(eq(schema.leads.id, input.leadId));
+  });
+  return { templateId: flowTemplate, touchNumber: touch, label: DEFAULT_TEMPLATES[flowTemplate].label };
+}
+
 /** Genuine engagement before the first message: the person is on the creator's profile anyway, and a DM
  *  from an account they just saw in their notifications gets opened instead of ignored in Requests
  *  (Josh + Raza, 2026-09-18, in place of automated seeding). Recorded, never required. */
@@ -393,15 +454,34 @@ export function stepSummary(step: FlowStep): { kind: FlowStep["kind"]; templateI
 
 export type WorkBucket = "answer" | "checkin" | "new";
 
+/** Narrows the queue to the kind of creator someone wants to work through: one platform at a sitting,
+ *  one brand's affiliates, or only accounts above a size. Set by the person on the Outreach page. */
+export interface QueueFilters {
+  platform?: string | null;
+  niche?: string | null;
+  competitorId?: number | null;
+  minFollowers?: number | null;
+}
+
+/** What is actually in the queue to filter by, so the page offers real choices and their sizes. */
+export interface QueueOptions {
+  platforms: Array<{ value: string; count: number }>;
+  niches: Array<{ value: string; count: number }>;
+  competitors: Array<{ id: number; name: string; count: number }>;
+}
+
 export interface WorkQueue {
   counts: {
     answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number;
     /** First messages left out because the lead came from the imported research board, not sourcing. */
     importedNew: number;
   };
+  /** Leads the filters are holding back, by bucket: a reply must never go unanswered unnoticed. */
+  hidden: { answer: number; checkin: number; new: number; waiting: number };
   /** The next lead to work on, or null when everything is done. */
   next: { leadId: number; bucket: WorkBucket } | null;
   waiting: Array<{ leadId: number; name: string; handle: string | null; platform: string | null; dmUrl: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
+  options: QueueOptions;
 }
 
 export interface DmTarget {
@@ -475,7 +555,7 @@ const CLOSED_STATUSES = ["Signed", "Passed", "No", "Signed up"];
  *  check-ins that are due, then new leads by rank. Leads someone else has open are left out. */
 export async function outreachWorkQueue(
   db: Db,
-  opts: { userId: number; now?: Date; exclude?: Set<number>; dayStart: Date; forceLeadId?: number | null },
+  opts: { userId: number; now?: Date; exclude?: Set<number>; dayStart: Date; forceLeadId?: number | null; filters?: QueueFilters },
 ): Promise<WorkQueue> {
   const now = opts.now ?? new Date();
   const leads = await db.select().from(schema.leads);
@@ -499,6 +579,17 @@ export async function outreachWorkQueue(
   );
   const buckets: Record<WorkBucket, Array<{ leadId: number; sortKey: number }>> = { answer: [], checkin: [], new: [] };
   const waiting: WorkQueue["waiting"] = [];
+  const hidden = { answer: 0, checkin: 0, new: 0, waiting: 0 };
+  const competitorNames = new Map((await db.select().from(schema.competitors)).map((c) => [c.id, c.name]));
+  const tally = { platforms: new Map<string, number>(), niches: new Map<string, number>(), competitors: new Map<number, number>() };
+  const f = opts.filters ?? {};
+  // A lead asked for by id (coming back from a reply, or after an undo) is shown whatever the filters say.
+  const matches = (l: (typeof eligible)[number]) =>
+    l.id === opts.forceLeadId ||
+    ((!f.platform || (l.primaryPlatform ?? "").toLowerCase() === f.platform.toLowerCase()) &&
+      (!f.niche || (l.niche ?? "") === f.niche) &&
+      (f.competitorId == null || l.competitorId === f.competitorId) &&
+      (f.minFollowers == null || (l.totalReach ?? 0) >= f.minFollowers));
   // The queue hands out first messages to leads this engine sourced. The imported research board
   // (no sourcing profile) is a different kind of list — older, unverified, and nobody is working
   // through it — so it isn't mixed in here; those leads are still reachable from the Leads page,
@@ -509,17 +600,39 @@ export async function outreachWorkQueue(
     const events = flows.get(l.id)?.events ?? [];
     const step = flowStepFor(pathOf(l, rates), events, l.id, settings, now, l);
     const last = events[events.length - 1];
+    const shown = matches(l);
+    const count = () => {
+      if (l.primaryPlatform) tally.platforms.set(l.primaryPlatform, (tally.platforms.get(l.primaryPlatform) ?? 0) + 1);
+      if (l.niche) tally.niches.set(l.niche, (tally.niches.get(l.niche) ?? 0) + 1);
+      if (l.competitorId != null) tally.competitors.set(l.competitorId, (tally.competitors.get(l.competitorId) ?? 0) + 1);
+    };
     if (step.kind === "wait") {
+      count();
+      if (!shown) {
+        hidden.waiting++;
+        continue;
+      }
       const target = dmTargetFor(l, handleKeys.get(l.id));
       waiting.push({ leadId: l.id, name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)", handle: target?.handle ?? null, platform: l.primaryPlatform, dmUrl: target?.url ?? null, lastLabel: DEFAULT_TEMPLATES[step.lastTemplateId].label, sentAt: step.since.toISOString(), dueAt: step.dueAt.toISOString() });
       continue;
     }
     if (step.kind === "done") continue;
-    if (last?.type === "reply") buckets.answer.push({ leadId: l.id, sortKey: last.at.getTime() });
-    else if (last?.type === "sent") buckets.checkin.push({ leadId: l.id, sortKey: last.at.getTime() });
+    // The bucket decides itself first, so a filter can't turn an imported lead (which never enters
+    // the queue) into something "set aside by your filters".
+    const bucket: WorkBucket | null =
+      last?.type === "reply" ? "answer" : last?.type === "sent" ? "checkin" : l.sourcingProfileId != null || l.id === opts.forceLeadId ? "new" : null;
+    if (!bucket) {
+      importedNew++;
+      continue;
+    }
+    count();
+    if (!shown) {
+      hidden[bucket]++;
+      continue;
+    }
     // New leads we can open straight on their profile come before the ones that need a name search.
-    else if (l.sourcingProfileId != null || l.id === opts.forceLeadId) buckets.new.push({ leadId: l.id, sortKey: (dmTargetFor(l, handleKeys.get(l.id)) ?.kind === "profile" ? 0 : 1e7) + (l.conversionRank ?? 1e6) });
-    else importedNew++;
+    if (bucket === "new") buckets.new.push({ leadId: l.id, sortKey: (dmTargetFor(l, handleKeys.get(l.id))?.kind === "profile" ? 0 : 1e7) + (l.conversionRank ?? 1e6) });
+    else buckets[bucket].push({ leadId: l.id, sortKey: last!.at.getTime() });
   }
   for (const b of Object.values(buckets)) b.sort((a, c) => a.sortKey - c.sortKey);
   waiting.sort((a, b) => a.dueAt.localeCompare(b.dueAt));
@@ -554,8 +667,16 @@ export async function outreachWorkQueue(
       sentTodayByMe: today.filter((m) => m.by === opts.userId).length,
       importedNew,
     },
+    hidden,
     next,
     waiting,
+    options: {
+      platforms: [...tally.platforms].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count),
+      niches: [...tally.niches].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count),
+      competitors: [...tally.competitors]
+        .map(([id, count]) => ({ id, name: competitorNames.get(id) ?? `#${id}`, count }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    },
   };
 }
 

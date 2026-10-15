@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader, scrollPageTop } from "../components.js";
 import { toast, toastError } from "../toast.js";
-import { api, type Me, type OutreachWork, type ReplySuggestion } from "../api.js";
+import { api, NO_FILTERS, type Me, type OutreachFilters, type OutreachWork, type ReplySuggestion } from "../api.js";
 import { REPLY_OPTIONS, channelFor, compact, copyText, splitName, suggestCode, type ReplyKind } from "../outreachShared.js";
 
 const BUCKET_LABEL: Record<string, string> = {
@@ -21,11 +21,40 @@ const BUCKET_TASK: Record<string, string> = {
   new: "Nobody has contacted them yet. This is the first message.",
 };
 
+const FILTER_KEY = "bx.outreach.filters";
+
+/** What this person filtered by last time, so a sitting picks up where it left off. */
+function storedFilters(): OutreachFilters {
+  try {
+    const raw = window.localStorage.getItem(FILTER_KEY);
+    if (!raw) return NO_FILTERS;
+    const p = JSON.parse(raw) as Partial<OutreachFilters>;
+    return {
+      platform: String(p.platform ?? ""),
+      niche: String(p.niche ?? ""),
+      competitor: String(p.competitor ?? ""),
+      minFollowers: String(p.minFollowers ?? ""),
+    };
+  } catch {
+    return NO_FILTERS;
+  }
+}
+
+const REACH_STEPS: Array<[string, string]> = [
+  ["", "Any size"],
+  ["5000", "5K+ followers"],
+  ["25000", "25K+ followers"],
+  ["100000", "100K+ followers"],
+];
+
 type SignupDetails = ReplySuggestion["details"];
 
 export function Outreach({ me }: { me: Me }) {
   const [work, setWork] = useState<OutreachWork | null>(null);
   const [skipped, setSkipped] = useState<number[]>([]);
+  const [filters, setFilters] = useState<OutreachFilters>(storedFilters);
+  // The last send, so a mis-press can be taken back while the next lead is already open.
+  const [undoable, setUndoable] = useState<{ leadId: number; who: string } | null>(null);
   const [tab, setTab] = useState<"next" | "waiting">("next");
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
@@ -38,7 +67,7 @@ export function Outreach({ me }: { me: Me }) {
     setLoading(true);
     setErr("");
     try {
-      const w = await api.outreachWork(skip, lead);
+      const w = await api.outreachWork(skip, lead, filters);
       setWork(w);
       current.current = w.lead?.id ?? null;
     } catch (e) {
@@ -46,7 +75,7 @@ export function Outreach({ me }: { me: Me }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filters]);
   useEffect(() => {
     void load([]);
     // Let go of the lead this person was holding when they leave the page.
@@ -55,18 +84,51 @@ export function Outreach({ me }: { me: Me }) {
     };
   }, [load]);
 
-  const next = async (opts: { skip?: number; message?: string } = {}) => {
+  const next = async (opts: { skip?: number; message?: string; undo?: { leadId: number; who: string } } = {}) => {
     const skip = opts.skip != null ? [...skipped, opts.skip] : skipped;
     if (opts.skip != null) setSkipped(skip);
     setNote(opts.message ?? "");
+    setUndoable(opts.undo ?? null);
     if (opts.message) toast(opts.message);
     await load(skip);
     scrollPageTop();
   };
 
+  /** Takes the last send back and puts that lead in front of you again. */
+  const undoSent = async () => {
+    if (!undoable) return;
+    const { leadId } = undoable;
+    try {
+      await api.outreachUndoSent(leadId);
+      setUndoable(null);
+      setNote("");
+      const keep = skipped.filter((id) => id !== leadId);
+      setSkipped(keep);
+      toast("Taken back. Nothing is recorded for them.");
+      setTab("next");
+      await load(keep, leadId);
+      scrollPageTop();
+    } catch (e) {
+      toastError((e as Error).message);
+    }
+  };
+
+  const changeFilters = (f: OutreachFilters) => {
+    setFilters(f);
+    setUndoable(null);
+    try {
+      window.localStorage.setItem(FILTER_KEY, JSON.stringify(f));
+    } catch {
+      /* a browser with storage off still filters, it just forgets next time */
+    }
+  };
+
   const c = work?.counts;
   const lead = work?.lead ?? null;
   const queueLeft = (c?.answer ?? 0) + (c?.checkin ?? 0) + (c?.new ?? 0);
+  const filtered = Object.values(filters).some(Boolean);
+  const h = work?.hidden;
+  const hiddenTotal = (h?.answer ?? 0) + (h?.checkin ?? 0) + (h?.new ?? 0) + (h?.waiting ?? 0);
 
   return (
     <div className="outreach-page">
@@ -106,8 +168,61 @@ export function Outreach({ me }: { me: Me }) {
         )}
       </PageHeader>
 
+      {work && (
+        <div className="outreach-filters">
+          <span className="muted">Work through</span>
+          <select
+            value={filters.platform}
+            onChange={(e) => changeFilters({ ...filters, platform: e.target.value })}
+            aria-label="Platform"
+          >
+            <option value="">Every platform</option>
+            {work.options.platforms.map((o) => (
+              <option key={o.value} value={o.value}>{o.value} · {o.count}</option>
+            ))}
+          </select>
+          <select value={filters.niche} onChange={(e) => changeFilters({ ...filters, niche: e.target.value })} aria-label="Niche">
+            <option value="">Every niche</option>
+            {work.options.niches.map((o) => (
+              <option key={o.value} value={o.value}>{o.value} · {o.count}</option>
+            ))}
+          </select>
+          <select value={filters.competitor} onChange={(e) => changeFilters({ ...filters, competitor: e.target.value })} aria-label="Brand they promote">
+            <option value="">Every brand</option>
+            {work.options.competitors.map((o) => (
+              <option key={o.id} value={String(o.id)}>{o.name} · {o.count}</option>
+            ))}
+          </select>
+          <select value={filters.minFollowers} onChange={(e) => changeFilters({ ...filters, minFollowers: e.target.value })} aria-label="Smallest audience">
+            {REACH_STEPS.map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          {filtered && (
+            <button type="button" onClick={() => changeFilters(NO_FILTERS)} title="Work through everyone again">
+              Clear filters
+            </button>
+          )}
+          {filtered && hiddenTotal > 0 && (
+            <span className="muted">
+              {hiddenTotal} set aside by these filters
+              {(work.hidden.answer ?? 0) > 0 ? `, including ${work.hidden.answer} who replied` : ""}
+            </span>
+          )}
+        </div>
+      )}
+
       {err && <div className="error">{err}</div>}
-      {note && !err && <div className="notice">{note}</div>}
+      {note && !err && (
+        <div className="notice undo-note">
+          <span>{note}</span>
+          {undoable && (
+            <button type="button" onClick={() => void undoSent()} title={`Take back the message to ${undoable.who} and open them again`}>
+              ↩︎ Undo that
+            </button>
+          )}
+        </div>
+      )}
 
       {tab === "waiting" && work && (
         <div className="outreach-card">
@@ -132,7 +247,7 @@ export function Outreach({ me }: { me: Me }) {
         <div className="outreach-card">
           <h2 style={{ marginTop: 0 }}>All done 🎉</h2>
           <p className="muted">
-            Nothing to send right now.{skipped.length > 0 ? ` You skipped ${skipped.length}: use "Show skipped again" to see them.` : ""} When replies come in, open "Waiting for reply".
+            Nothing to send right now.{filtered && hiddenTotal > 0 ? ` ${hiddenTotal} more are set aside by your filters — clear them to carry on.` : ""}{skipped.length > 0 ? ` You skipped ${skipped.length}: use "Show skipped again" to see them.` : ""} When replies come in, open "Waiting for reply".
           </p>
         </div>
       )}
@@ -144,7 +259,7 @@ export function Outreach({ me }: { me: Me }) {
           work={work}
           busyLoading={loading}
           presetDetails={details?.leadId === lead.id ? details.d : null}
-          onNext={(message) => void next({ message })}
+          onNext={(message, undo) => void next({ message, ...(undo ? { undo } : {}) })}
           onSkip={() => void next({ skip: lead.id, message: "Skipped for now." })}
           onDetails={(d) => setDetails({ leadId: lead.id, d })}
           onReloadSame={async () => load(skipped, lead.id)}
@@ -168,7 +283,7 @@ function LeadCard({
   work: OutreachWork;
   busyLoading: boolean;
   presetDetails: SignupDetails | null;
-  onNext: (message: string) => void;
+  onNext: (message: string, undo?: { leadId: number; who: string }) => void;
   onSkip: () => void;
   onDetails: (d: SignupDetails) => void;
   onReloadSame: () => Promise<void>;
@@ -355,7 +470,7 @@ function LeadCard({
               onClick={() =>
                 void run(async () => {
                   await api.outreachSent(lead.id, { templateId: message.templateId, body: text, channel: noDm && lead.email ? "Email" : channelFor(lead.platform), gapIndex: message.templateId.startsWith("offer") ? conv.gapIndex : null, ...(firstMessage ? { warmUp: warm } : {}) });
-                  onNext(`Recorded: sent to ${handleLabel}. Next lead loaded.`);
+                  onNext(`Recorded: sent to ${handleLabel}. Next lead loaded.`, { leadId: lead.id, who: handleLabel });
                 })
               }
             >

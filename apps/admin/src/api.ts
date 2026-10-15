@@ -172,8 +172,32 @@ export interface AffiliateAssets {
   assets: RenderedAsset[];
 }
 
+export interface OutreachFilters {
+  platform: string;
+  niche: string;
+  competitor: string;
+  minFollowers: string;
+}
+
+export const NO_FILTERS: OutreachFilters = { platform: "", niche: "", competitor: "", minFollowers: "" };
+
+/** The work-queue query: skipped leads, a lead to come back to, and whatever the person filtered by. */
+function outreachQuery(skip: number[], lead?: number | null, filters?: OutreachFilters): string {
+  const q = new URLSearchParams({ skip: skip.join(",") });
+  if (lead) q.set("lead", String(lead));
+  for (const [k, v] of Object.entries(filters ?? {})) if (v) q.set(k, v);
+  return q.toString();
+}
+
 export interface OutreachWork {
   counts: { answer: number; checkin: number; new: number; waiting: number; sentToday: number; sentTodayByMe: number; importedNew: number };
+  /** How many leads the filters are holding back, per bucket. */
+  hidden: { answer: number; checkin: number; new: number; waiting: number };
+  options: {
+    platforms: Array<{ value: string; count: number }>;
+    niches: Array<{ value: string; count: number }>;
+    competitors: Array<{ id: number; name: string; count: number }>;
+  };
   next: { leadId: number; bucket: "answer" | "checkin" | "new" } | null;
   waiting: Array<{ leadId: number; name: string; handle: string | null; platform: string | null; dmUrl: string | null; lastLabel: string; sentAt: string; dueAt: string }>;
   lead: {
@@ -379,8 +403,10 @@ export const api = {
     request<{ ok: true }>(`/api/leads/${id}/outreach/reply`, { method: "POST", body: JSON.stringify(body) }),
   outreachSignup: (id: number, body: { firstName: string; lastName: string; email: string; code: string }) =>
     request<{ ok: true; signupId: number }>(`/api/leads/${id}/outreach/signup`, { method: "POST", body: JSON.stringify(body) }),
-  outreachWork: (skip: number[], lead?: number | null) =>
-    request<OutreachWork>(`/api/outreach/work?skip=${skip.join(",")}${lead ? `&lead=${lead}` : ""}`),
+  outreachWork: (skip: number[], lead?: number | null, filters?: OutreachFilters) =>
+    request<OutreachWork>(`/api/outreach/work?${outreachQuery(skip, lead, filters)}`),
+  outreachUndoSent: (leadId: number) =>
+    request<{ ok: true; templateId: string | null; touchNumber: number; label: string }>(`/api/leads/${leadId}/outreach/undo-sent`, { method: "POST", body: "{}" }),
   outreachCheck: (leadId: number, body: string, templateId: string) =>
     request<{ placeholders: string[]; violations: Array<{ rule: string; detail: string }>; blocked: boolean }>("/api/outreach/check", { method: "POST", body: JSON.stringify({ leadId, body, templateId }) }),
   outreachRelease: (leadId: number) => request<{ ok: true }>("/api/outreach/release", { method: "POST", body: JSON.stringify({ leadId }) }),
