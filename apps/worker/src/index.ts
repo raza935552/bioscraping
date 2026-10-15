@@ -5,7 +5,7 @@ import { loadEnv } from "@biolinx/core";
 loadEnv();
 
 const { connect, hydrateEnvFromSettings, withMysqlLock } = await import("@biolinx/db");
-const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize, runLeadIngest, runCustomerioSync, runSwipeSync, runSwipeSearch } =
+const { runIdevSync, runRankRecompute, runReferralExpiry, runMetricsDigest, runEnrichPersonalize, runLeadIngest, runCustomerioSync, runSwipeSync, runSwipeSearch, runEmailFind } =
   await import("@biolinx/jobs");
 const { startScheduler } = await import("./scheduler.js");
 
@@ -37,6 +37,9 @@ startScheduler(conn, [
   },
   { name: "customerio-sync", everyMs: HOUR, runOnBoot: true, fn: async () => void (await runCustomerioSync(conn.db)) },
   { name: "metrics-digest", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runMetricsDigest(conn.db)) },
+  // Business addresses behind the links leads already have. Plain fetches from this server, so it
+  // spends nothing and a restart can't cost money.
+  { name: "email-find", everyMs: 24 * HOUR, runOnBoot: false, fn: async () => void (await runEmailFind(conn.db, { cap: 60 })) },
   // Sends only posts a person approved (and only when auto-send is on); looks up missed callbacks.
   { name: "swipe-sync", everyMs: 10 * 60 * 1000, runOnBoot: false, fn: async () => void (await runSwipeSync(conn.db)) },
   // Top posts for the swipe file: only when switched on in Settings and the unused pile runs low.

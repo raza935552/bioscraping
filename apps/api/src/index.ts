@@ -62,6 +62,7 @@ import {
   redoSwipeImage,
   runSwipeSearch,
   outreachWorkQueue,
+  runEmailFind,
   undoFlowSent,
   warmUpOf,
   WARM_UP_STEPS,
@@ -1431,6 +1432,8 @@ const jobTriggers: Record<string, () => Promise<unknown>> = {
     return r;
   },
   "customerio-sync": () => runCustomerioSync(db),
+  // Plain fetches of links we already have: no Apify, no spend.
+  "email-find": () => runEmailFind(db, { cap: 60 }),
 };
 
 app.post("/api/jobs/:job", { preHandler: requireRole("admin", "ops") }, async (req, reply) => {

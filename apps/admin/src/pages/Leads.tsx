@@ -291,6 +291,27 @@ export function Leads({ me, initialQuery = "" }: { me: Me; initialQuery?: string
             {busy ? "Working…" : "Research next batch"}
           </button>
         )}
+        {canRun && (
+          <button
+            disabled={busy}
+            title="Follow the link in each lead's bio to their own site and keep a business address they published there. Free: no Apify, no spend."
+            onClick={() => {
+              setBusy(true);
+              setRankMsg("");
+              void api
+                .runJob("email-find")
+                .then((r) => {
+                  setRankMsg(describeRun("email-find", r.result));
+                  toast(describeRun("email-find", r.result));
+                  return load();
+                })
+                .catch((e) => { setError((e as Error).message); toastError((e as Error).message); })
+                .finally(() => setBusy(false));
+            }}
+          >
+            {busy ? "Looking…" : "Find emails"}
+          </button>
+        )}
         {me.role === "admin" && (
           <button
             disabled={busy}

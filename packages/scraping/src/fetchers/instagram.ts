@@ -18,6 +18,9 @@ interface InstagramRow {
   isBusinessAccount?: boolean;
   businessCategoryName?: string | null;
   about?: { country?: string | null } | null;
+  externalUrl?: string | null;
+  publicEmail?: string | null;
+  businessEmail?: string | null;
   latestPosts?: Array<{ caption?: string; url?: string | null; timestamp?: string | null; likesCount?: number; commentsCount?: number; videoViewCount?: number }>;
 }
 
@@ -44,5 +47,8 @@ export const fetchInstagram: Fetcher = async (c, deps) => {
     items: takeItems(items, deps.maxItems),
     country: p?.about?.country ?? null,
     businessCategory: p?.isBusinessAccount ? (p.businessCategoryName ?? "business") : null,
+    externalUrl: p?.externalUrl ?? null,
+    // Instagram shows this one behind the profile's Contact button: published for business mail.
+    platformEmail: p?.publicEmail ?? p?.businessEmail ?? null,
   };
 };

@@ -145,6 +145,8 @@ export function describeRun(job: string, detail: unknown): string {
     }
     case "rank-recompute":
       return `${n("total") ?? 0} leads ranked · ${n("changed") ?? 0} moved · ${n("triage") ?? 0} need triage · ${n("sp5Excluded") ?? 0} do-not-contact${n("notReviewed") ? ` · ${n("notReviewed")} sourced leads waiting for review (not ranked)` : ""}`;
+    case "email-find":
+      return `${n("checked") ?? 0} leads checked · ${n("found") ?? 0} business addresses found · ${n("brandStore") ?? 0} linked a brand's shop · ${n("notTheirs") ?? 0} had somebody else's address`;
     case "referral-expiry":
       return `${n("stamped") ?? 0} dated · ${n("newlyExpired") ?? 0} newly expired · ${n("expiredTotal") ?? 0} expired total`;
     case "outreach-dispatch:dm":

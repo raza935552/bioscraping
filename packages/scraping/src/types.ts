@@ -39,6 +39,11 @@ export interface SourceBundle {
   postCountries?: Array<string | null>;
   /** Instagram business account category ("Gym/Physical Fitness Center"), or null for personal/creator accounts. */
   businessCategory?: string | null;
+  /** The link in their bio, raw. Where the email finder starts looking. */
+  externalUrl?: string | null;
+  /** An address the platform publishes as their business contact (Instagram's contact button).
+   *  Unlike an address written in a bio, this one is offered for business mail. */
+  platformEmail?: string | null;
 }
 
 export interface FetchDeps {

@@ -29,3 +29,4 @@ export * from "./content/swipe-search.js";
 export * from "./qualification.js";
 export * from "./outreach-conversation.js";
 export { lintEmail, isBlocked } from "@biolinx/compliance";
+export * from "./email-find.js";

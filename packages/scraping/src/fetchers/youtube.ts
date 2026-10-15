@@ -42,5 +42,7 @@ export const fetchYouTube: Fetcher = async (c, deps) => {
     followers: toNumber(first?.numberOfSubscribers),
     items: takeItems(items, deps.maxItems),
     country: first?.channelLocation ?? null,
+    // Channels put their site (or link hub) in the description; the email finder starts there.
+    externalUrl: first?.channelDescription?.match(/https?:\/\/[^\s"'<>)]+/)?.[0] ?? null,
   };
 };

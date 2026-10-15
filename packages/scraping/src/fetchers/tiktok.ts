@@ -17,7 +17,7 @@ interface TikTokRow {
   commentCount?: number;
   isRepost?: boolean;
   locationCreated?: string;
-  authorMeta?: { name?: string; nickName?: string; signature?: string; fans?: number; profileUrl?: string };
+  authorMeta?: { name?: string; nickName?: string; signature?: string; fans?: number; profileUrl?: string; bioLink?: string | { link?: string } | null };
 }
 
 export const fetchTikTok: Fetcher = async (c, deps) => {
@@ -42,5 +42,7 @@ export const fetchTikTok: Fetcher = async (c, deps) => {
     followers: toNumber(meta?.fans),
     items: takeItems(items, deps.maxItems),
     postCountries: videos.map((r) => r.locationCreated ?? null),
+    // The actor has returned bioLink as a string and as { link } at different times.
+    externalUrl: typeof meta?.bioLink === "string" ? meta.bioLink : (meta?.bioLink?.link ?? null),
   };
 };

@@ -23,6 +23,10 @@ import {
   urlsInText,
   qualityGate,
   emailFromText,
+  isPlausibleEmail,
+  isLinkHub,
+  isOwnSite,
+  normalizeUrl,
   suggestCompetitors,
   findTerm,
   looksLikeStore,
@@ -195,7 +199,24 @@ export interface IngestSummary {
   pendingReviewBefore?: number;
 }
 
-export type VerifiedRead = VerifiedProfile & { items: SourceItem[]; profileUrl: string; country?: string | null; businessCategory?: string | null };
+/** The link in a bio, kept only when it is a real http(s) address and not another platform's page:
+ *  a link hub counts, because the finder follows it one hop to their own site. */
+function ownSiteUrl(raw: string | null | undefined): string | null {
+  const url = normalizeUrl(raw);
+  if (!url || url.length > 500) return null;
+  return isOwnSite(url) || isLinkHub(url) ? url : null;
+}
+
+export type VerifiedRead = VerifiedProfile & {
+  items: SourceItem[];
+  profileUrl: string;
+  country?: string | null;
+  businessCategory?: string | null;
+  /** The link in their bio, kept so the email finder has somewhere to look later. */
+  externalUrl?: string | null;
+  /** An address the platform publishes as their business contact (Instagram's contact button). */
+  platformEmail?: string | null;
+};
 export type VerifyFn = (hit: DiscoveryHit) => Promise<VerifiedRead | null>;
 
 export interface Candidate {
@@ -451,7 +472,10 @@ export async function planProfile(
     }
     // An email written in the bio, else in the post that found them or their recent posts.
     // Someone we already have under that email is not a new lead.
-    const email = emailFromText(v?.bio ?? h.bio) ?? emailFromText(h.bio) ?? emailFromText(h.postText) ?? (v?.items ?? []).map((i) => emailFromText(i.text)).find(Boolean) ?? null;
+    // A platform's business-contact field is published for business mail, so it may be written to;
+    // an address in a bio or caption is "scraped" and the linter blocks automated mail to it.
+    const businessEmail = isPlausibleEmail(v?.platformEmail) ? v!.platformEmail!.toLowerCase() : null;
+    const email = businessEmail ?? emailFromText(v?.bio ?? h.bio) ?? emailFromText(h.bio) ?? emailFromText(h.postText) ?? (v?.items ?? []).map((i) => emailFromText(i.text)).find(Boolean) ?? null;
     if (email && known.emails.has(normalizeEmail(email))) {
       summary.alreadyKnown++;
       track(h, false);
@@ -478,7 +502,9 @@ export async function planProfile(
       primaryPlatform: PLATFORM_LABEL[h.platform],
       socialProfiles: `${SOCIAL_PREFIX[h.platform]}${h.handle}`,
       // "scraped" provenance: the linter blocks automated email to it; a person decides.
-      ...(email ? { email, emailNormalized: normalizeEmail(email), emailProvenance: "scraped" } : {}),
+      ...(email ? { email, emailNormalized: normalizeEmail(email), emailProvenance: businessEmail ? "published_business" : "scraped" } : {}),
+      // Only http(s), and never another platform's page: this is where the email finder looks next.
+      ...(ownSiteUrl(v?.externalUrl) ? { websiteUrl: ownSiteUrl(v?.externalUrl) } : {}),
       whereFound: h.postUrl,
       totalReach: v?.followers ?? null,
       reachSourceUrl: v ? v.profileUrl : null,
@@ -631,6 +657,8 @@ export function makeVerify(deps: IngestDeps): VerifyFn {
       bio: bundle.bio,
       country: resolveCountry({ platform: bundle.country, posts: bundle.postCountries, bio: bundle.bio, captions: bundle.items.map((i) => i.text) }).country,
       businessCategory: bundle.businessCategory ?? null,
+      externalUrl: bundle.externalUrl ?? null,
+      platformEmail: bundle.platformEmail ?? null,
       lastPostAt: dated.length > 0 ? dated[dated.length - 1]! : null,
       isRepostRatio: flagged.length > 0 ? flagged.filter((i) => i.isRepost).length / flagged.length : null,
       items: bundle.items,
