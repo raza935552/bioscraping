@@ -13,7 +13,7 @@ import fastifyCors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
 import fastifyStatic from "@fastify/static";
 import fastifyRateLimit from "@fastify/rate-limit";
-import Fastify, { type FastifyReply } from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { desc, eq, inArray, isNotNull } from "drizzle-orm";
 import {
   connect,
@@ -428,7 +428,22 @@ app.post("/api/affiliates/classify", { preHandler: requireRole("admin", "ops") }
 
 // ── Team (invites) ──────────────────────────────────────────────────────
 
-app.get("/api/team", { preHandler: requireRole("admin") }, async () => {
+/** Where the admin is served from, so an invite is a link someone can click rather than a fragment.
+ *  PUBLIC_ADMIN_URL wins (set it when the API answers on a different host); otherwise the request's
+ *  own origin, which nginx passes through as x-forwarded-proto/host. */
+function publicBaseUrl(req: FastifyRequest): string {
+  const configured = (process.env.PUBLIC_ADMIN_URL ?? "").trim().replace(/\/+$/, "");
+  if (configured) return configured;
+  const head = (name: string) => String(req.headers[name] ?? "").split(",")[0]!.trim();
+  const host = head("x-forwarded-host") || head("host");
+  if (!host) return "";
+  return `${head("x-forwarded-proto") || req.protocol}://${host}`;
+}
+
+const inviteUrlFor = (req: FastifyRequest, token: string) =>
+  `${publicBaseUrl(req)}/#/accept-invite/${token}`;
+
+app.get("/api/team", { preHandler: requireRole("admin") }, async (req) => {
   const users = await db.select().from(schema.users);
   return users.map((u) => ({
     id: u.id,
@@ -437,6 +452,7 @@ app.get("/api/team", { preHandler: requireRole("admin") }, async () => {
     role: u.role,
     activated: !!u.activatedAt,
     inviteToken: u.activatedAt ? null : u.inviteToken,
+    inviteUrl: u.activatedAt || !u.inviteToken ? null : inviteUrlFor(req, u.inviteToken),
   }));
 });
 
@@ -457,7 +473,7 @@ app.post("/api/team/invite", { preHandler: requireRole("admin") }, async (req, r
     })
     .$returningId();
   await audit(req, "team.invite", "users", row!.id, { email, role });
-  return { ok: true, inviteToken: token, invitePath: `/#/accept-invite/${token}` };
+  return { ok: true, inviteToken: token, inviteUrl: inviteUrlFor(req, token), invitePath: `/#/accept-invite/${token}` };
 });
 
 // ── Settings (encrypted secret store, managed by admins) ────────────────

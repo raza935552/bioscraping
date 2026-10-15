@@ -58,6 +58,8 @@ export interface TeamMember {
   role: string;
   activated: boolean;
   inviteToken: string | null;
+  /** Absolute link to send them. Null once they have activated. */
+  inviteUrl: string | null;
 }
 
 class ApiError extends Error {
@@ -362,7 +364,7 @@ export const api = {
     ),
   team: () => request<TeamMember[]>("/api/team"),
   invite: (name: string, email: string, role: string) =>
-    request<{ ok: true; inviteToken: string; invitePath: string }>("/api/team/invite", {
+    request<{ ok: true; inviteToken: string; inviteUrl: string; invitePath: string }>("/api/team/invite", {
       method: "POST",
       body: JSON.stringify({ name, email, role }),
     }),

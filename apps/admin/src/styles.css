@@ -551,3 +551,43 @@ table.leads tbody tr, table.sourced tbody tr { cursor: pointer; }
     background: var(--surface); border-top: 1px solid var(--line);
   }
 }
+
+/* Team: an invite is only useful as a link someone can click, so it is shown whole,
+   with a copy button and a mail draft beside it. */
+a.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-weight: 500;
+  text-decoration: none;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 7px 13px;
+  transition: background 0.12s, border-color 0.12s;
+}
+a.button:hover { border-color: var(--accent); background: var(--surface-2); color: var(--ink); }
+.invite-fresh {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--good);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  box-shadow: var(--shadow);
+}
+.invite-fresh .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.invite-cell { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.invite-cell button, .invite-cell a.button { padding: 4px 9px; font-size: 12.5px; }
+.invite-link {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  user-select: all;
+  font-size: 12.5px;
+}
