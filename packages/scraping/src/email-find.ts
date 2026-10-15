@@ -13,6 +13,73 @@
 import { isPlausibleEmail } from "./contact.js";
 
 const UA = "Mozilla/5.0 (compatible; BiolinxEngine/1.0; +https://biolinxlabs.com)";
+const MAX_REDIRECTS = 3;
+
+/** Where a fetch must never go. These URLs come from a creator's bio link, which anyone can set, so
+ *  "https://169.254.169.254/" in a TikTok bio would otherwise have this server read its own cloud
+ *  metadata, and "http://127.0.0.1:3001/..." would have it call our own API from inside. Both the
+ *  hostname and every address it resolves to are checked, and again on each redirect. */
+const BLOCKED_V4 = [
+  [0, 0], // 0.0.0.0/8 "this host"
+  [10, 10], // private
+  [127, 127], // loopback
+  [169, 169], // link-local 169.254/16, narrowed below
+  [172, 172], // 172.16/12, narrowed below
+  [192, 192], // 192.168/16 + 192.0.0/24, narrowed below
+  [100, 100], // CGNAT 100.64/10, narrowed below
+  [224, 255], // multicast + reserved
+] as const;
+
+function isBlockedIp(ip: string): boolean {
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 169) return b === 254;
+    if (a === 172) return b >= 16 && b <= 31;
+    if (a === 192) return b === 168 || b === 0;
+    if (a === 100) return b >= 64 && b <= 127;
+    return BLOCKED_V4.some(([lo, hi]) => a >= lo && a <= hi && a !== 169 && a !== 172 && a !== 192 && a !== 100);
+  }
+  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  if (v6 === "::" || v6 === "::1") return true;
+  // IPv4-mapped (::ffff:127.0.0.1) is the same address by another name.
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(v6);
+  if (mapped) return isBlockedIp(mapped[1]!);
+  return /^(fe[89ab]|fc|fd)/.test(v6); // link-local, unique-local
+}
+
+export function isIpLiteral(host: string): boolean {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":") || /^\[/.test(host);
+}
+
+/** Resolves a hostname to its addresses. Injected in tests so they never touch DNS. */
+export type ResolveHost = (host: string) => Promise<string[]>;
+
+const resolveWithDns: ResolveHost = async (host) => {
+  const { lookup } = await import("node:dns/promises");
+  return (await lookup(host, { all: true })).map((a) => a.address);
+};
+
+/** True when this URL may be fetched: a named host, a normal web port, and every address it
+ *  resolves to is on the public internet. */
+export async function isFetchable(url: string, resolve: ResolveHost = resolveWithDns): Promise<boolean> {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  if (u.port && u.port !== "80" && u.port !== "443") return false;
+  if (isIpLiteral(u.hostname)) return false;
+  try {
+    const addresses = await resolve(u.hostname);
+    return addresses.length > 0 && !addresses.some(isBlockedIp);
+  } catch {
+    return false; // no DNS answer: nothing to fetch
+  }
+}
+
 const MAX_BYTES = 600_000;
 const TIMEOUT_MS = 12_000;
 
@@ -55,6 +122,8 @@ export interface FindDeps {
   /** Their handle and name. An address is only theirs if its domain looks like one of these; without
    *  it a creator linking a brand store would be given that brand's support address. */
   creatorTokens?: string[];
+  /** How a hostname is resolved before it is fetched. Injected in tests; real DNS otherwise. */
+  resolveHost?: ResolveHost;
 }
 
 /** The domain without its public suffix or "www", letters and digits only. */
@@ -104,6 +173,9 @@ export function normalizeUrl(raw: string | null | undefined): string | null {
     const u = new URL(withScheme);
     if (u.protocol !== "http:" && u.protocol !== "https:") return null;
     if (!u.hostname.includes(".")) return null;
+    // An address rather than a name, or a port that isn't the web's, is nothing a creator publishes.
+    if (isIpLiteral(u.hostname)) return null;
+    if (u.port && u.port !== "80" && u.port !== "443") return null;
     u.hash = "";
     for (const k of [...u.searchParams.keys()]) if (/^(utm_|fbclid|gclid|igshid)/i.test(k)) u.searchParams.delete(k);
     return u.toString();
@@ -200,17 +272,30 @@ interface Page {
   url: string;
 }
 
-async function getPage(url: string, fetchImpl: typeof fetch): Promise<Page | null> {
+/** One page, if it may be fetched. Redirects are followed by hand so each hop is checked too: a
+ *  public URL that redirects to 127.0.0.1 is the usual way around a check done only on the first. */
+async function getPage(url: string, fetchImpl: typeof fetch, resolve: ResolveHost): Promise<Page | null> {
+  let next: string | null = url;
   try {
-    const res = await fetchImpl(url, {
-      headers: { "user-agent": UA, accept: "text/html,*/*" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    if (!/text\/html|text\/plain|application\/xhtml/i.test(res.headers.get("content-type") ?? "")) return null;
-    const body = await res.text();
-    return { html: body.slice(0, MAX_BYTES), url: normalizeUrl(res.url) ?? url };
+    for (let hop = 0; next && hop <= MAX_REDIRECTS; hop++) {
+      if (!(await isFetchable(next, resolve))) return null;
+      const here: string = next;
+      const res = await fetchImpl(here, {
+        headers: { "user-agent": UA, accept: "text/html,*/*" },
+        redirect: "manual",
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get("location");
+        next = location ? normalizeUrl(new URL(location, here).toString()) : null;
+        continue;
+      }
+      if (!res.ok) return null;
+      if (!/text\/html|text\/plain|application\/xhtml/i.test(res.headers.get("content-type") ?? "")) return null;
+      const body = await res.text();
+      return { html: body.slice(0, MAX_BYTES), url: normalizeUrl(res.url) ?? here };
+    }
+    return null;
   } catch {
     return null; // unreachable, too slow, bad certificate: not an error worth a row
   }
@@ -233,6 +318,7 @@ export async function findBusinessEmail(url: string, deps: FindDeps): Promise<Fi
   const start = normalizeUrl(url);
   const maxPages = deps.maxPages ?? 6;
   const rejects = deps.rejectDomains ?? [];
+  const resolve = deps.resolveHost ?? resolveWithDns;
   const tokens = deps.creatorTokens ?? [];
   let pages = 0;
   if (!start) return { found: null, pages };
@@ -255,7 +341,7 @@ export async function findBusinessEmail(url: string, deps: FindDeps): Promise<Fi
     for (const candidate of contactUrlsFor(siteUrl)) {
       if (pages >= maxPages) return null;
       pages++;
-      const page = await getPage(candidate, deps.fetchImpl);
+      const page = await getPage(candidate, deps.fetchImpl, resolve);
       if (!page) continue;
       const host = hostOf(page.url);
       // A shortener or a redirect can land us somewhere that isn't theirs after all.
@@ -278,7 +364,7 @@ export async function findBusinessEmail(url: string, deps: FindDeps): Promise<Fi
 
   if (isLinkHub(start)) {
     pages++;
-    const hub = await getPage(start, deps.fetchImpl);
+    const hub = await getPage(start, deps.fetchImpl, resolve);
     if (!hub) return { found: null, pages };
     // A hub sometimes prints the address itself; otherwise follow the first site that is theirs.
     const onHub = emailsFromHtml(hub.html, start).filter((e) => theirs(e, null)).find((e) => e.how !== "text");
